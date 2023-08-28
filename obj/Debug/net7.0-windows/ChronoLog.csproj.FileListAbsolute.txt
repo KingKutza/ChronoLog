@@ -1,0 +1,14 @@
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\bin\Debug\net7.0-windows\ChronoLog.exe
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\bin\Debug\net7.0-windows\ChronoLog.deps.json
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\bin\Debug\net7.0-windows\ChronoLog.runtimeconfig.json
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\bin\Debug\net7.0-windows\ChronoLog.dll
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\bin\Debug\net7.0-windows\ChronoLog.pdb
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ChronoLog.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ChronoLog.AssemblyInfoInputs.cache
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ChronoLog.AssemblyInfo.cs
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ChronoLog.csproj.CoreCompileInputs.cache
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ChronoLog.dll
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\refint\ChronoLog.dll
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ChronoLog.pdb
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ChronoLog.genruntimeconfig.cache
+C:\Users\KWhite\OneDrive\Documents\Workspace\CronoLog\obj\Debug\net7.0-windows\ref\ChronoLog.dll
