@@ -1,17 +1,25 @@
-There is nothing here yet.
-
 Features:
     Implemented
         None
     To Implement
         TimeLines
-        Timeline Duplication
-        Parallel Universe Scheduling
+            Timeline Duplication
+            Datastructure
+            Interesting TimeLines (Seting different constant values)
+            Party Lines (Each of these is a timeline that can be displayed as prime)
         Twice in a Lifetime Events
-        Party Lines 
+            arallel Universe Scheduling
         Time Capsules
         Quantum Annotations
         Travlers Log
-        Interesting TimeLines
+        GUI
+            View Buttons
+            PrimeLine
+            TimeLines
+            Events
+            Notes
+            Journals
+            View Switching
+            Primeline Switching
     Posible Features
         Temporal Topography
