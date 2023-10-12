@@ -1,3 +1,4 @@
+Note This is now take two of the Project creation using Idea and Java
 Features:
     Implemented
         None
