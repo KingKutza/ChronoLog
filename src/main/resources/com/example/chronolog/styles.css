@@ -1,0 +1,19 @@
+.app-shell { -fx-background-color: #10131a; -fx-font-family: "Segoe UI", Arial, sans-serif; }
+.top-bar { -fx-background-color: #171b25; -fx-border-color: #2b3241; -fx-border-width: 0 0 1 0; }
+.brand { -fx-text-fill: #f7f3e8; -fx-font-size: 28px; -fx-font-weight: 800; }
+.subtitle, .detail-copy { -fx-text-fill: #9aa4b2; }
+.side-panel, .detail-panel { -fx-background-color: #151a23; -fx-border-color: #2b3241; }
+.side-panel { -fx-border-width: 0 1 0 0; }
+.detail-panel { -fx-border-width: 0 0 0 1; }
+.workspace { -fx-background-color: #0f1218; }
+.section-title { -fx-text-fill: #f0c66a; -fx-font-size: 13px; -fx-font-weight: 700; }
+.canvas-title { -fx-text-fill: #f7f3e8; -fx-font-size: 22px; -fx-font-weight: 700; }
+.detail-heading { -fx-text-fill: #f7f3e8; -fx-font-size: 18px; -fx-font-weight: 700; }
+.button, .toggle-button { -fx-background-color: #232a36; -fx-text-fill: #e7ebf0; -fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: #343d4d; }
+.toggle-button:selected, .primary-button { -fx-background-color: #e75b3c; -fx-text-fill: white; -fx-border-color: #ff8a66; }
+.list-view { -fx-background-color: #0f1218; -fx-control-inner-background: #0f1218; -fx-text-fill: #e7ebf0; -fx-border-color: #343d4d; }
+.legend-prime { -fx-text-fill: #ff7a45; -fx-font-weight: 700; }
+.legend-timeline { -fx-text-fill: #f7f3e8; -fx-font-weight: 700; }
+.legend-archive { -fx-text-fill: #45f0ae; -fx-font-weight: 700; }
+.event-strip { -fx-padding: 12; -fx-background-color: #171b25; -fx-background-radius: 12; }
+.event-strip .label, .detail-panel .label { -fx-text-fill: #dce3ea; }

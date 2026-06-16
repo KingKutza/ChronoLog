@@ -1,16 +1,80 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
+<?import javafx.scene.canvas.Canvas?>
+<?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.ToggleButton?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
-<?import javafx.scene.control.Button?>
-<VBox alignment="CENTER" spacing="20.0" xmlns:fx="http://javafx.com/fxml"
-      fx:controller="com.example.chronolog.HelloController">
-  <padding>
-    <Insets bottom="20.0" left="20.0" right="20.0" top="20.0"/>
-  </padding>
-
-  <Label fx:id="welcomeText"/>
-  <Button text="Hello!" onAction="#onHelloButtonClick"/>
-</VBox>
+<BorderPane prefHeight="800.0" prefWidth="1280.0" styleClass="app-shell" stylesheets="@styles.css" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.example.chronolog.HelloController">
+  <top>
+    <HBox alignment="CENTER_LEFT" spacing="16.0" styleClass="top-bar">
+      <padding>
+        <Insets bottom="14.0" left="18.0" right="18.0" top="14.0" />
+      </padding>
+      <Label styleClass="brand" text="ChronoLog" />
+      <Label styleClass="subtitle" text="timeline GUI mockup" />
+      <HBox HBox.hgrow="ALWAYS" />
+      <Button text="New Event" />
+      <Button text="Duplicate Timeline" />
+      <Button styleClass="primary-button" text="Prime Line" />
+    </HBox>
+  </top>
+  <left>
+    <VBox prefWidth="260.0" spacing="14.0" styleClass="side-panel">
+      <padding>
+        <Insets bottom="18.0" left="18.0" right="18.0" top="18.0" />
+      </padding>
+      <Label styleClass="section-title" text="Views" />
+      <ToggleButton selected="true" text="PrimeLine" />
+      <ToggleButton text="TimeLines" />
+      <ToggleButton text="Events" />
+      <ToggleButton text="Notes" />
+      <ToggleButton text="Journals" />
+      <Separator />
+      <Label styleClass="section-title" text="Party Lines" />
+      <ListView fx:id="timelineList" prefHeight="210.0" />
+      <Separator />
+      <Label styleClass="section-title" text="Legend" />
+      <Label styleClass="legend-prime" text="━ Prime Line" />
+      <Label styleClass="legend-timeline" text="━ Timeline" />
+      <Label styleClass="legend-archive" text="━ Secondary Archive" />
+    </VBox>
+  </left>
+  <center>
+    <VBox spacing="12.0" styleClass="workspace">
+      <padding>
+        <Insets bottom="18.0" left="18.0" right="18.0" top="18.0" />
+      </padding>
+      <Label styleClass="canvas-title" text="Parallel Universe Scheduler" />
+      <Canvas fx:id="timelineCanvas" height="520.0" width="920.0" VBox.vgrow="ALWAYS" />
+      <HBox spacing="14.0" styleClass="event-strip">
+        <Label text="Aug 14: Seed" />
+        <Label text="Aug 21: Change" />
+        <Label text="Aug 28: Any 2" />
+        <Label text="Sep 04: Anchor" />
+        <Label text="Sep 18: Capsule" />
+      </HBox>
+    </VBox>
+  </center>
+  <right>
+    <VBox prefWidth="260.0" spacing="12.0" styleClass="detail-panel">
+      <padding>
+        <Insets bottom="18.0" left="18.0" right="18.0" top="18.0" />
+      </padding>
+      <Label styleClass="section-title" text="Selected Event" />
+      <Label styleClass="detail-heading" text="Quantum Annotation" />
+      <Label styleClass="detail-copy" wrapText="true" text="Mockup-only event inspector for timeline branches, loops, traveler notes, and capsules." />
+      <Separator />
+      <Label styleClass="section-title" text="Time Capsules" />
+      <Label text="• Open Aug 21" />
+      <Label text="• Duplicate Sep 04" />
+      <Label text="• Archive Sep 18" />
+    </VBox>
+  </right>
+</BorderPane>
