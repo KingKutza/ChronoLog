@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=yes, maximum-scale=8">
+<title>Pocket Instrument r1</title>
+<style>
+:root{
+  --ground:#EDF0F1; --surface:#F8FAFA; --panel:#FFFFFF;
+  --ink:#1B2328; --muted:#5B6B72; --faint:#8FA0A7;
+  --hair:#D6DDE0; --hair-strong:#B9C4C9;
+  --wknd:#DCE8F4; --wknd-deep:#D0DFF0;
+  --now:#E8542F; --accent:#1D9E75; --block:#E7F3EE; --block-line:#1D9E75;
+  --font-ui:"Avenir Next","Segoe UI",system-ui,sans-serif;
+  --font-data:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--font-ui)}
+#app{max-width:1480px;margin:0 auto;padding:12px 14px 40px}
+
+/* ------- bar + detents ------- */
+#bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+#bar h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0 6px 0 0;font-weight:700}
+.detent{font-family:var(--font-data);font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  padding:7px 12px;border:1px solid var(--hair-strong);border-radius:6px;background:var(--surface);
+  color:var(--muted);cursor:pointer}
+.detent:hover{border-color:var(--faint)}
+.detent.active{background:var(--panel);color:var(--ink);border-color:var(--ink);font-weight:600}
+.ctl{font-family:var(--font-data);font-size:12px;padding:6px 10px;border:1px solid var(--hair-strong);
+  border-radius:6px;background:var(--surface);color:var(--ink)}
+button.ctl{cursor:pointer;color:var(--muted)}
+button.ctl:hover{border-color:var(--faint);color:var(--ink)}
+button.ctl.on{background:var(--panel);color:var(--ink);border-color:var(--ink);font-weight:600}
+button.ctl.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+label.ctl{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+#todaychip{font-family:var(--font-data);font-size:12px;color:#fff;background:var(--now);
+  padding:4px 10px;border-radius:5px;font-weight:600}
+#lensctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+
+/* ------- feed panel ------- */
+#feed{background:var(--panel);border:1px solid var(--hair-strong);border-radius:8px;padding:14px;margin-bottom:14px}
+#feed p{margin:0 0 10px;font-size:13px;color:var(--muted);line-height:1.5;max-width:74ch}
+#feed textarea{width:100%;height:110px;font-family:var(--font-data);font-size:11px;
+  border:1px solid var(--hair);border-radius:6px;padding:8px;resize:vertical}
+#feedrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:center}
+#stat{font-family:var(--font-data);font-size:12px;color:var(--accent);font-weight:600}
+#stat.err{color:var(--now)}
+
+/* ------- STRATEGIC (path) ------- */
+#view{overflow-x:auto;-webkit-overflow-scrolling:touch}
+#planner{min-width:1100px;background:var(--surface);border:1px solid var(--hair-strong);border-radius:6px;padding:6px 8px 8px}
+.mrow{display:grid;grid-template-columns:46px repeat(31,1fr);border-top:1px solid var(--hair)}
+.mrow:first-child{border-top:none}
+.mlabel{display:flex;flex-direction:column;justify-content:center;font-weight:800;font-size:13px;
+  letter-spacing:.05em;padding-left:2px;line-height:1.1}
+.mlabel span{font-weight:400;font-size:9px;color:var(--faint);font-family:var(--font-data)}
+.day{position:relative;min-height:78px;border-left:1px solid var(--hair);background:var(--panel);
+  padding:2px 2px 2px 3px;overflow:hidden}
+.day.wknd{background:var(--wknd)} .day.wknd.sun{background:var(--wknd-deep)}
+.day.pad{background:var(--surface)}
+.dh{font-size:8px;color:var(--faint);font-family:var(--font-data);line-height:1.05;white-space:nowrap}
+.dh b{color:var(--ink);font-weight:700;font-size:9.5px}
+.day.today,.cell.today{outline:2.5px solid var(--now);outline-offset:-2.5px;z-index:2}
+.day.today .dh b{color:var(--now)}
+.day.past::after{content:"";position:absolute;left:-8%;top:-6%;width:116%;height:112%;
+  background:linear-gradient(to top right,transparent 47%,rgba(35,40,45,.78) 47%,rgba(35,40,45,.78) 53%,transparent 53%);
+  pointer-events:none;transform:rotate(2deg)}
+body.noslash .past::after{display:none}
+.mk{font-size:9px;line-height:1.15;font-weight:600;margin-top:1px;word-break:break-word;color:var(--ink)}
+.mk.allday{color:#8a6d00;background:linear-gradient(transparent 25%,rgba(238,214,90,.7) 25%,rgba(238,214,90,.7) 92%,transparent 92%)}
+.mk.cont{opacity:.55;font-weight:400}
+.mk.cancelled{text-decoration:line-through;opacity:.5}
+
+/* ------- STRATEGIC wrap (cycle sheets) ------- */
+#sheets{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.sheet{background:var(--panel);border:1px solid var(--hair-strong);border-radius:4px;padding:10px 12px 12px}
+.sheet h2{margin:0 0 6px;font-size:14px;font-weight:700;display:flex;justify-content:space-between}
+.sheet h2 span{font-size:11px;color:var(--faint);font-family:var(--font-data)}
+.wkgrid{display:grid;grid-template-columns:repeat(7,1fr)}
+.hd{font-size:8.5px;color:var(--faint);padding:1px 3px;border-bottom:1.5px solid var(--ink);font-family:var(--font-data)}
+.cell{position:relative;min-height:46px;border-bottom:1px solid var(--hair);border-right:1px solid var(--hair);padding:1px 2px}
+.cell:nth-child(7n+1){border-left:1px solid var(--hair)}
+.cell.wknd{background:var(--wknd)}
+.cell .n{font-size:8.5px;color:var(--faint);font-family:var(--font-data)}
+.cell.past::after{content:"";position:absolute;inset:-4% -6%;
+  background:linear-gradient(to top right,transparent 47%,rgba(35,40,45,.75) 47%,rgba(35,40,45,.75) 53%,transparent 53%);
+  pointer-events:none}
+.cell .mk{font-size:8.5px}
+
+/* ------- TACTICAL: week, day columns ------- */
+#week{display:grid;gap:0;background:var(--surface);border:1px solid var(--hair-strong);border-radius:6px;overflow:hidden}
+.wcol{border-left:1px solid var(--hair);background:var(--panel);min-height:300px;display:flex;flex-direction:column}
+.wcol:first-child{border-left:none}
+.wcol.wknd{background:var(--wknd)}
+.wcol.dim .wbody{opacity:.42}
+.whead{padding:6px 6px 5px;border-bottom:1.5px solid var(--ink);font-family:var(--font-data)}
+.whead .wd{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.whead .dn{font-size:17px;font-weight:700;line-height:1.1}
+.wcol.istoday .whead .dn{color:var(--now)}
+.wcol.istoday{outline:2.5px solid var(--now);outline-offset:-2.5px;z-index:2}
+.wbody{padding:4px 5px 8px;display:flex;flex-direction:column;gap:4px}
+.tev{border-left:3px solid var(--block-line);background:var(--block);border-radius:0 4px 4px 0;
+  padding:3px 5px;font-size:11px;line-height:1.25}
+.tev .tt{font-family:var(--font-data);font-size:9.5px;color:var(--muted)}
+.tev.allday{border-left-color:#c9a227;background:rgba(238,214,90,.35)}
+.tev.cancelled{text-decoration:line-through;opacity:.5}
+
+/* ------- INTIMATE: one day, hour rail ------- */
+#dayview{background:var(--panel);border:1px solid var(--hair-strong);border-radius:6px;overflow:hidden}
+#dayhead{padding:10px 14px;border-bottom:1.5px solid var(--ink);display:flex;align-items:baseline;gap:10px}
+#dayhead .dn{font-size:22px;font-weight:800}
+#dayhead .wd{font-family:var(--font-data);color:var(--muted);font-size:12px;letter-spacing:.1em;text-transform:uppercase}
+#adband{padding:6px 14px;border-bottom:1px solid var(--hair);display:flex;flex-wrap:wrap;gap:6px}
+#adband:empty{display:none}
+#adband .tev{font-size:12px}
+#rail{position:relative;margin:8px 8px 12px 52px}
+.hline{position:absolute;left:0;right:0;border-top:1px solid var(--hair);font-family:var(--font-data);
+  font-size:9.5px;color:var(--faint)}
+.hline span{position:absolute;left:-46px;top:-6px;width:40px;text-align:right}
+.iev{position:absolute;border-left:3px solid var(--block-line);background:var(--block);
+  border-radius:0 5px 5px 0;padding:4px 7px;font-size:12.5px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(30,40,50,.12)}
+.iev .tt{font-family:var(--font-data);font-size:10px;color:var(--muted)}
+.iev.cancelled{text-decoration:line-through;opacity:.5}
+#nowline{position:absolute;left:-8px;right:0;border-top:2px solid var(--now);z-index:5}
+#nowline::before{content:"";position:absolute;left:0;top:-4.5px;width:7px;height:7px;border-radius:50%;background:var(--now)}
+#empty{padding:40px 10px;text-align:center;color:var(--faint);font-size:14px}
+@media print{ #bar,#lensctl,#feed{display:none} body{background:#fff} }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <h1>Pocket Instrument <span style="color:var(--faint)">r1</span></h1>
+    <span id="todaychip"></span>
+    <button class="detent" data-lens="intimate">Intimate</button>
+    <button class="detent" data-lens="tactical">Tactical</button>
+    <button class="detent" data-lens="strategic">Strategic</button>
+    <span style="flex:1"></span>
+    <button class="ctl" id="feedtoggle">Feed</button>
+    <button class="ctl primary" id="bake">Bake static copy</button>
+  </div>
+
+  <div id="lensctl"></div>
+
+  <div id="feed">
+    <p><b>Feed the instrument.</b> Outlook &rarr; calendar settings &rarr; <i>Export calendar</i> (or publish &amp; download the ICS). Pick the file or paste its text. Parsing is local &mdash; nothing leaves this page, works offline. Recurrence rules, exceptions, and moved instances come from the file itself.</p>
+    <input type="file" id="icsfile" accept=".ics,text/calendar" class="ctl">
+    <textarea id="icstext" placeholder="&hellip;or paste ICS text here (BEGIN:VCALENDAR &hellip;)"></textarea>
+    <div id="feedrow">
+      <button class="ctl" id="loadtext">Load pasted text</button>
+      <span id="stat"></span>
+    </div>
+  </div>
+
+  <div id="view"></div>
+</div>
+
+<script>
+/* =============== EMBEDDED DATA (written by Bake) =============== */
+const EMBEDDED = /*DATA*/null/*ENDDATA*/;
+
+/* =============== ICS PARSER =============== */
+function unfold(t){return t.replace(/\r\n/g,"\n").replace(/\n[ \t]/g,"")}
+function parseICS(text){
+  const lines=unfold(text).split("\n");const events=[];let cur=null;
+  for(const raw of lines){const line=raw.trim();if(!line)continue;
+    if(line==="BEGIN:VEVENT"){cur={props:{}};continue}
+    if(line==="END:VEVENT"){if(cur)events.push(cur);cur=null;continue}
+    if(!cur)continue;
+    const ci=line.indexOf(":");if(ci<0)continue;
+    const key=line.slice(0,ci),val=line.slice(ci+1);
+    const name=key.split(";")[0].toUpperCase();
+    if(name==="EXDATE"){(cur.props.EXDATE=cur.props.EXDATE||[]).push({val})}
+    else cur.props[name]={val};}
+  return events.map(normalize).filter(Boolean);
+}
+function parseStamp(v){const m=/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?/.exec(v);
+  if(!m)return null;return{y:+m[1],mo:+m[2],d:+m[3],h:+(m[4]||0),mi:+(m[5]||0),dateOnly:!m[4]}}
+function toDate(s){return new Date(s.y,s.mo-1,s.d,s.h,s.mi)}
+function isoDay(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function unesc(s){return s.replace(/\\n/gi," ").replace(/\\,/g,",").replace(/\\;/g,";").replace(/\\\\/g,"\\")}
+function normalize(ev){const P=ev.props;
+  if(!P.DTSTART||!P.SUMMARY)return null;
+  const start=parseStamp(P.DTSTART.val);if(!start)return null;
+  const end=P.DTEND?parseStamp(P.DTEND.val):null;
+  let dur=null;
+  if(end&&!start.dateOnly){dur=Math.round((toDate(end)-toDate(start))/60000);if(dur<0||dur>1440)dur=null}
+  const ex=new Set();(P.EXDATE||[]).forEach(e=>e.val.split(",").forEach(v=>{const s=parseStamp(v);if(s)ex.add(isoDay(toDate(s)))}));
+  return{uid:(P.UID&&P.UID.val)||Math.random().toString(36).slice(2),
+    title:unesc(P.SUMMARY.val),start,end,dateOnly:start.dateOnly,dur,
+    rrule:P.RRULE?parseRRule(P.RRULE.val):null,exdates:ex,
+    recurrenceId:P["RECURRENCE-ID"]?isoDay(toDate(parseStamp(P["RECURRENCE-ID"].val))):null,
+    status:(P.STATUS&&P.STATUS.val)||""}}
+function parseRRule(v){const r={};v.split(";").forEach(p=>{const[k,val]=p.split("=");if(k)r[k.toUpperCase()]=val});
+  return{freq:r.FREQ,interval:+(r.INTERVAL||1),byday:r.BYDAY?r.BYDAY.split(","):null,
+    bymonthday:r.BYMONTHDAY?r.BYMONTHDAY.split(",").map(Number):null,
+    until:r.UNTIL?parseStamp(r.UNTIL):null,count:r.COUNT?+r.COUNT:null}}
+const DOWMAP={SU:0,MO:1,TU:2,WE:3,TH:4,FR:5,SA:6};const MS=86400000;
+
+/* expand: {isoDay -> [{title,dateOnly,first,cancelled,h,mi,dur}]} within window */
+function expand(events,winStart,winEnd){
+  const out={};
+  const push=(dstr,e,first,d)=>{if(d&&(d<winStart||d>winEnd))return;
+    (out[dstr]=out[dstr]||[]).push({title:e.title,dateOnly:e.dateOnly,first,
+      cancelled:e.status==="CANCELLED",
+      h:(!e.dateOnly&&first)?e.start.h:null,mi:(!e.dateOnly&&first)?e.start.mi:null,
+      dur:(!e.dateOnly&&first)?e.dur:null})};
+  const overrides={};
+  for(const e of events){if(e.recurrenceId)(overrides[e.uid]=overrides[e.uid]||new Set()).add(e.recurrenceId)}
+  for(const e of events){
+    const s=toDate(e.start);
+    let spanDays=1;
+    if(e.end){const en=toDate(e.end);
+      if(e.dateOnly)spanDays=Math.max(1,Math.round((en-s)/MS));
+      else if(isoDay(en)!==isoDay(s)&&(en.getHours()>0||en.getMinutes()>0))
+        spanDays=Math.round((new Date(en.getFullYear(),en.getMonth(),en.getDate())-new Date(s.getFullYear(),s.getMonth(),s.getDate()))/MS)+1;
+      else spanDays=Math.max(1,Math.round((en-s)/MS));}
+    const emit=(d0)=>{for(let i=0;i<spanDays;i++){
+      const d=new Date(d0.getFullYear(),d0.getMonth(),d0.getDate()+i);
+      if(d<winStart||d>winEnd)continue;const dstr=isoDay(d);
+      if(e.exdates.has(dstr))continue;
+      push(dstr,e,i===0)}};
+    if(!e.rrule){emit(s);continue}
+    const r=e.rrule;const until=r.until?toDate(r.until):winEnd;
+    const hardEnd=until<winEnd?until:winEnd;let made=0;
+    const s0=new Date(s.getFullYear(),s.getMonth(),s.getDate());
+    if(r.freq==="WEEKLY"){
+      const days=r.byday?r.byday.map(b=>DOWMAP[b.slice(-2)]):[s.getDay()];
+      const wkStart=d=>{const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());const off=(x.getDay()+6)%7;return new Date(x-off*MS)};
+      const w0=wkStart(s);
+      for(let d=s0;d<=hardEnd;d=new Date(d.getTime()+MS)){
+        const wk=Math.round((wkStart(d)-w0)/(7*MS));
+        if(wk%r.interval!==0)continue;
+        if(!days.includes(d.getDay()))continue;
+        const dstr=isoDay(d);
+        if(overrides[e.uid]&&overrides[e.uid].has(dstr)){made++;continue}
+        if(e.exdates.has(dstr)){made++;continue}
+        push(dstr,e,true,d);made++;
+        if(r.count&&made>=r.count)break}}
+    else if(r.freq==="DAILY"){
+      for(let d=s0;d<=hardEnd;d=new Date(d.getTime()+r.interval*MS)){
+        const dstr=isoDay(d);
+        if(overrides[e.uid]&&overrides[e.uid].has(dstr)){made++;continue}
+        if(e.exdates.has(dstr)){made++;continue}
+        push(dstr,e,true,d);made++;
+        if(r.count&&made>=r.count)break}}
+    else if(r.freq==="MONTHLY"){
+      const dom=r.bymonthday?r.bymonthday[0]:s.getDate();
+      for(let y=s.getFullYear(),m=s.getMonth();;){
+        const d=new Date(y,m,dom);if(d>hardEnd)break;
+        if(d>=s0&&d.getDate()===dom){const dstr=isoDay(d);
+          if(!(overrides[e.uid]&&overrides[e.uid].has(dstr))&&!e.exdates.has(dstr))push(dstr,e,true,d);
+          made++;if(r.count&&made>=r.count)break}
+        m+=r.interval;y+=Math.floor(m/12);m%=12}}
+    else if(r.freq==="YEARLY"){
+      for(let y=s.getFullYear();;y+=r.interval){
+        const d=new Date(y,s.getMonth(),s.getDate());if(d>hardEnd)break;
+        if(d>=s0){const dstr=isoDay(d);
+          if(!(overrides[e.uid]&&overrides[e.uid].has(dstr))&&!e.exdates.has(dstr))push(dstr,e,true,d);
+          made++;if(r.count&&made>=r.count)break}}}}
+  return out;
+}
+
+/* =============== STATE =============== */
+const DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const today=new Date();today.setHours(0,0,0,0);
+const $=id=>document.getElementById(id);
+$("todaychip").textContent=DOW[today.getDay()]+" "+isoDay(today);
+
+let state={
+  lens:"tactical",                 // intimate | tactical | strategic
+  iDate:isoDay(today),             // intimate anchor
+  tStart:isoDay(mondayOf(today)),  // tactical anchor
+  tDays:7,
+  sFromY:today.getFullYear(),sFromM:today.getMonth(),sSpan:6,
+  sWrap:false,                     // strategic: cycle as an option, not a peer
+  slashes:true,
+  events:[]
+};
+function mondayOf(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());return new Date(x-((x.getDay()+6)%7)*MS)}
+function pDay(s){const[a,b,c]=s.split("-").map(Number);return new Date(a,b-1,c)}
+function fmtTime(h,mi){const ap=h<12?"a":"p";let hh=h%12;if(hh===0)hh=12;return hh+(mi?":"+String(mi).padStart(2,"0"):"")+ap}
+
+function setStat(msg,err){const s=$("stat");s.textContent=msg;s.className=err?"err":""}
+function loadICS(text,label){
+  try{const evs=parseICS(text);
+    if(!evs.length){setStat("No VEVENTs found in "+label,true);return}
+    state.events=evs;setStat(evs.length+" events loaded from "+label);render();
+  }catch(e){setStat("Parse failed: "+e.message,true)}
+}
+$("icsfile").addEventListener("change",e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();r.onload=()=>loadICS(r.result,f.name);r.readAsText(f)});
+$("loadtext").addEventListener("click",()=>loadICS($("icstext").value,"pasted text"));
+$("feedtoggle").addEventListener("click",()=>{
+  const f=$("feed");f.style.display=f.style.display==="none"?"":"none"});
+document.querySelectorAll(".detent").forEach(b=>
+  b.addEventListener("click",()=>{state.lens=b.dataset.lens;render()}));
+
+/* =============== LENS CONTROLS (rebuilt per lens) =============== */
+function ctlHTML(){
+  const c=$("lensctl");c.innerHTML="";
+  const mk=(html)=>{const t=document.createElement("template");t.innerHTML=html.trim();return t.content.firstChild};
+  if(state.lens==="intimate"){
+    const prev=mk('<button class="ctl">&lsaquo; day</button>');
+    const next=mk('<button class="ctl">day &rsaquo;</button>');
+    const dp=mk('<label class="ctl">date <input type="date" style="border:none;background:none;font:inherit"></label>');
+    const td=mk('<button class="ctl">today</button>');
+    dp.querySelector("input").value=state.iDate;
+    prev.onclick=()=>{state.iDate=isoDay(new Date(pDay(state.iDate)-MS));render()};
+    next.onclick=()=>{state.iDate=isoDay(new Date(+pDay(state.iDate)+MS));render()};
+    td.onclick=()=>{state.iDate=isoDay(today);render()};
+    dp.querySelector("input").onchange=e=>{if(e.target.value){state.iDate=e.target.value;render()}};
+    [prev,dp,next,td].forEach(x=>c.appendChild(x));
+  }else if(state.lens==="tactical"){
+    const prev=mk('<button class="ctl">&lsaquo; week</button>');
+    const next=mk('<button class="ctl">week &rsaquo;</button>');
+    const td=mk('<button class="ctl">this week</button>');
+    const d7=mk('<button class="ctl'+(state.tDays===7?" on":"")+'">7d</button>');
+    const d14=mk('<button class="ctl'+(state.tDays===14?" on":"")+'">14d</button>');
+    prev.onclick=()=>{state.tStart=isoDay(new Date(+pDay(state.tStart)-7*MS));render()};
+    next.onclick=()=>{state.tStart=isoDay(new Date(+pDay(state.tStart)+7*MS));render()};
+    td.onclick=()=>{state.tStart=isoDay(mondayOf(today));render()};
+    d7.onclick=()=>{state.tDays=7;render()};
+    d14.onclick=()=>{state.tDays=14;render()};
+    [prev,td,next,d7,d14].forEach(x=>c.appendChild(x));
+  }else{
+    const from=mk('<label class="ctl">from <input type="month" style="border:none;background:none;font:inherit"></label>');
+    const span=mk('<label class="ctl">months <input type="number" min="1" max="18" style="width:44px;border:none;background:none;font:inherit"></label>');
+    const wrap=mk('<label class="ctl"><input type="checkbox"> cycle wrap</label>');
+    const sl=mk('<label class="ctl"><input type="checkbox"> slashes</label>');
+    from.querySelector("input").value=state.sFromY+"-"+String(state.sFromM+1).padStart(2,"0");
+    span.querySelector("input").value=state.sSpan;
+    wrap.querySelector("input").checked=state.sWrap;
+    sl.querySelector("input").checked=state.slashes;
+    from.querySelector("input").onchange=e=>{const[y,m]=e.target.value.split("-").map(Number);if(y){state.sFromY=y;state.sFromM=m-1;render()}};
+    span.querySelector("input").onchange=e=>{state.sSpan=Math.max(1,Math.min(18,+e.target.value||6));render()};
+    wrap.querySelector("input").onchange=e=>{state.sWrap=e.target.checked;render()};
+    sl.querySelector("input").onchange=e=>{state.slashes=e.target.checked;render()};
+    [from,span,wrap,sl].forEach(x=>c.appendChild(x));
+  }
+}
+
+/* =============== RENDER =============== */
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;")}
+function mkHTML(e){
+  const cls=["mk"];if(e.dateOnly)cls.push("allday");
+  if(!e.first)cls.push("cont");if(e.cancelled)cls.push("cancelled");
+  return '<div class="'+cls.join(" ")+'">'+esc(e.title)+(e.first?"":" &rsaquo;")+"</div>";
+}
+function sortDay(list){
+  return list.slice().sort((a,b)=>{
+    if(a.dateOnly!==b.dateOnly)return a.dateOnly?-1:1;
+    return ((a.h||0)*60+(a.mi||0))-((b.h||0)*60+(b.mi||0))});
+}
+
+function render(){
+  document.body.classList.toggle("noslash",!state.slashes);
+  document.querySelectorAll(".detent").forEach(b=>
+    b.classList.toggle("active",b.dataset.lens===state.lens));
+  ctlHTML();
+  const view=$("view");view.innerHTML="";
+  if(!state.events.length){
+    view.innerHTML='<div id="empty">No data yet. Feed the instrument an ICS export above.</div>';return}
+  if(state.lens==="intimate")renderIntimate(view);
+  else if(state.lens==="tactical")renderTactical(view);
+  else renderStrategic(view);
+}
+
+/* ---- INTIMATE: one day at hour grain, waking focus ---- */
+function renderIntimate(view){
+  const d=pDay(state.iDate),ds=state.iDate;
+  const byDay=expand(state.events,d,d);
+  const list=sortDay(byDay[ds]||[]);
+  const allday=list.filter(e=>e.dateOnly||e.h===null);
+  const timed=list.filter(e=>!e.dateOnly&&e.h!==null);
+  // waking focus 7–21, extended by the day's actual claims
+  let h0=7,h1=21;
+  timed.forEach(e=>{h0=Math.min(h0,e.h);h1=Math.max(h1,Math.ceil((e.h*60+(e.mi||0)+(e.dur||60))/60))});
+  const PXH=56, railH=(h1-h0)*PXH;
+  // greedy lanes for overlaps
+  const lanes=[];
+  timed.forEach(e=>{
+    const st=e.h*60+(e.mi||0), en=st+Math.max(e.dur||60,30);
+    e._st=st;e._en=en;
+    let L=0;while(lanes[L]&&lanes[L]>st)L++;
+    lanes[L]=en;e._lane=L;e._lanes=0});
+  const nl=Math.max(1,lanes.length);
+  timed.forEach(e=>e._lanes=nl);
+  const wrap=document.createElement("div");wrap.id="dayview";
+  let html='<div id="dayhead"><span class="dn">'+d.getDate()+' '+MONTHS[d.getMonth()]+'</span>'
+    +'<span class="wd">'+DOW[d.getDay()]+' '+d.getFullYear()+(+d===+today?' &mdash; today':'')+'</span></div>'
+    +'<div id="adband">'+allday.map(e=>'<div class="tev allday'+(e.cancelled?' cancelled':'')+'">'+esc(e.title)+'</div>').join("")+'</div>'
+    +'<div id="rail" style="height:'+railH+'px">';
+  for(let h=h0;h<=h1;h++)
+    html+='<div class="hline" style="top:'+((h-h0)*PXH)+'px"><span>'+fmtTime(h,0)+'</span></div>';
+  timed.forEach(e=>{
+    const top=(e._st-h0*60)*PXH/60, ht=Math.max((e._en-e._st)*PXH/60,26);
+    const w=100/e._lanes, left=e._lane*w;
+    html+='<div class="iev'+(e.cancelled?' cancelled':'')+'" style="top:'+top+'px;height:'+ht
+      +'px;left:'+left+'%;width:calc('+w+'% - 6px)"><b>'+esc(e.title)+'</b>'
+      +'<div class="tt">'+fmtTime(e.h,e.mi)+(e.dur?' &middot; '+e.dur+'m':'')+'</div></div>'});
+  if(ds===isoDay(today)){
+    const now=new Date();const nm=now.getHours()*60+now.getMinutes();
+    if(nm>=h0*60&&nm<=h1*60)
+      html+='<div id="nowline" style="top:'+((nm-h0*60)*PXH/60)+'px"></div>'}
+  html+='</div>';
+  if(!list.length)html+='<div id="empty">Nothing claimed on this day.</div>';
+  wrap.innerHTML=html;view.appendChild(wrap);
+}
+
+/* ---- TACTICAL: day columns across a week or two ---- */
+function renderTactical(view){
+  const start=pDay(state.tStart);
+  const end=new Date(+start+(state.tDays-1)*MS);
+  const byDay=expand(state.events,start,end);
+  const grid=document.createElement("div");grid.id="week";
+  grid.style.gridTemplateColumns="repeat("+Math.min(state.tDays,7)+",1fr)";
+  for(let i=0;i<state.tDays;i++){
+    const d=new Date(+start+i*MS),ds=isoDay(d),dow=d.getDay();
+    const col=document.createElement("div");
+    col.className="wcol"+((dow===0||dow===6)?" wknd":"")+(+d===+today?" istoday":"")+(d<today?" dim":"");
+    let html='<div class="whead"><div class="wd">'+DOW[dow]+'</div><div class="dn">'+d.getDate()
+      +' <span style="font-size:10px;color:var(--faint)">'+MONTHS[d.getMonth()].slice(0,3)+'</span></div></div><div class="wbody">';
+    sortDay(byDay[ds]||[]).forEach(e=>{
+      html+='<div class="tev'+(e.dateOnly?' allday':'')+(e.cancelled?' cancelled':'')+'">'
+        +(e.h!==null?'<span class="tt">'+fmtTime(e.h,e.mi)+'</span> ':'')
+        +esc(e.title)+(e.first?'':' &rsaquo;')+'</div>'});
+    html+='</div>';col.innerHTML=html;grid.appendChild(col);
+  }
+  view.appendChild(grid);
+}
+
+/* ---- STRATEGIC: the path; cycle available as a wrap option ---- */
+function renderStrategic(view){
+  const winStart=new Date(state.sFromY,state.sFromM,1);
+  const winEnd=new Date(state.sFromY,state.sFromM+state.sSpan,0);
+  const byDay=expand(state.events,winStart,winEnd);
+  if(state.sWrap)renderCycle(view,byDay,winStart);
+  else renderPath(view,byDay,winStart);
+}
+function renderPath(view,byDay,winStart){
+  const planner=document.createElement("div");planner.id="planner";
+  for(let i=0;i<state.sSpan;i++){
+    const y=winStart.getFullYear()+Math.floor((winStart.getMonth()+i)/12);
+    const m=(winStart.getMonth()+i)%12;
+    const nDays=new Date(y,m+1,0).getDate();
+    const row=document.createElement("div");row.className="mrow";
+    let html='<div class="mlabel">'+MONTHS[m].slice(0,3).toUpperCase()+'<span>'+y+'</span></div>';
+    for(let dd=1;dd<=31;dd++){
+      if(dd>nDays){html+='<div class="day pad"></div>';continue}
+      const dt=new Date(y,m,dd),ds=isoDay(dt),dow=dt.getDay();
+      const cls=["day"];
+      if(dow===0||dow===6)cls.push("wknd");if(dow===0)cls.push("sun");
+      if(dt<today)cls.push("past");if(+dt===+today)cls.push("today");
+      html+='<div class="'+cls.join(" ")+'"><div class="dh"><b>'+dd+'</b> '+DOW[dow]+'</div>'
+        +sortDay(byDay[ds]||[]).map(mkHTML).join("")+'</div>';
+    }
+    row.innerHTML=html;planner.appendChild(row);
+  }
+  view.appendChild(planner);
+}
+function renderCycle(view,byDay,winStart){
+  const sheets=document.createElement("div");sheets.id="sheets";
+  for(let i=0;i<state.sSpan;i++){
+    const y=winStart.getFullYear()+Math.floor((winStart.getMonth()+i)/12);
+    const m=(winStart.getMonth()+i)%12;
+    const nDays=new Date(y,m+1,0).getDate();
+    const lead=(new Date(y,m,1).getDay()+6)%7;
+    const s=document.createElement("div");s.className="sheet";
+    let html='<h2>'+MONTHS[m]+' <span>'+y+'</span></h2><div class="wkgrid">';
+    ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].forEach(h=>html+='<div class="hd">'+h+'</div>');
+    for(let k=0;k<lead;k++)html+='<div class="cell"></div>';
+    for(let dd=1;dd<=nDays;dd++){
+      const dt=new Date(y,m,dd),ds=isoDay(dt),dow=dt.getDay();
+      const cls=["cell"];
+      if(dow===0||dow===6)cls.push("wknd");
+      if(dt<today)cls.push("past");if(+dt===+today)cls.push("today");
+      html+='<div class="'+cls.join(" ")+'"><div class="n">'+dd+'</div>'
+        +sortDay(byDay[ds]||[]).map(mkHTML).join("")+'</div>';
+    }
+    const tail=(7-(lead+nDays)%7)%7;
+    for(let k=0;k<tail;k++)html+='<div class="cell"></div>';
+    html+='</div>';s.innerHTML=html;sheets.appendChild(s);
+  }
+  view.appendChild(sheets);
+}
+
+/* =============== BAKE =============== */
+$("bake").addEventListener("click",()=>{
+  if(!state.events.length){setStat("Nothing to bake &mdash; load data first",true);return}
+  const payload=JSON.stringify({events:state.events.map(e=>({
+      uid:e.uid,title:e.title,start:e.start,end:e.end,dateOnly:e.dateOnly,dur:e.dur,
+      rrule:e.rrule,exdates:[...e.exdates],recurrenceId:e.recurrenceId,status:e.status})),
+    settings:{lens:state.lens,iDate:state.iDate,tStart:state.tStart,tDays:state.tDays,
+      sFromY:state.sFromY,sFromM:state.sFromM,sSpan:state.sSpan,sWrap:state.sWrap,slashes:state.slashes}});
+  let src="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
+  src=src.replace(/\/\*DATA\*\/[\s\S]*?\/\*ENDDATA\*\//,
+    "/*DATA*/"+payload.replace(/<\/script/gi,"<\\/script")+"/*ENDDATA*/");
+  const blob=new Blob([src],{type:"text/html"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="pocket-wall-baked.html";a.click();
+  setStat("Baked. The copy carries its data &mdash; fully offline.");
+});
+
+/* =============== BOOT =============== */
+if(EMBEDDED){
+  state.events=EMBEDDED.events.map(e=>({...e,exdates:new Set(e.exdates)}));
+  Object.assign(state,EMBEDDED.settings);
+  $("feed").style.display="none";
+  setStat(state.events.length+" events (embedded)");
+}
+render();
+</script>
+</body>
+</html>
