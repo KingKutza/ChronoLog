@@ -76,6 +76,13 @@ ICS is an adapter:
 - Unknown properties, components, VTIMEZONE, VALARM, and parameters survive
   export.
 
+Imported VEVENT/VTODO components are stored once on their Event; the calendar
+source retains only calendar-level properties and non-event children such as
+VTIMEZONE. Opening older Chronolog JSON normalizes duplicate source-tree events
+in memory, and the next save writes compact JSON. On the 2,717-event field-test
+document this reduced the serialized form from 224.4 MiB to 80.4 MiB without
+discarding round-trip data.
+
 Matching UIDs produce staple suggestions but never merge identities. Formula
 patterns export only over the visible/selected finite window, while unchanged
 native RRULEs remain structural.
@@ -84,21 +91,48 @@ native RRULEs remain structural.
 
 The page is a fixed full-viewport canvas with no document scrolling:
 
-- Scale rail: continuous scale with Intimate, Tactical, and Strategic detents.
-- Projection dial: calendar, wall, topology/lines, and radial.
-- Minimap: surrounding facts, focus playhead, and draggable viewport.
-- Shared focus: on by default; projection-local focus is opt-in.
+- Six named lenses are always visible: Intimate, Tactical, Strategic, Wall,
+  Lines, and Radial.
+- Each lens has contextual window controls instead of an abstract scale slider.
+- The minimap has dated gradations, surrounding facts, a focus playhead, and a
+  draggable viewport.
+- Shared focus is on by default; projection-local focus remains opt-in.
 
-Intimate wheel motion rolls through midnight. Tactical has three equal-height
-rows. Strategic and Wall fill the viewport. Lines use calendar/timeline Frames
-as the core lines; groups only annotate events. Radial defaults to one inward,
-one current, and one outward turn; wheel motion travels time, previous/next
-cycle buttons work in both variants, and past/future extent changes
-independently.
+Intimate uses a scrollable full-day rail with 15/30/60-minute grain, overlap
+lanes, and independent back/forward day counts. Tactical exposes rows and days
+per row. Strategic restores the month-by-31-day path with glance/detail and
+optional record slashes; Wall and Lines expose their own month windows. Radial
+supports spiral and group-banded concentric forms, cycle selection, previous/
+next cycle, and independent inward/outward turns.
 
-Click or drag calendar space to create an Event. The responsive inspector edits
-Events, Frames, and Patterns. All model changes use command-based undo/redo
-before autosave.
+Large documents are indexed by frame, day, pattern applicability, and event
+group. UI queries are bounded and disclose dense-window truncation. Finite RRULE
+series and open-ended 64-day windows use hard LRU fact budgets; pathological
+COUNT values fail visibly instead of monopolizing the UI thread. Dense tactical
+cells aggregate overflow. The minimap reads only the explicit day index, so
+navigation chrome never performs a second recurrence query. Wheel navigation is
+detented and coalesced in the responsive style of Pocket Instrument r2-r4.
+Canonical engine queries remain unlimited unless a caller explicitly supplies a
+limit.
+
+Click or drag calendar space to create an Event. Ordinary calendar work uses a
+plain-language inspector: Starts, Duration and Units, Calendar, Repeats,
+Description, Location, and Groups. Formula traits and raw Patterns stay under
+Advanced. Groups have a dedicated manager and can also be created while editing
+an Event. Daily, weekly, monthly, and yearly RRULE Patterns are created directly
+from the Event editor.
+
+Drag an explicit Event or generated recurring occurrence to reschedule it in
+any lens. Calendar-cell drops retain its time of day; Intimate drops snap to the
+selected grain; Lines and Radial map the pointer back onto their continuous time
+surfaces. Active drags show a live landing coordinate. Lens scroll positions and
+the minimap's surrounding strip survive rerenders, preserving spatial motion.
+Lines is one Prime calendar line with branching group side-lines, using one
+bounded query. Drag, create, edit, delete, group, recurrence, and import actions
+use scoped reversible deltas, so large imported documents are not copied and
+warm recurrence caches survive lightweight edits. A moved virtual occurrence
+becomes one explicit replacement with one suppression. Snapshot-style history
+has a 32 MiB retention budget for remaining advanced operations.
 
 ## Important boundaries
 

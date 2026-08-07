@@ -54,6 +54,14 @@ test("ICS import keeps recurrence structural and task times distinct", () => {
   assert.equal(validation.valid, true, validation.errors.join("\n"));
   assert.equal(result.events.length, 2);
   assert.equal(result.patterns.length, 1);
+  const sourceId = document.frames[result.frames[0]].codec.source;
+  const storedCalendar = document.foreign.ics.sources[sourceId].component;
+  assert.equal(storedCalendar.components.some(
+    (component) => ["VEVENT", "VTODO"].includes(component.name)
+  ), false);
+  assert.ok(result.events.every(
+    (eventId) => ["VEVENT", "VTODO"].includes(document.events[eventId].foreign.ics.component.name)
+  ));
   const task = Object.values(document.events).find((event) => event.traits.includes("task"));
   const roles = Object.values(document.relations)
     .filter((relation) => relation.event === task.id)

@@ -115,9 +115,14 @@ const PRECEDENCE = {
   "^": 7
 };
 
+const MAX_PARSE_DEPTH = 500;
+const MAX_CALL_DEPTH = 200;
+const TRANSCENDENTAL_FUEL = 256;
+
 class Parser {
   constructor(source) {
     this.tokens = new Tokenizer(source);
+    this.depth = 0;
   }
 
   match(value) {
@@ -173,25 +178,33 @@ class Parser {
   }
 
   expression(minimum = 0) {
-    let left = this.prefix();
-    while (true) {
-      const token = this.tokens.peek();
-      if (token.value === "?") {
-        if (minimum > 0) break;
-        this.tokens.next();
-        const yes = this.expression();
-        this.expect(":");
-        const no = this.expression();
-        left = { type: "conditional", condition: left, yes, no };
-        continue;
-      }
-      const precedence = PRECEDENCE[token.value];
-      if (!precedence || precedence < minimum) break;
-      this.tokens.next();
-      const right = this.expression(precedence + (token.value === "^" ? 0 : 1));
-      left = { type: "binary", operator: token.value, left, right };
+    if (this.depth >= MAX_PARSE_DEPTH) {
+      throw new SyntaxError("Formula expression too deeply nested");
     }
-    return left;
+    this.depth += 1;
+    try {
+      let left = this.prefix();
+      while (true) {
+        const token = this.tokens.peek();
+        if (token.value === "?") {
+          if (minimum > 0) break;
+          this.tokens.next();
+          const yes = this.expression();
+          this.expect(":");
+          const no = this.expression();
+          left = { type: "conditional", condition: left, yes, no };
+          continue;
+        }
+        const precedence = PRECEDENCE[token.value];
+        if (!precedence || precedence < minimum) break;
+        this.tokens.next();
+        const right = this.expression(precedence + (token.value === "^" ? 0 : 1));
+        left = { type: "binary", operator: token.value, left, right };
+      }
+      return left;
+    } finally {
+      this.depth -= 1;
+    }
   }
 
   prefix() {
@@ -405,7 +418,7 @@ export class FormulaRuntime {
     const builtins = this.builtins();
     for (const [name, value] of Object.entries(builtins)) global.define(name, value);
     const exports = {};
-    const state = { fuel: this.defaultFuel, emitted: 0 };
+    const state = { fuel: this.defaultFuel, emitted: 0, depth: 0 };
 
     for (const declaration of ast.declarations) {
       if (declaration.type === "const") {
@@ -429,7 +442,7 @@ export class FormulaRuntime {
       call(name, arguments_ = []) {
         const callable = exports[name];
         if (!callable) throw new Error(`Formula module does not export ${name}`);
-        const callState = { fuel: runtime.defaultFuel, emitted: 0 };
+        const callState = { fuel: runtime.defaultFuel, emitted: 0, depth: 0 };
         const result = runtime.invoke(callable, arguments_.map(deepInput), callState);
         runtime.assertOutputSize(result);
         return toPlain(result);
@@ -453,17 +466,24 @@ export class FormulaRuntime {
     return result;
   }
 
-  assertOutputSize(value) {
+  countCells(value) {
     let count = 0;
     const stack = [value];
     while (stack.length) {
       const current = stack.pop();
       count += 1;
-      if (count > this.outputLimit) throw new RangeError("Formula output limit exceeded");
+      if (count > this.outputLimit) return count;
       if (Array.isArray(current)) stack.push(...current);
       else if (current && typeof current === "object" && !isRational(current)) {
         stack.push(...Object.values(current));
       }
+    }
+    return count;
+  }
+
+  assertOutputSize(value) {
+    if (this.countCells(value) > this.outputLimit) {
+      throw new RangeError("Formula output limit exceeded");
     }
   }
 
@@ -519,8 +539,9 @@ export class FormulaRuntime {
           const scope = new Environment(environment);
           scope.define(node.name, item);
           if (node.filter && !truthy(this.evaluate(node.filter, scope, state))) continue;
-          output.push(this.evaluate(node.value, scope, state));
-          state.emitted += 1;
+          const produced = this.evaluate(node.value, scope, state);
+          output.push(produced);
+          state.emitted += this.countCells(produced);
           if (state.emitted > this.outputLimit) throw new RangeError("Formula output limit exceeded");
         }
         return output;
@@ -579,12 +600,18 @@ export class FormulaRuntime {
   }
 
   invoke(callable, arguments_, state) {
-    this.burn(state, 2);
+    this.burn(state, callable?.formulaCost ?? 2);
     if (typeof callable === "function" && callable.formulaBuiltin) return callable(...arguments_);
     if (!callable?.formulaFunction) throw new TypeError("Value is not callable");
-    const scope = new Environment(callable.closure);
-    callable.parameters.forEach((name, index) => scope.define(name, arguments_[index] ?? null));
-    return this.evaluate(callable.body, scope, state);
+    if (state.depth >= MAX_CALL_DEPTH) throw new RangeError("Formula call depth limit exceeded");
+    state.depth += 1;
+    try {
+      const scope = new Environment(callable.closure);
+      callable.parameters.forEach((name, index) => scope.define(name, arguments_[index] ?? null));
+      return this.evaluate(callable.body, scope, state);
+    } finally {
+      state.depth -= 1;
+    }
   }
 
   builtins() {
@@ -642,6 +669,9 @@ export class FormulaRuntime {
       if (typeof value === "function") {
         Object.defineProperty(value, "formulaBuiltin", { value: true });
       }
+    }
+    for (const name of ["sin", "cos", "sqrt"]) {
+      Object.defineProperty(builtins[name], "formulaCost", { value: TRANSCENDENTAL_FUEL });
     }
     return builtins;
   }

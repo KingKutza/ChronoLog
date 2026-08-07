@@ -7,12 +7,17 @@ import {
 
 export const SCHEMA_VERSION = "chronolog/1";
 
-let sequence = 0;
-
 export function createId(prefix = "item") {
   if (globalThis.crypto?.randomUUID) return `${prefix}:${globalThis.crypto.randomUUID()}`;
-  sequence += 1;
-  return `${prefix}:${Date.now().toString(36)}-${sequence.toString(36)}`;
+  if (globalThis.crypto?.getRandomValues) {
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+    return `${prefix}:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  }
+  let hex = "";
+  while (hex.length < 32) {
+    hex += Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, "0");
+  }
+  return `${prefix}:${hex.slice(0, 32)}`;
 }
 
 export function createDocument(title = "Untitled Chronolog") {
@@ -42,10 +47,18 @@ export function validateDocument(document) {
     }
   }
   for (const [id, event] of Object.entries(document.events || {})) {
+    if (!event || typeof event !== "object") {
+      errors.push(`Event ${id} must be an object`);
+      continue;
+    }
     if (event.id !== id) errors.push(`Event map key ${id} does not match its id`);
     if (!Array.isArray(event.traits)) errors.push(`Event ${id} requires traits`);
     if (!event.magnitudes?.duration) errors.push(`Event ${id} requires an intrinsic duration`);
     for (const [kind, magnitude] of Object.entries(event.magnitudes || {})) {
+      if (!magnitude || typeof magnitude !== "object") {
+        errors.push(`Event ${id} magnitude ${kind} must be an object`);
+        continue;
+      }
       if (!magnitude.frame || !document.frames?.[magnitude.frame]) {
         errors.push(`Event ${id} magnitude ${kind} references a missing frame`);
       }
@@ -59,6 +72,10 @@ export function validateDocument(document) {
     }
   }
   for (const [id, frame] of Object.entries(document.frames || {})) {
+    if (!frame || typeof frame !== "object") {
+      errors.push(`Frame ${id} must be an object`);
+      continue;
+    }
     if (frame.id !== id) errors.push(`Frame map key ${id} does not match its id`);
     if (!Array.isArray(frame.traits)) errors.push(`Frame ${id} requires traits`);
     if (frame.basis && !document.frames?.[frame.basis]) errors.push(`Frame ${id} has a missing basis`);
@@ -67,10 +84,26 @@ export function validateDocument(document) {
     }
   }
   for (const [id, pattern] of Object.entries(document.patterns || {})) {
+    if (!pattern || typeof pattern !== "object") {
+      errors.push(`Pattern ${id} must be an object`);
+      continue;
+    }
     if (pattern.id !== id) errors.push(`Pattern map key ${id} does not match its id`);
     if (!pattern.language) errors.push(`Pattern ${id} lacks a language`);
+    if (pattern.kind === "ics-rrule") {
+      if (!document.events?.[pattern.templateEvent]) {
+        errors.push(`Pattern ${id} references a missing template event`);
+      }
+      if (pattern.templateRelation != null && !document.relations?.[pattern.templateRelation]) {
+        errors.push(`Pattern ${id} references a missing template relation`);
+      }
+    }
   }
   for (const [id, relation] of Object.entries(document.relations || {})) {
+    if (!relation || typeof relation !== "object") {
+      errors.push(`Relation ${id} must be an object`);
+      continue;
+    }
     if (relation.id !== id) errors.push(`Relation map key ${id} does not match its id`);
     if (relation.type === "attachment") {
       if (!document.events?.[relation.event]) errors.push(`Attachment ${id} references a missing event`);
@@ -90,6 +123,23 @@ export function validateDocument(document) {
       }
     } else {
       errors.push(`Relation ${id} has an unknown type`);
+    }
+  }
+  for (const [id, override] of Object.entries(document.overrides || {})) {
+    if (!override || typeof override !== "object") {
+      errors.push(`Override ${id} must be an object`);
+      continue;
+    }
+    if (override.id !== id) errors.push(`Override map key ${id} does not match its id`);
+    const virtual = typeof override.virtual === "string" ? override.virtual : "";
+    const patternId = virtual.slice(0, virtual.lastIndexOf("/"));
+    if (!patternId || !document.patterns?.[patternId]) {
+      errors.push(`Override ${id} references a missing virtual pattern`);
+    }
+    for (const replacement of override.replacements || []) {
+      if (!document.events?.[replacement]) {
+        errors.push(`Override ${id} replacement references a missing event`);
+      }
     }
   }
   return { valid: errors.length === 0, errors };
@@ -205,7 +255,14 @@ export function daysToCoordinate(document, frameId, days) {
 }
 
 export function stableVirtualId(patternId, key) {
-  return `${patternId}/${String(key).replace(/[^a-zA-Z0-9._~-]+/g, "-")}`;
+  const encoded = String(key).replace(
+    /[^a-zA-Z0-9._~-]/g,
+    (char) => Array.from(
+      new TextEncoder().encode(char),
+      (byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`
+    ).join("")
+  );
+  return `${patternId}/${encoded}`;
 }
 
 export function applyVirtualOverrides(document, facts) {
@@ -256,43 +313,99 @@ export function stapleEvents(document, eventIds) {
 }
 
 export class CommandHistory {
-  constructor(document, onChange = () => {}) {
+  constructor(document, onChange = () => {}, limit = 200, maxSnapshotBytes = 32 * 1024 * 1024) {
     this.document = document;
     this.onChange = onChange;
+    this.limit = limit;
+    this.maxSnapshotBytes = maxSnapshotBytes;
     this.undoStack = [];
     this.redoStack = [];
   }
 
+  commandBytes(command) {
+    if (command.bytes !== undefined) return command.bytes;
+    return ((command.before?.length || 0) + (command.after?.length || 0)) * 2;
+  }
+
+  retainedBytes() {
+    return [...this.undoStack, ...this.redoStack]
+      .reduce((total, command) => total + this.commandBytes(command), 0);
+  }
+
+  trim() {
+    while (this.undoStack.length > this.limit) this.undoStack.shift();
+    while (this.undoStack.length && this.retainedBytes() > this.maxSnapshotBytes) {
+      this.undoStack.shift();
+    }
+  }
+
   execute(label, mutate) {
-    const before = clone(this.document);
-    mutate(this.document);
+    const before = JSON.stringify(this.document);
+    try {
+      mutate(this.document);
+    } catch (error) {
+      this.replace(before);
+      throw error;
+    }
     touch(this.document);
-    const after = clone(this.document);
-    this.undoStack.push({ label, before, after });
+    const after = JSON.stringify(this.document);
     this.redoStack = [];
-    this.onChange({ label, document: this.document });
+    const command = { label, before, after, bytes: (before.length + after.length) * 2 };
+    const historyLimited = command.bytes > this.maxSnapshotBytes;
+    if (!historyLimited) {
+      this.undoStack.push(command);
+      this.trim();
+    }
+    this.onChange({ label, document: this.document, historyLimited });
+  }
+
+  executeDelta(label, apply, revert, metadata = {}) {
+    try {
+      apply(this.document);
+    } catch (error) {
+      // Delta callers make revert safe for partially-applied work so large
+      // imports can recover without cloning the entire calendar first.
+      revert(this.document);
+      throw error;
+    }
+    touch(this.document);
+    this.undoStack.push({ label, apply, revert, metadata, bytes: 0 });
+    this.redoStack = [];
+    this.trim();
+    this.onChange({ label, document: this.document, ...metadata });
   }
 
   replace(snapshot) {
+    const restored = typeof snapshot === "string" ? JSON.parse(snapshot) : clone(snapshot);
     for (const key of Object.keys(this.document)) delete this.document[key];
-    Object.assign(this.document, clone(snapshot));
+    Object.assign(this.document, restored);
   }
 
   undo() {
     const command = this.undoStack.pop();
     if (!command) return false;
-    this.replace(command.before);
+    if (command.revert) {
+      command.revert(this.document);
+      touch(this.document);
+    } else {
+      this.replace(command.before);
+    }
     this.redoStack.push(command);
-    this.onChange({ label: `Undo ${command.label}`, document: this.document });
+    this.onChange({ label: `Undo ${command.label}`, document: this.document, ...command.metadata });
     return true;
   }
 
   redo() {
     const command = this.redoStack.pop();
     if (!command) return false;
-    this.replace(command.after);
+    if (command.apply) {
+      command.apply(this.document);
+      touch(this.document);
+    } else {
+      this.replace(command.after);
+    }
     this.undoStack.push(command);
-    this.onChange({ label: `Redo ${command.label}`, document: this.document });
+    this.onChange({ label: `Redo ${command.label}`, document: this.document, ...command.metadata });
     return true;
   }
 }

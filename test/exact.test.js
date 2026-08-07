@@ -6,7 +6,8 @@ import {
   coordinate,
   daysFromCivil,
   daysToCivilCoordinate,
-  sinExact
+  sinExact,
+  sqrtExact
 } from "../src/exact.js";
 
 test("arbitrary-year civil coordinates retain a quarter millisecond exactly", () => {
@@ -38,4 +39,27 @@ test("Rational decimal parsing and deterministic trig are stable", () => {
   const first = sinExact(Rational.parse("123456789012345.125"), 32).toJSON();
   const second = sinExact(Rational.parse("123456789012345.125"), 32).toJSON();
   assert.equal(first, second);
+});
+
+test("sqrtExact is accurate and deterministic without host floats", () => {
+  const two = sqrtExact(Rational.parse("2"), 30);
+  assert.equal(two.mul(two).sub(2).abs().compare(Rational.parse("1e-29")) < 0, true);
+  assert.equal(two.toJSON(), sqrtExact(Rational.parse("2"), 30).toJSON());
+  assert.equal(sqrtExact(Rational.parse("2.25"), 30).toJSON(), "3/2");
+});
+
+test("sqrtExact handles magnitudes beyond double range quickly", () => {
+  const started = Date.now();
+  const tiny = sqrtExact(Rational.parse("1e-330"), 30);
+  assert.equal(tiny.toJSON(), "0");
+  const huge = sqrtExact(Rational.parse("1e309"), 30);
+  const residual = huge.mul(huge).sub(Rational.parse("1e309")).abs();
+  assert.equal(residual.compare(Rational.parse("1e130")) < 0, true);
+  assert.equal(huge.toJSON(), sqrtExact(Rational.parse("1e309"), 30).toJSON());
+  assert.equal(Date.now() - started < 5000, true);
+});
+
+test("sqrtExact rejects negatives and preserves exact zero", () => {
+  assert.equal(sqrtExact(Rational.parse("0")).toJSON(), "0");
+  assert.throws(() => sqrtExact(Rational.parse("-4")), /negative/);
 });

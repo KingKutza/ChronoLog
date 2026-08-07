@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node tools/serve.js",
-    "test": "node --test",
-    "check": "node --check src/*.js && node --check tools/*.js"
+    "test": "node tools/test.js",
+    "check": "node tools/check.js"
   }
 }

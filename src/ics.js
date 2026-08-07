@@ -35,6 +35,12 @@ function splitOutsideQuotes(value, separator) {
   return parts;
 }
 
+function stripQuotes(value) {
+  return value.length >= 2 && value.startsWith('"') && value.endsWith('"')
+    ? value.slice(1, -1)
+    : value;
+}
+
 function colonIndex(line) {
   let quoted = false;
   for (let index = 0; index < line.length; index += 1) {
@@ -53,7 +59,7 @@ export function unfoldICS(text) {
 
 export function parseContentLine(line) {
   const colon = colonIndex(line);
-  if (colon < 0) return { name: line.toUpperCase(), params: [], value: "", raw: line };
+  if (colon < 0) return { name: line.toUpperCase(), params: [], value: "", raw: line, verbatim: true };
   const head = line.slice(0, colon);
   const value = line.slice(colon + 1);
   const [rawName, ...rawParams] = splitOutsideQuotes(head, ";");
@@ -62,7 +68,7 @@ export function parseContentLine(line) {
     if (equals < 0) return { name: parameter.toUpperCase(), values: [""] };
     return {
       name: parameter.slice(0, equals).toUpperCase(),
-      values: splitOutsideQuotes(parameter.slice(equals + 1), ",")
+      values: splitOutsideQuotes(parameter.slice(equals + 1), ",").map(stripQuotes)
     };
   });
   return { name: rawName.toUpperCase(), params, value, raw: line };
@@ -104,11 +110,9 @@ function parameter(propertyValue, name) {
 }
 
 export function unescapeICSText(value = "") {
-  return String(value)
-    .replace(/\\n/gi, "\n")
-    .replace(/\\,/g, ",")
-    .replace(/\\;/g, ";")
-    .replace(/\\\\/g, "\\");
+  return String(value).replace(/\\([\\;,nN])/g, (whole, escaped) =>
+    escaped === "n" || escaped === "N" ? "\n" : escaped
+  );
 }
 
 export function escapeICSText(value = "") {
@@ -125,7 +129,7 @@ export function parseICSDate(propertyValue) {
   if (!match) return null;
   const dateOnly = !match[4] || parameter(propertyValue, "VALUE") === "DATE";
   const levels = [
-    { level: "year", value: match[1] },
+    { level: "year", value: String(BigInt(match[1])) },
     { level: "month", value: match[2] },
     { level: "day", value: match[3] }
   ];
@@ -209,9 +213,33 @@ function normalizedEntry(component, calendarFrame, sourceId) {
   };
 }
 
-function eventFromEntry(document, entry) {
+function sameTimeTyping(left, right) {
+  return Boolean(left?.utc) === Boolean(right?.utc)
+    && (left?.timeZone || null) === (right?.timeZone || null);
+}
+
+function timedTypingMismatch(date, start) {
+  if (!date || !start || date.dateOnly || start.dateOnly) return false;
+  return !sameTimeTyping(date, start);
+}
+
+function occurrenceKey(date, start) {
+  const day = civilCoordinateToDays(date.coordinate);
+  if (date.dateOnly && start && !start.dateOnly) {
+    const startDay = civilCoordinateToDays(start.coordinate);
+    return day.add(startDay.sub(startDay.floor()));
+  }
+  return day;
+}
+
+function eventFromEntry(document, entry, warnings) {
   let duration = Rational.parse(0);
   if (entry.start && entry.end) {
+    if (!entry.start.dateOnly && !entry.end.dateOnly && !sameTimeTyping(entry.start, entry.end)) {
+      warnings.push(
+        `Event ${entry.uid}: DTSTART and DTEND use different time zones; duration is their wall-clock difference`
+      );
+    }
     duration = civilCoordinateToDays(entry.end.coordinate)
       .sub(civilCoordinateToDays(entry.start.coordinate))
       .mul(86400);
@@ -261,7 +289,7 @@ function eventFromEntry(document, entry) {
       frame: entry.calendarFrame.id,
       role: "observed",
       coordinate: entry.observed.coordinate,
-      parameters: { utc: entry.observed.utc, timeZone: entry.observed.timeZone },
+      parameters: { utc: entry.observed.utc, timeZone: entry.observed.timeZone, stamp: true },
       provenance: { kind: "ics", source: entry.sourceId }
     });
   }
@@ -284,7 +312,7 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
   const calendars = tree.components.filter((component) => component.name === "VCALENDAR");
   if (!calendars.length) throw new Error("No VCALENDAR component found");
   document.foreign.ics ||= { sources: {} };
-  const result = { frames: [], events: [], patterns: [], relations: [], suggestions: [] };
+  const result = { frames: [], events: [], patterns: [], relations: [], suggestions: [], warnings: [] };
   const existingByUid = new Map();
   for (const event of Object.values(document.events)) {
     const uid = event.payload?.uid;
@@ -312,7 +340,12 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
     document.foreign.ics.sources[sourceId] = {
       id: sourceId,
       label: calendarName,
-      component: calendar
+      component: {
+        ...calendar,
+        components: calendar.components.filter(
+          (component) => !["VEVENT", "VTODO"].includes(component.name)
+        )
+      }
     };
 
     const entries = componentEntries(calendar).map((component) =>
@@ -320,7 +353,7 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
     );
     const uidOccurrences = new Map();
     for (const entry of entries) {
-      eventFromEntry(document, entry);
+      eventFromEntry(document, entry, result.warnings);
       result.events.push(entry.event.id);
       if (entry.relation) result.relations.push(entry.relation.id);
       if (existingByUid.has(entry.uid)) {
@@ -336,6 +369,13 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
     }
 
     for (const entry of entries.filter((item) => item.rrule)) {
+      for (const date of entry.exdates) {
+        if (timedTypingMismatch(date, entry.start)) {
+          result.warnings.push(
+            `EXDATE for ${entry.uid} uses a different time form than DTSTART; the exclusion may not match any occurrence`
+          );
+        }
+      }
       const pattern = addPattern(document, {
         title: `${entry.title} recurrence`,
         language: "chronolog-formula/1",
@@ -346,7 +386,14 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
         templateRelation: entry.relation?.id,
         rrule: parseRRule(entry.rrule.value),
         rawRule: entry.rrule,
-        exdates: entry.exdates.map((date) => civilCoordinateToDays(date.coordinate).toJSON()),
+        exdates: entry.exdates.map((date) => occurrenceKey(date, entry.start).toJSON()),
+        exdateProperties: properties(entry.component, "EXDATE").map((item) => ({
+          params: item.params,
+          values: item.value.split(",").map((value) => {
+            const date = parseICSDate({ ...item, value });
+            return { value, day: date ? occurrenceKey(date, entry.start).toJSON() : null };
+          })
+        })),
         source: recurrencePatternSource(),
         exports: { state: "state", facts: "facts" },
         provenance: { kind: "ics", source: sourceId, uid: entry.uid }
@@ -361,7 +408,12 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
       for (const exception of exceptions) {
         const base = bases[0];
         if (!base) continue;
-        const occurrenceDay = civilCoordinateToDays(exception.recurrenceId.coordinate).toJSON();
+        if (timedTypingMismatch(exception.recurrenceId, base.start)) {
+          result.warnings.push(
+            `RECURRENCE-ID for ${uid} uses a different time form than DTSTART; the override may not match any occurrence`
+          );
+        }
+        const occurrenceDay = occurrenceKey(exception.recurrenceId, base.start).toJSON();
         const virtualId = stableVirtualId(base.pattern.id, `occurrence-${occurrenceDay}`);
         const override = suppressVirtual(document, virtualId, [exception.event.id]);
         override.provenance = { kind: "ics", source: sourceId, uid };
@@ -385,7 +437,9 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
 }
 
 function serializeParams(params = []) {
-  return params.map((item) => `;${item.name}=${item.values.join(",")}`).join("");
+  return params.map((item) => `;${item.name}=${item.values.map((value) =>
+    /[;:,]/.test(value) ? `"${value}"` : value
+  ).join(",")}`).join("");
 }
 
 function foldLine(line) {
@@ -413,7 +467,7 @@ function foldLine(line) {
 export function serializeComponent(component) {
   const lines = [`BEGIN:${component.name}`];
   for (const item of component.properties || []) {
-    lines.push(foldLine(`${item.name}${serializeParams(item.params)}:${item.value}`));
+    lines.push(foldLine(item.verbatim ? item.raw : `${item.name}${serializeParams(item.params)}:${item.value}`));
   }
   for (const child of component.components || []) lines.push(serializeComponent(child));
   lines.push(`END:${component.name}`);
@@ -423,8 +477,12 @@ export function serializeComponent(component) {
 function setProperty(component, name, value, params = []) {
   const existing = component.properties.find((item) => item.name === name);
   const next = { name, params, value };
-  if (existing) Object.assign(existing, next);
-  else component.properties.push(next);
+  if (existing) {
+    delete existing.verbatim;
+    Object.assign(existing, next);
+  } else {
+    component.properties.push(next);
+  }
 }
 
 function removeProperty(component, name) {
@@ -432,7 +490,10 @@ function removeProperty(component, name) {
 }
 
 function coordinateToICS(value, dateOnly = false, utc = false) {
-  const year = levelValue(value, "year").padStart(4, "0");
+  // Signed years beyond 0000-9999 deliberately deviate from RFC 5545 so remote dates round-trip.
+  const yearValue = BigInt(levelValue(value, "year"));
+  const magnitude = yearValue < 0n ? -yearValue : yearValue;
+  const year = `${yearValue < 0n ? "-" : ""}${magnitude.toString().padStart(4, "0")}`;
   const month = levelValue(value, "month", "1").padStart(2, "0");
   const day = levelValue(value, "day", "1").padStart(2, "0");
   if (dateOnly) return `${year}${month}${day}`;
@@ -461,7 +522,19 @@ function magnitudeSeconds(event) {
   return seconds;
 }
 
-function eventComponent(document, event, relation, componentName = "VEVENT") {
+function startParams(relation) {
+  if (relation?.parameters?.dateOnly) return [{ name: "VALUE", values: ["DATE"] }];
+  if (relation?.parameters?.timeZone) return [{ name: "TZID", values: [relation.parameters.timeZone] }];
+  return [];
+}
+
+function icsTimestamp(date) {
+  const pad = (value, length = 2) => String(value).padStart(length, "0");
+  return `${pad(date.getUTCFullYear(), 4)}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`
+    + `T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+}
+
+function eventComponent(document, event, relation, now, componentName = "VEVENT") {
   const original = event.foreign?.ics?.component;
   const component = original
     ? structuredClone(original)
@@ -484,12 +557,20 @@ function eventComponent(document, event, relation, componentName = "VEVENT") {
     const observed = taskRelations.find((item) => item.role === "observed") || relation;
     const completed = taskRelations.find((item) => item.role === "completed");
     if (observed?.coordinate) {
-      setProperty(
-        component,
-        "DTSTAMP",
-        coordinateToICS(observed.coordinate, false, observed.parameters?.utc !== false)
-      );
-      if (observed.role === "observed") removeProperty(component, "DTSTART");
+      if (observed.parameters?.stamp) {
+        setProperty(component, "DTSTAMP", coordinateToICS(observed.coordinate, false, true));
+      } else {
+        setProperty(
+          component,
+          "DTSTART",
+          coordinateToICS(
+            observed.coordinate,
+            Boolean(observed.parameters?.dateOnly),
+            Boolean(observed.parameters?.utc)
+          ),
+          startParams(observed)
+        );
+      }
     }
     if (completed?.coordinate) {
       setProperty(
@@ -503,11 +584,7 @@ function eventComponent(document, event, relation, componentName = "VEVENT") {
   } else if (relation?.coordinate) {
     const dateOnly = Boolean(relation.parameters?.dateOnly);
     const utc = Boolean(relation.parameters?.utc);
-    const params = dateOnly
-      ? [{ name: "VALUE", values: ["DATE"] }]
-      : relation.parameters?.timeZone
-        ? [{ name: "TZID", values: [relation.parameters.timeZone] }]
-        : [];
+    const params = startParams(relation);
     setProperty(component, "DTSTART", coordinateToICS(relation.coordinate, dateOnly, utc), params);
     const seconds = magnitudeSeconds(event);
     if (seconds.compare(0) > 0) {
@@ -515,6 +592,9 @@ function eventComponent(document, event, relation, componentName = "VEVENT") {
       setProperty(component, "DTEND", coordinateToICS(daysToCivilCoordinate(end), dateOnly, utc), params);
       removeProperty(component, "DURATION");
     }
+  }
+  if (!property(component, "DTSTAMP")) {
+    setProperty(component, "DTSTAMP", icsTimestamp(now || new Date()));
   }
   return component;
 }
@@ -524,6 +604,7 @@ export function exportICS(document, {
   start,
   end,
   engine,
+  now = new Date(),
   productId = "-//Chronolog//Chronolog 1//EN"
 }) {
   const calendarFrame = document.frames[frame];
@@ -541,7 +622,7 @@ export function exportICS(document, {
           { name: "CALSCALE", params: [], value: "GREGORIAN" }
         ],
     components: original
-      ? structuredClone(original.components.filter((item) => item.name === "VTIMEZONE"))
+      ? structuredClone(original.components.filter((item) => !["VEVENT", "VTODO"].includes(item.name)))
       : []
   };
   setProperty(calendar, "X-WR-CALNAME", escapeICSText(calendarFrame.title));
@@ -568,18 +649,41 @@ export function exportICS(document, {
       if (relation.role === "completed" || exportedTasks.has(event.id)) continue;
       exportedTasks.add(event.id);
     }
-    const component = eventComponent(document, event, relation);
+    const component = eventComponent(document, event, relation, now);
     const pattern = nativePatterns.find((item) => item.templateRelation === relation.id);
     if (pattern) {
-      setProperty(component, "RRULE", pattern.rawRule?.value || Object.entries(pattern.rrule)
-        .map(([key, value]) => `${key}=${value}`).join(";"));
-      if (pattern.exdates?.length) {
-        setProperty(
-          component,
-          "EXDATE",
-          pattern.exdates.map((day) => coordinateToICS(daysToCivilCoordinate(day))).join(",")
-        );
+      const rule = pattern.rrule && Object.keys(pattern.rrule).length
+        ? Object.entries(pattern.rrule).map(([key, value]) => `${key}=${value}`).join(";")
+        : pattern.rawRule?.value || "";
+      setProperty(component, "RRULE", rule);
+      const exdateIndex = component.properties.findIndex((item) => item.name === "EXDATE");
+      removeProperty(component, "EXDATE");
+      const exdateProperties = [];
+      const remaining = new Set(pattern.exdates || []);
+      for (const stored of pattern.exdateProperties || []) {
+        const kept = stored.values.filter((item) => item.day === null || remaining.has(item.day));
+        for (const item of kept) remaining.delete(item.day);
+        if (kept.length) {
+          exdateProperties.push({
+            name: "EXDATE",
+            params: stored.params || [],
+            value: kept.map((item) => item.value).join(",")
+          });
+        }
       }
+      if (remaining.size) {
+        exdateProperties.push({
+          name: "EXDATE",
+          params: startParams(relation),
+          value: [...remaining].map((day) => coordinateToICS(
+            daysToCivilCoordinate(day),
+            Boolean(relation.parameters?.dateOnly),
+            Boolean(relation.parameters?.utc)
+          )).join(",")
+        });
+      }
+      if (exdateIndex >= 0) component.properties.splice(exdateIndex, 0, ...exdateProperties);
+      else component.properties.push(...exdateProperties);
     }
     calendar.components.push(component);
   }
@@ -590,7 +694,7 @@ export function exportICS(document, {
         && !nativePatterns.some((pattern) => fact.virtualId.startsWith(`${pattern.id}/`))
     );
     for (const fact of generated) {
-      calendar.components.push(eventComponent(document, fact.event, fact.relation));
+      calendar.components.push(eventComponent(document, fact.event, fact.relation, now));
     }
   }
 

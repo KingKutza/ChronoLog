@@ -72,6 +72,39 @@ test("one event may attach repeatedly and shared frames compose by reference", (
   assert.equal(validateDocument(document).valid, true);
 });
 
+test("overlap queries retain a multi-day event after its start day", () => {
+  const document = createCelestialDocument();
+  const event = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("9", "day") },
+    payload: { title: "PTO" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: event.id,
+    frame: "calendar:personal",
+    role: "placed",
+    coordinate: date("2026", "8", "1")
+  });
+  const engine = new ChronologEngine(document);
+  const window = {
+    frame: "calendar:personal",
+    start: date("2026", "8", "5"),
+    end: date("2026", "8", "6")
+  };
+  assert.equal(engine.queryFacts(window).facts.length, 0);
+  assert.deepEqual(
+    engine.queryFacts({ ...window, includeOverlaps: true }).facts.map((fact) => fact.event.payload.title),
+    ["PTO"]
+  );
+  assert.equal(engine.queryFacts({
+    ...window,
+    start: date("2026", "8", "10"),
+    end: date("2026", "8", "11"),
+    includeOverlaps: true
+  }).facts.length, 0);
+});
+
 test("task and terminator traits enforce zero duration and retrospective calendar roles", () => {
   const document = createCelestialDocument();
   const task = addEvent(document, {
