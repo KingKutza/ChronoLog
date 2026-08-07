@@ -191,10 +191,14 @@ export function sqrtExact(value, decimalPlaces = 30) {
   const input = Rational.parse(value);
   if (input.compare(0) < 0) throw new RangeError("Square root of a negative value");
   if (input.isZero()) return ZERO;
-  let guess = Rational.parse(Math.sqrt(input.toNumber()) || 1);
+  const workingPlaces = decimalPlaces + 8;
+  const exponent = BigInt(input.n.toString(2).length - input.d.toString(2).length);
+  const half = exponent >> 1n;
+  let guess = half >= 0n ? new Rational(2n ** half) : new Rational(1n, 2n ** -half);
   const limit = new Rational(1n, TEN ** BigInt(decimalPlaces + 6));
   for (let index = 0; index < 128; index += 1) {
-    const next = guess.add(input.div(guess)).div(2);
+    const next = roundRational(guess.add(input.div(guess)).div(2), workingPlaces);
+    if (next.isZero()) return ZERO;
     if (next.sub(guess).abs().compare(limit) < 0) {
       guess = next;
       break;

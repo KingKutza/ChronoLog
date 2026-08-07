@@ -172,9 +172,7 @@ export function createCelestialDocument() {
       siderealMonth: "27.321661",
       synodicMonth: "29.530588853",
       moonPhase: "0.157",
-      newMoonEpoch: `${newMoonDay}+547/720`.includes("+")
-        ? String(newMoonDay * 720n + 547n) + "/720"
-        : String(newMoonDay)
+      newMoonEpoch: String(newMoonDay * 720n + 547n) + "/720"
     },
     source: CELESTIAL_SOURCE,
     exports: { state: "state", facts: "facts" },

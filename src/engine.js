@@ -30,7 +30,31 @@ function attachmentDay(engine, relation) {
   return engine.coordinateDays(relation.frame, relation.coordinate);
 }
 
+function eventDurationDays(event) {
+  const factors = {
+    week: Rational.parse(7),
+    day: Rational.parse(1),
+    hour: Rational.parse("1/24"),
+    minute: Rational.parse("1/1440"),
+    second: Rational.parse("1/86400")
+  };
+  let duration = Rational.parse(0);
+  try {
+    for (const part of event?.magnitudes?.duration?.value?.levels || []) {
+      if (factors[part.level]) duration = duration.add(rational(part.value).mul(factors[part.level]));
+    }
+  } catch {
+    return Rational.parse(0);
+  }
+  return duration.compare(0) > 0 ? duration : Rational.parse(0);
+}
+
 const WEEKDAYS = { SU: 0n, MO: 1n, TU: 2n, WE: 3n, TH: 4n, FR: 5n, SA: 6n };
+const MAX_CACHED_RECURRENCE_COUNT = 256;
+const MAX_RRULE_COUNT = 10_000n;
+const MAX_RECURRENCE_SERIES_FACTS = 12_000;
+const MAX_RECURRENCE_WINDOWS = 256;
+const MAX_RECURRENCE_WINDOW_FACTS = 16_000;
 
 function weekday(day) {
   return floorMod(BigInt(day) + 4n, 7n);
@@ -47,7 +71,54 @@ function compactIcsDay(value) {
     .add(Rational.parse(match[6]).div(86400));
 }
 
-function occurrenceFacts(engine, pattern, lower, upper) {
+function compareBigInt(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function parseByDay(value) {
+  return String(value || "").split(",").map((token) => {
+    const match = /^([+-]?\d+)?(SU|MO|TU|WE|TH|FR|SA)$/.exec(token.trim().toUpperCase());
+    if (!match) return null;
+    return { ordinal: match[1] ? Number(match[1]) : null, weekday: WEEKDAYS[match[2]] };
+  }).filter(Boolean);
+}
+
+function monthDayCandidates(rule, year, month, baseDay) {
+  const length = BigInt(daysInMonth(year, month));
+  const byDay = rule.BYDAY ? parseByDay(rule.BYDAY) : [];
+  let candidates;
+  if (rule.BYMONTHDAY) {
+    candidates = rule.BYMONTHDAY.split(",").map((value) => {
+      const monthDay = BigInt(value);
+      return monthDay < 0n ? length + monthDay + 1n : monthDay;
+    }).filter((monthDay) => monthDay >= 1n && monthDay <= length);
+    if (byDay.length) {
+      const weekdays = byDay.map((item) => item.weekday);
+      candidates = candidates.filter((monthDay) =>
+        weekdays.includes(weekday(daysFromCivil(year, month, monthDay))));
+    }
+  } else if (byDay.length) {
+    candidates = [];
+    for (const item of byDay) {
+      const matching = [];
+      for (let monthDay = 1n; monthDay <= length; monthDay += 1n) {
+        if (weekday(daysFromCivil(year, month, monthDay)) === item.weekday) matching.push(monthDay);
+      }
+      if (item.ordinal === null) candidates.push(...matching);
+      else {
+        const pick = item.ordinal > 0
+          ? matching[item.ordinal - 1]
+          : matching[matching.length + item.ordinal];
+        if (pick !== undefined) candidates.push(pick);
+      }
+    }
+  } else {
+    candidates = [baseDay].filter((monthDay) => monthDay >= 1n && monthDay <= length);
+  }
+  return [...new Set(candidates)].sort(compareBigInt);
+}
+
+function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
   const document = engine.document;
   const relation = document.relations[pattern.templateRelation];
   const event = document.events[pattern.templateEvent];
@@ -58,95 +129,111 @@ function occurrenceFacts(engine, pattern, lower, upper) {
   const rule = pattern.rrule || {};
   const frequency = String(rule.FREQ || "").toUpperCase();
   const interval = BigInt(rule.INTERVAL || 1);
+  if (interval <= 0n) throw new RangeError(`RRULE INTERVAL must be positive, got ${rule.INTERVAL}`);
   const count = rule.COUNT ? BigInt(rule.COUNT) : null;
+  if (count !== null && count > MAX_RRULE_COUNT) {
+    throw new RangeError(`RRULE COUNT exceeds the safe limit of ${MAX_RRULE_COUNT}`);
+  }
   const until = compactIcsDay(rule.UNTIL);
   const excluded = new Set(pattern.exdates || []);
   const days = [];
+  let counted = 0n;
 
-  const accept = (day, index = null) => {
-    if (day.compare(base) < 0 || day.compare(lower) < 0 || day.compare(upper) > 0) return;
-    if (until && day.compare(until) > 0) return;
-    if (count !== null && index !== null && index >= count) return;
-    if (excluded.has(day.toJSON())) return;
-    days.push(day);
+  // Candidates arrive in chronological order; emit counts every occurrence at or
+  // after the base so COUNT reflects emitted occurrences, not generator cycles.
+  const emit = (day) => {
+    if (day.compare(base) < 0) return true;
+    if (until && day.compare(until) > 0) return false;
+    if (count !== null && counted >= count) return false;
+    counted += 1n;
+    if (day.compare(upper) > 0) return false;
+    if (day.compare(lower) >= 0 && !excluded.has(day.toJSON())) {
+      days.push(day);
+      if (days.length >= limit) return false;
+    }
+    return true;
   };
 
   if (frequency === "DAILY") {
-    let first = lower.sub(base).div(interval).ceil();
-    if (first < 0n) first = 0n;
-    for (let index = first; ; index += 1n) {
-      const day = base.add(index * interval);
-      if (day.compare(upper) > 0 || (count !== null && index >= count)) break;
-      accept(day, index);
+    let index = 0n;
+    if (count === null) {
+      const skip = lower.sub(base).div(interval).ceil();
+      if (skip > 0n) index = skip;
+    }
+    for (;; index += 1n) {
+      if (!emit(base.add(index * interval))) break;
     }
   } else if (frequency === "WEEKLY") {
-    const weekStart = floorMod(weekday(baseWhole) - WEEKDAYS.MO, 7n);
-    const baseWeek = baseWhole - weekStart;
-    const selected = (rule.BYDAY ? rule.BYDAY.split(",") : [])
-      .map((token) => WEEKDAYS[token.slice(-2)])
-      .filter((value) => value !== undefined);
+    const baseWeek = baseWhole - floorMod(weekday(baseWhole) - WEEKDAYS.MO, 7n);
+    const selected = parseByDay(rule.BYDAY).map((item) => item.weekday);
     if (!selected.length) selected.push(weekday(baseWhole));
-    let dayWhole = lower.floor() - 7n;
-    const finalWhole = upper.ceil() + 1n;
-    for (; dayWhole <= finalWhole; dayWhole += 1n) {
-      if (!selected.includes(weekday(dayWhole))) continue;
-      const candidateWeekStart = dayWhole - floorMod(weekday(dayWhole) - WEEKDAYS.MO, 7n);
-      const weekIndex = floorDiv(candidateWeekStart - baseWeek, 7n);
-      if (weekIndex < 0n || floorMod(weekIndex, interval) !== 0n) continue;
-      accept(new Rational(dayWhole).add(time));
+    let cycle = 0n;
+    if (count === null) {
+      const lowerWhole = lower.floor();
+      const lowerWeek = lowerWhole - floorMod(weekday(lowerWhole) - WEEKDAYS.MO, 7n);
+      cycle = floorDiv(lowerWeek - baseWeek, 7n * interval);
+      if (cycle < 0n) cycle = 0n;
+    }
+    weekly: for (;; cycle += 1n) {
+      const weekStart = baseWeek + cycle * interval * 7n;
+      for (let offset = 0n; offset < 7n; offset += 1n) {
+        if (!selected.includes(weekday(weekStart + offset))) continue;
+        if (!emit(new Rational(weekStart + offset).add(time))) break weekly;
+      }
     }
   } else if (frequency === "MONTHLY") {
     const baseCivil = civilFromDays(baseWhole);
-    const lowerCivil = civilFromDays(lower.floor());
     const baseMonth = baseCivil.year * 12n + baseCivil.month - 1n;
-    const lowerMonth = lowerCivil.year * 12n + lowerCivil.month - 1n;
-    let cycle = floorDiv(lowerMonth - baseMonth, interval);
-    if (cycle < 0n) cycle = 0n;
-    const monthDays = rule.BYMONTHDAY
-      ? rule.BYMONTHDAY.split(",").map((value) => BigInt(value))
-      : [baseCivil.day];
-    for (;; cycle += 1n) {
+    let cycle = 0n;
+    if (count === null) {
+      const lowerCivil = civilFromDays(lower.floor());
+      cycle = floorDiv(lowerCivil.year * 12n + lowerCivil.month - 1n - baseMonth, interval);
+      if (cycle < 0n) cycle = 0n;
+    }
+    monthly: for (;; cycle += 1n) {
       const monthIndex = baseMonth + cycle * interval;
       const year = floorDiv(monthIndex, 12n);
       const month = floorMod(monthIndex, 12n) + 1n;
-      const earliest = new Rational(daysFromCivil(year, month, 1n)).add(time);
-      if (earliest.compare(upper) > 0) break;
-      for (let monthDay of monthDays) {
-        const length = BigInt(daysInMonth(year, month));
-        if (monthDay < 0n) monthDay = length + monthDay + 1n;
-        if (monthDay < 1n || monthDay > length) continue;
-        accept(new Rational(daysFromCivil(year, month, monthDay)).add(time), cycle);
+      if (new Rational(daysFromCivil(year, month, 1n)).add(time).compare(upper) > 0) break;
+      for (const monthDay of monthDayCandidates(rule, year, month, baseCivil.day)) {
+        if (!emit(new Rational(daysFromCivil(year, month, monthDay)).add(time))) break monthly;
       }
     }
   } else if (frequency === "YEARLY") {
     const baseCivil = civilFromDays(baseWhole);
-    const lowerCivil = civilFromDays(lower.floor());
-    let cycle = floorDiv(lowerCivil.year - baseCivil.year, interval);
-    if (cycle < 0n) cycle = 0n;
-    for (;; cycle += 1n) {
+    let cycle = 0n;
+    if (count === null) {
+      const lowerCivil = civilFromDays(lower.floor());
+      cycle = floorDiv(lowerCivil.year - baseCivil.year, interval);
+      if (cycle < 0n) cycle = 0n;
+    }
+    const months = rule.BYMONTH
+      ? [...new Set(rule.BYMONTH.split(",").map((value) => BigInt(value)))]
+        .filter((month) => month >= 1n && month <= 12n)
+        .sort(compareBigInt)
+      : [baseCivil.month];
+    yearly: for (;; cycle += 1n) {
       const year = baseCivil.year + cycle * interval;
-      const month = rule.BYMONTH ? BigInt(rule.BYMONTH.split(",")[0]) : baseCivil.month;
-      const dayOfMonth = rule.BYMONTHDAY ? BigInt(rule.BYMONTHDAY.split(",")[0]) : baseCivil.day;
-      const yearStart = new Rational(daysFromCivil(year, 1n, 1n)).add(time);
-      if (yearStart.compare(upper) > 0) break;
-      if (dayOfMonth > BigInt(daysInMonth(year, month))) continue;
-      const day = new Rational(daysFromCivil(year, month, dayOfMonth)).add(time);
-      if (day.compare(upper) > 0) break;
-      accept(day, cycle);
+      if (new Rational(daysFromCivil(year, 1n, 1n)).add(time).compare(upper) > 0) break;
+      for (const month of months) {
+        for (const monthDay of monthDayCandidates(rule, year, month, baseCivil.day)) {
+          if (!emit(new Rational(daysFromCivil(year, month, monthDay)).add(time))) break yearly;
+        }
+      }
     }
   } else {
-    accept(base, 0n);
+    throw new Error(`Unsupported FREQ in RRULE: ${rule.FREQ || "(missing)"}`);
   }
 
   return days.map((day) => {
     const virtualId = stableVirtualId(pattern.id, `occurrence-${day.toJSON()}`);
     const virtualEvent = {
-      ...structuredClone(event),
+      ...event,
       id: virtualId,
       provenance: { kind: "pattern", pattern: pattern.id, key: day.toJSON() }
     };
     const virtualRelation = {
-      ...structuredClone(relation),
+      ...relation,
       id: `${virtualId}/attachment`,
       event: virtualId,
       coordinate: engine.daysCoordinate(relation.frame, day),
@@ -165,14 +252,59 @@ function occurrenceFacts(engine, pattern, lower, upper) {
 
 export class ChronologEngine {
   constructor(document, options = {}) {
-    this.document = document;
     this.runtime = options.runtime || new FormulaRuntime(options.formula);
     this.compiledPatterns = new Map();
+    this.setDocument(document);
   }
 
-  setDocument(document) {
+  setDocument(document, options = {}) {
+    const preserveRecurrence = options.preserveRecurrence === true && this.document === document;
     this.document = document;
     this.compiledPatterns.clear();
+    this.patternsForEveryFrame = [];
+    this.patternsByFrame = new Map();
+    this.relationsByFrame = new Map();
+    this.groupFrameByEvent = new Map();
+    this.framesByEvent = new Map();
+    this.calendarFrameByEvent = new Map();
+    this.explicitFactsByFrame = new Map();
+    this.explicitMaxDurationByFrame = new Map();
+    if (!preserveRecurrence) {
+      this.recurrenceSeries = new Map();
+      this.recurrenceSeriesFacts = 0;
+      this.recurrenceWindows = new Map();
+      this.recurrenceWindowFacts = 0;
+    }
+
+    for (const pattern of Object.values(document.patterns)) {
+      if (!pattern.appliesTo?.length) {
+        this.patternsForEveryFrame.push(pattern);
+        continue;
+      }
+      for (const frameId of pattern.appliesTo) {
+        const patterns = this.patternsByFrame.get(frameId) || [];
+        patterns.push(pattern);
+        this.patternsByFrame.set(frameId, patterns);
+      }
+    }
+
+    for (const relation of Object.values(document.relations)) {
+      if (relation.type !== "attachment") continue;
+      const relations = this.relationsByFrame.get(relation.frame) || [];
+      relations.push(relation);
+      this.relationsByFrame.set(relation.frame, relations);
+      const eventFrames = this.framesByEvent.get(relation.event) || new Set();
+      eventFrames.add(relation.frame);
+      this.framesByEvent.set(relation.event, eventFrames);
+      if (document.frames[relation.frame]?.traits.includes("group")
+        && !document.frames[relation.frame]?.traits.includes("importance")) {
+        this.groupFrameByEvent.set(relation.event, relation.frame);
+      }
+      if (document.frames[relation.frame]?.traits.includes("calendar")
+        && !this.calendarFrameByEvent.has(relation.event)) {
+        this.calendarFrameByEvent.set(relation.event, relation.frame);
+      }
+    }
   }
 
   validate() {
@@ -188,10 +320,168 @@ export class ChronologEngine {
   }
 
   matchingPatterns(frameId) {
-    return Object.values(this.document.patterns).filter(
-      (pattern) => pattern.enabled !== false
-        && (!pattern.appliesTo?.length || pattern.appliesTo.includes(frameId))
+    return [...this.patternsForEveryFrame, ...(this.patternsByFrame.get(frameId) || [])]
+      .filter((pattern) => pattern.enabled !== false);
+  }
+
+  eventGroupFrame(eventId) {
+    return this.groupFrameByEvent.get(eventId) || null;
+  }
+
+  eventCalendarFrame(eventId) {
+    return this.calendarFrameByEvent.get(eventId) || null;
+  }
+
+  eventFrames(eventId) {
+    return [...(this.framesByEvent.get(eventId) || [])];
+  }
+
+  refreshFrame(frameId) {
+    const affectedEvents = new Set((this.relationsByFrame.get(frameId) || []).map((relation) => relation.event));
+    for (const eventId of affectedEvents) {
+      if (this.groupFrameByEvent.get(eventId) === frameId) this.groupFrameByEvent.delete(eventId);
+      if (this.calendarFrameByEvent.get(eventId) === frameId) this.calendarFrameByEvent.delete(eventId);
+    }
+    const frame = this.document.frames[frameId];
+    if (frame?.traits.includes("group") && !frame?.traits.includes("importance")) {
+      for (const eventId of affectedEvents) this.groupFrameByEvent.set(eventId, frameId);
+    }
+    if (frame?.traits.includes("calendar")) {
+      for (const eventId of affectedEvents) this.calendarFrameByEvent.set(eventId, frameId);
+    }
+    this.explicitFactsByFrame.delete(frameId);
+    this.explicitMaxDurationByFrame.delete(frameId);
+  }
+
+  indexedExplicitFacts(frameId) {
+    const cached = this.explicitFactsByFrame.get(frameId);
+    if (cached) return cached;
+    const templateRelations = new Set(
+      this.matchingPatterns(frameId)
+        .filter((pattern) => pattern.kind === "ics-rrule")
+        .map((pattern) => pattern.templateRelation)
     );
+    const entries = [];
+    let maxDuration = Rational.parse(0);
+    for (const relation of this.relationsByFrame.get(frameId) || []) {
+      if (!relation.coordinate || templateRelations.has(relation.id)) continue;
+      const event = this.document.events[relation.event];
+      if (!event) continue;
+      const day = attachmentDay(this, relation);
+      if (!day) continue;
+      const duration = eventDurationDays(event);
+      if (duration.compare(maxDuration) > 0) maxDuration = duration;
+      entries.push({
+        day,
+        fact: {
+          kind: "explicit",
+          event,
+          relation,
+          day: day.toJSON(),
+          coordinate: relation.coordinate
+        }
+      });
+    }
+    entries.sort((left, right) => left.day.compare(right.day));
+    this.explicitFactsByFrame.set(frameId, entries);
+    this.explicitMaxDurationByFrame.set(frameId, maxDuration);
+    return entries;
+  }
+
+  recurrenceFacts(pattern, lower, upper, limit) {
+    const hasCount = pattern.rrule?.COUNT !== undefined;
+    const count = Number(pattern.rrule?.COUNT);
+    if (hasCount && (
+      !Number.isSafeInteger(count)
+      || count < 1
+      || count > MAX_CACHED_RECURRENCE_COUNT
+    )) {
+      return occurrenceFacts(this, pattern, lower, upper, limit);
+    }
+    if (hasCount) {
+      let series = this.recurrenceSeries.get(pattern.id);
+      if (series) {
+        // Map insertion order is the LRU order. Refresh hot series without
+        // allocating another copy of their generated facts.
+        this.recurrenceSeries.delete(pattern.id);
+        this.recurrenceSeries.set(pattern.id, series);
+      } else {
+        const relation = this.document.relations[pattern.templateRelation];
+        if (!relation?.coordinate) return [];
+        const base = this.coordinateDays(relation.frame, relation.coordinate);
+        const interval = BigInt(pattern.rrule?.INTERVAL || 1);
+        const frequency = String(pattern.rrule?.FREQ || "").toUpperCase();
+        const factor = frequency === "DAILY" ? 1n
+          : frequency === "WEEKLY" ? 7n
+            : frequency === "MONTHLY" ? 32n
+              : 367n;
+        const horizon = base.add(interval * BigInt(count) * factor + 367n);
+        series = occurrenceFacts(this, pattern, base, horizon).map((fact) => ({
+          day: rational(fact.day),
+          fact
+        }));
+        while (
+          this.recurrenceSeries.size
+          && this.recurrenceSeriesFacts + series.length > MAX_RECURRENCE_SERIES_FACTS
+        ) {
+          const oldest = this.recurrenceSeries.keys().next().value;
+          this.recurrenceSeriesFacts -= this.recurrenceSeries.get(oldest).length;
+          this.recurrenceSeries.delete(oldest);
+        }
+        this.recurrenceSeries.set(pattern.id, series);
+        this.recurrenceSeriesFacts += series.length;
+      }
+      const visible = [];
+      for (const entry of series) {
+        if (entry.day.compare(lower) < 0) continue;
+        if (entry.day.compare(upper) > 0) break;
+        visible.push(entry.fact);
+        if (visible.length >= limit) break;
+      }
+      return visible;
+    }
+
+    const width = 64n;
+    const firstWindow = floorDiv(lower.floor(), width);
+    const lastWindow = floorDiv(upper.floor(), width);
+    const visible = [];
+    for (let window = firstWindow; window <= lastWindow; window += 1n) {
+      const key = `${pattern.id}\u0000${window}`;
+      let entries = this.recurrenceWindows.get(key);
+      if (entries) {
+        this.recurrenceWindows.delete(key);
+        this.recurrenceWindows.set(key, entries);
+      } else {
+        const windowStart = new Rational(window * width);
+        const windowEnd = windowStart.add(width);
+        entries = occurrenceFacts(this, pattern, windowStart, windowEnd)
+          .map((fact) => ({ day: rational(fact.day), fact }))
+          .filter((entry) => entry.day.compare(windowEnd) < 0);
+        while (
+          this.recurrenceWindows.size
+          && (
+            this.recurrenceWindows.size >= MAX_RECURRENCE_WINDOWS
+            || this.recurrenceWindowFacts + entries.length > MAX_RECURRENCE_WINDOW_FACTS
+          )
+        ) {
+          const oldest = this.recurrenceWindows.keys().next().value;
+          this.recurrenceWindowFacts -= this.recurrenceWindows.get(oldest).length;
+          this.recurrenceWindows.delete(oldest);
+        }
+        // An unusually dense single window is useful for the current query but
+        // is deliberately not retained after it has been rendered.
+        if (entries.length <= MAX_RECURRENCE_WINDOW_FACTS) {
+          this.recurrenceWindows.set(key, entries);
+          this.recurrenceWindowFacts += entries.length;
+        }
+      }
+      for (const entry of entries) {
+        if (entry.day.compare(lower) < 0 || entry.day.compare(upper) > 0) continue;
+        visible.push(entry.fact);
+        if (visible.length >= limit) return visible;
+      }
+    }
+    return visible;
   }
 
   coordinateDays(frameId, value) {
@@ -250,38 +540,61 @@ export class ChronologEngine {
     return { frame, coordinate, atDays: atDays.toJSON(), values, errors };
   }
 
-  queryFacts({ frame, start, end, selection = null }) {
+  queryFacts({ frame, start, end, selection = null, limit = Infinity, includeOverlaps = false }) {
     const fromDays = this.coordinateDays(frame, start);
     const toDays = this.coordinateDays(frame, end);
     const lower = fromDays.compare(toDays) <= 0 ? fromDays : toDays;
     const upper = fromDays.compare(toDays) <= 0 ? toDays : fromDays;
+    const maxFacts = Number.isFinite(Number(limit))
+      ? Math.max(1, Math.floor(Number(limit)))
+      : Infinity;
     const facts = [];
     const errors = [];
-    const nativePatterns = this.matchingPatterns(frame).filter(
-      (pattern) => pattern.kind === "ics-rrule"
-    );
-    const templateRelations = new Set(nativePatterns.map((pattern) => pattern.templateRelation));
-
-    for (const relation of Object.values(this.document.relations)) {
-      if (relation.type !== "attachment" || relation.frame !== frame || !relation.coordinate) continue;
-      if (templateRelations.has(relation.id)) continue;
-      const day = attachmentDay(this, relation);
-      if (!day || !within(day, lower, upper)) continue;
-      const event = this.document.events[relation.event];
-      if (!event) continue;
-      facts.push({
-        kind: "explicit",
-        event,
-        relation,
-        day: day.toJSON(),
-        coordinate: relation.coordinate
-      });
+    let truncated = false;
+    const explicit = this.indexedExplicitFacts(frame);
+    const explicitLookback = includeOverlaps
+      ? this.explicitMaxDurationByFrame.get(frame) || Rational.parse(0)
+      : Rational.parse(0);
+    const explicitLower = lower.sub(explicitLookback);
+    let low = 0;
+    let high = explicit.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (explicit[middle].day.compare(explicitLower) < 0) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = low; index < explicit.length; index += 1) {
+      const entry = explicit[index];
+      if (entry.day.compare(upper) > 0) break;
+      if (
+        includeOverlaps
+        && entry.day.compare(lower) < 0
+        && entry.day.add(eventDurationDays(entry.fact.event)).compare(lower) <= 0
+      ) continue;
+      if (facts.length >= maxFacts) {
+        truncated = true;
+        break;
+      }
+      facts.push(entry.fact);
     }
 
     for (const pattern of this.matchingPatterns(frame)) {
+      if (facts.length >= maxFacts) {
+        truncated = true;
+        break;
+      }
       if (pattern.kind === "ics-rrule") {
         try {
-          facts.push(...occurrenceFacts(this, pattern, lower, upper));
+          const remaining = maxFacts === Infinity ? Infinity : maxFacts - facts.length;
+          const templateDuration = eventDurationDays(this.document.events[pattern.templateEvent]);
+          const recurrenceLower = includeOverlaps ? lower.sub(templateDuration) : lower;
+          const emitted = this.recurrenceFacts(pattern, recurrenceLower, upper, remaining)
+            .filter((fact) => (
+              rational(fact.day).compare(lower) >= 0
+              || rational(fact.day).add(eventDurationDays(fact.event)).compare(lower) > 0
+            ));
+          facts.push(...emitted.slice(0, remaining));
+          if (emitted.length >= remaining) truncated = true;
         } catch (error) {
           errors.push({ pattern: pattern.id, message: error.message });
         }
@@ -299,6 +612,10 @@ export class ChronologEngine {
         }]);
         if (!Array.isArray(emitted)) throw new TypeError("facts export must return a list");
         for (const output of emitted) {
+          if (facts.length >= maxFacts) {
+            truncated = true;
+            break;
+          }
           const virtualId = stableVirtualId(pattern.id, output.key);
           if (output.type === "event") {
             const day = rational(output.day);
@@ -355,7 +672,8 @@ export class ChronologEngine {
     }
 
     const visible = applyVirtualOverrides(this.document, facts)
-      .sort((left, right) => rational(left.day || 0).compare(rational(right.day || 0)));
+      .sort((left, right) => rational(left.day || 0).compare(rational(right.day || 0)))
+      .slice(0, maxFacts);
     return {
       frame,
       start,
@@ -363,7 +681,8 @@ export class ChronologEngine {
       fromDays: lower.toJSON(),
       toDays: upper.toJSON(),
       facts: visible,
-      errors
+      errors,
+      truncated
     };
   }
 }

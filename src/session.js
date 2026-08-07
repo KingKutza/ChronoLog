@@ -29,6 +29,48 @@ export function scaleForSpan(span) {
   return 1 + Math.log(value / DETENTS[1].span) / Math.log(DETENTS[2].span / DETENTS[1].span);
 }
 
+const PROJECTIONS = ["calendar", "wall", "lines", "radial"];
+const LENSES = ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"];
+const RADIAL_MODES = ["spiral", "concentric"];
+
+export function sanitizeSessionParameters(parameters, chronologDocument) {
+  const frames = chronologDocument?.frames || {};
+  const input = {};
+  const frame = parameters.get("frame");
+  if (frame && frames[frame]) {
+    input.activeFrame = frame;
+    input.primeFrame = frame;
+  }
+  const projection = parameters.get("projection");
+  if (PROJECTIONS.includes(projection)) input.projection = projection;
+  if (parameters.has("scale")) {
+    const scale = Number(parameters.get("scale"));
+    if (Number.isFinite(scale)) input.scale = Math.max(0, Math.min(2, scale));
+  }
+  const radialMode = parameters.get("radial");
+  if (RADIAL_MODES.includes(radialMode)) input.radialMode = radialMode;
+  return input;
+}
+
+export function minimapDragState(input) {
+  const start = Rational.parse(input.start);
+  const span = Rational.parse(input.end).sub(start);
+  const focus = Rational.parse(input.focus);
+  const fraction = Math.max(0, Math.min(1, Number(input.fraction)));
+  const positive = span.compare(0) > 0;
+  const focusFraction = positive ? focus.sub(start).div(span).toNumber() : 0.5;
+  const thumbHalf = positive ? Number(input.visibleSpan) / span.toNumber() / 2 : 0;
+  const grabbed = Math.abs(fraction - focusFraction) <= thumbHalf;
+  const drag = { start, span, grabOffset: grabbed ? fraction - focusFraction : 0 };
+  drag.focus = grabbed ? focus : minimapDragFocus(drag, fraction);
+  return drag;
+}
+
+export function minimapDragFocus(drag, fraction) {
+  const clamped = Math.max(0, Math.min(1, Number(fraction) - drag.grabOffset));
+  return drag.start.add(drag.span.mul(String(clamped)));
+}
+
 function todayDays() {
   const date = new Date();
   return new Rational(daysFromCivil(
@@ -52,11 +94,40 @@ export class ViewSession {
     this.primeFrame = input.primeFrame || this.activeFrame;
     this.activeCycle = input.activeCycle || "cycle:lunar";
     this.radialMode = input.radialMode || "spiral";
-    this.radialPast = Math.max(0, Number(input.radialPast ?? 1));
-    this.radialFuture = Math.max(0, Number(input.radialFuture ?? 1));
+    this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? 1)));
+    this.radialFuture = Math.max(0, Math.floor(Number(input.radialFuture ?? 1)));
     this.radialCycle = Rational.parse(input.radialCycle || "29.530588853");
+    this.radialDivisions = Math.max(0, Math.min(64, Math.floor(Number(input.radialDivisions ?? 0))));
+    this.radialMajorEvery = Math.max(0, Math.min(16, Math.floor(Number(input.radialMajorEvery ?? 0))));
+    this.radialMarks = ["auto", "plain", "day-night"].includes(input.radialMarks) ? input.radialMarks : "auto";
+    this.intimateBack = Math.max(0, Math.floor(Number(input.intimateBack ?? 1)));
+    this.intimateForward = Math.max(0, Math.floor(Number(input.intimateForward ?? 3)));
+    this.intimateGrain = [15, 30, 60].includes(Number(input.intimateGrain))
+      ? Number(input.intimateGrain)
+      : 15;
+    this.intimateStartHour = Math.max(0, Math.min(23, Math.floor(Number(input.intimateStartHour ?? 0))));
+    this.intimateEndHour = Math.max(this.intimateStartHour + 1, Math.min(24, Math.floor(Number(input.intimateEndHour ?? 24))));
+    this.tacticalRows = Math.max(1, Math.floor(Number(input.tacticalRows ?? 3)));
+    this.tacticalColumns = Math.max(1, Math.floor(Number(input.tacticalColumns ?? 7)));
+    this.strategicMonths = Math.max(1, Math.floor(Number(input.strategicMonths ?? 9)));
+    this.strategicMode = ["signal", "blocks", "all"].includes(input.strategicMode)
+      ? input.strategicMode
+      : "signal";
+    this.intimateZoneFill = input.intimateZoneFill ?? input.zoneFill ?? true;
+    this.tacticalZoneFill = input.tacticalZoneFill ?? input.zoneFill ?? true;
+    this.strategicZoneFill = input.strategicZoneFill ?? input.zoneFill ?? true;
+    this.wallZoneFill = input.wallZoneFill ?? input.zoneFill ?? true;
+    this.wallMonths = Math.max(1, Math.floor(Number(input.wallMonths ?? 3)));
+    this.linesMonths = Math.max(1, Math.floor(Number(input.linesMonths ?? 9)));
+    this.linesDays = Math.max(3, Math.floor(Number(input.linesDays ?? 14)));
+    this.strategicDetail = Boolean(input.strategicDetail ?? false);
+    this.wallDetail = Boolean(input.wallDetail ?? input.detail);
+    this.strategicRecordSlashes = Boolean(input.strategicRecordSlashes ?? input.recordSlashes);
+    this.wallRecordSlashes = Boolean(input.wallRecordSlashes ?? input.recordSlashes);
+    this.radialLabels = input.radialLabels !== false;
     this.selection = input.selection || null;
     this.inspector = input.inspector || null;
+    this.minimapDrag = null;
   }
 
   currentFocus() {
@@ -85,6 +156,36 @@ export class ViewSession {
     }
   }
 
+  currentLens() {
+    if (this.projection === "radial") return this.radialMode === "spiral" ? "spiral" : "radial";
+    if (this.projection !== "calendar") return this.projection;
+    if (this.scale < 0.55) return "intimate";
+    if (this.scale < 1.45) return "tactical";
+    return "strategic";
+  }
+
+  setLens(lens) {
+    if (!LENSES.includes(lens)) return;
+    if (lens === "intimate") {
+      this.setProjection("calendar");
+      this.scale = 0;
+    } else if (lens === "tactical") {
+      this.setProjection("calendar");
+      this.scale = 1;
+    } else if (lens === "strategic") {
+      this.setProjection("calendar");
+      this.scale = 2;
+    } else if (lens === "spiral") {
+      this.radialMode = "spiral";
+      this.setProjection("radial");
+    } else if (lens === "radial") {
+      this.radialMode = "concentric";
+      this.setProjection("radial");
+    } else {
+      this.setProjection(lens);
+    }
+  }
+
   toggleShared(value) {
     const current = this.currentFocus();
     this.sharedFocus = Boolean(value);
@@ -93,7 +194,12 @@ export class ViewSession {
   }
 
   visibleSpan() {
-    if (this.projection === "wall") return this.scale < 1 ? 31 : this.scale < 1.65 ? 92 : 183;
+    const lens = this.currentLens();
+    if (lens === "intimate") return this.intimateBack + this.intimateForward + 1;
+    if (lens === "tactical") return this.tacticalRows * this.tacticalColumns;
+    if (lens === "strategic") return this.strategicMonths * 30.4375;
+    if (lens === "wall") return this.wallMonths * 30.4375;
+    if (lens === "lines") return this.linesDays;
     if (this.projection === "radial") {
       return this.radialCycle.mul(this.radialPast + this.radialFuture + 1).toNumber();
     }
@@ -145,6 +251,30 @@ export class ViewSession {
       radialPast: this.radialPast,
       radialFuture: this.radialFuture,
       radialCycle: this.radialCycle.toJSON(),
+      radialDivisions: this.radialDivisions,
+      radialMajorEvery: this.radialMajorEvery,
+      radialMarks: this.radialMarks,
+      intimateBack: this.intimateBack,
+      intimateForward: this.intimateForward,
+      intimateGrain: this.intimateGrain,
+      intimateStartHour: this.intimateStartHour,
+      intimateEndHour: this.intimateEndHour,
+      tacticalRows: this.tacticalRows,
+      tacticalColumns: this.tacticalColumns,
+      strategicMonths: this.strategicMonths,
+      strategicMode: this.strategicMode,
+      intimateZoneFill: this.intimateZoneFill,
+      tacticalZoneFill: this.tacticalZoneFill,
+      strategicZoneFill: this.strategicZoneFill,
+      wallZoneFill: this.wallZoneFill,
+      wallMonths: this.wallMonths,
+      linesMonths: this.linesMonths,
+      linesDays: this.linesDays,
+      strategicDetail: this.strategicDetail,
+      wallDetail: this.wallDetail,
+      strategicRecordSlashes: this.strategicRecordSlashes,
+      wallRecordSlashes: this.wallRecordSlashes,
+      radialLabels: this.radialLabels,
       selection: this.selection
     };
   }

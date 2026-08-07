@@ -45,7 +45,8 @@ bin/
 
 ### Data Privacy / Testing ###
 *.ics
-*.icf
+*.chronolog
 
 ### Working machinery ###
 local-worktrees/
+.claude/
