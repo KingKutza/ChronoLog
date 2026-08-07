@@ -1,19 +1,17 @@
 # Fixtures
 
-Test data is **generated, never committed** — the repo stores code and repo
-stuff, not data. `*.ics` is universally gitignored, no exceptions.
+Chronolog fixtures are compact model documents. They are not pre-expanded bags
+of calendar occurrences.
 
 ```sh
-node fixtures/gen-celestial.js     # writes fixtures/celestial.ics (stays untracked)
-node fixtures/verify-celestial.js  # sanity-checks the output
+node fixtures/gen-celestial.js
+node fixtures/verify-celestial.js
 ```
 
-`celestial.ics` — 126 synthetic celestial events, 2025–2027: new moons
-(UTC-timed; radial cycle anchors), full moons, actual eclipses,
-solstices/equinoxes, meteor shower peaks, perihelion/aphelion. No RRULEs —
-every occurrence explicit, so cycles have honest variable lengths.
-CATEGORIES per type (Lunar/Solar/Meteor/Eclipse/Orbit) exercise group
-seeding from a second calendar.
+`celestial.chronolog.json` contains a small Earth–Moon–Sun mean-orbit pattern.
+The same constants and formula answer state queries and emit lunar phase facts
+for any requested window, including remote and negative years. The fixture is
+exact to its stored model; it is intentionally not a physical ephemeris.
 
-Personal calendar exports also live untracked in the working directory —
-same rule protects them.
+Personal `*.ics` exports remain untracked. The legacy generated
+`fixtures/celestial.ics` is no longer used.

@@ -1,87 +1,111 @@
-# Pocket Instrument — Handoff
-**Status:** r1, working, shipped under deadline 2026-08-06. Companion file: `pocket-instrument.html` (single file, no dependencies, offline after load).
-**Lineage:** Field expedient descended from the Attention Instrument (canon at r2, `DESIGN_THESIS.md`, chat "Multi-scale calendar visualization design"). This is **not** the instrument. It is the first artifact in the project where ontology and renderer are actually separate layers, which makes it the instrument's proving ground, not its demo.
-**Reading key (inherited):** RATIFIED is settled. PROVISIONAL ships but awaits a ruling. OPEN is undesigned.
+# Chronolog Pocket Instrument
 
----
+**Status:** model-first redesign, August 2026.
 
-## 1. Origin and diagnosis
+## Run and verify
 
-Don's physical year-wall ran out of room; he folded it, patched it with printed month sheets, and — leaving for a week OOO — photographed it, because the photo beat Outlook mobile. Two failed responses preceded r1 and their failure modes are doctrine now:
+The application is dependency-free ES modules served locally:
 
-1. **Transcription is forbidden.** An early build hand-transcribed the wall photo into an events array. Low fidelity, sacralized accidents of laminate inventory, replaced a photo with a worse photo. Dead.
-2. **The defect is severance, not display.** The problem was never that the photo doesn't work; it's that a photo was *necessary*. Outlook holds the data with an unusable projection; the wall held the projection with no data feed. RATIFIED: **data from the system of record, projection as a setting, transcription abolished.** The renderer eats ICS; fidelity is Outlook's problem.
+```sh
+npm start
+# open http://127.0.0.1:4173/
 
-## 2. Constitutional rulings from this session (Chronolog material — feeds canon, not just this file)
-
-This session reopened the Chronolog vs. Binary Grid substrate debate and produced rulings that belong in the main canon's next revision:
-
-- **Mindset assignment (PROVISIONAL, leaning ratify):** Chronolog constitution in the ontology; KISS constitution in the renderer. Restates the July 30 ruling "one frame rendered well, all frames representable" as a layer assignment. Under this, the Binary Grid demotes from constitutional axiom (C3) to *one quantization setting of the wall-time lens*. Nothing is lost; the 128 becomes a saved game.
-- **The fundamental object (PROVISIONAL):** not an n-dimensional space — a **directed metric multigraph**. Vertices, edges, optional edge lengths, quotients and gluings permitted, no isometry requirement. Line = path; circle = quotient; cut/unwrap = universal cover; variable time-flow = second measure on edges. **No acyclicity axiom** — Don's ruling, conceded: cycles permitted in data, detected in view (a schema that can't hold a deadlock can't show one).
-- **The two-anchor bond = nontrivial holonomy (RATIFIED as insight):** gluing lines A and B at two anchor pairs with unequal separations creates a cycle whose arcs disagree; duration becomes path-dependent. This *is* the cross-timezone handshake: each party's sane rendering is their own arc; the disagreement is holonomy, rendered honestly, not a bug. Chronolog reached its handshake math in this session.
-- **The embedding law (PROVISIONAL):** "settings-not-code" holds exactly as far as the view stays inside a canonical-embedding regime (path, cycle); crossing regimes is honest code. Consistency, faithfulness, and *renderability* are three separate requirements; Chronolog v1 died at the third.
-- **Empirical inventory (from the wall photo):** every view Don demonstrably lives with daily is path or cycle — a cut or a wrap of one metric line. The tension flow (todos / float space, a poset/graph, no canonical embedding) was entirely **undrawn** on the wall. Open question standing: is that the poset admitting it doesn't belong on a time instrument, or the largest unserved use case in the design?
-
-## 3. Architecture of r1
-
-One HTML file, three layers, deliberately severable:
-
-```
-ICS text ──▶ parseICS() ──▶ normalized events ──▶ expand(events, window) ──▶ {isoDay → [instances]}
-                                                                                    │
-                                                              lens renderers ◀──────┘
-                                                   (intimate | tactical | strategic[path|cycle-wrap])
+npm test
+npm run check
+node fixtures/verify-celestial.js
 ```
 
-**Normalized event:** `{uid, title, start{y,mo,d,h,mi,dateOnly}, end, dateOnly, dur(min), rrule, exdates:Set<iso>, recurrenceId, status}`. Naive local clock time throughout — TZID params are stripped, clock time taken as written. Adequate for one-timezone life; it is exactly the assumption holonomy support will have to remove (§6).
+`pocket-instrument.html` is now the small application shell. Source lives in
+`src/`; it must be served over HTTP because browsers do not consistently permit
+module imports from `file:` URLs.
 
-**expand()** projects events onto a day-indexed map within a window. Instances carry `{title, dateOnly, first, cancelled, h, mi, dur}` — clock time only on first day. Doctrine honored: RECURRENCE-ID overrides suppress the generated instance and stand as their own events (**actuals over defaults**); EXDATEs excluded; CANCELLED rendered struck-through, not hidden (a cancellation is a fact, not an absence).
+## Constitutional model
 
-**Lens state is a flat object** — `{lens, iDate, tStart, tDays, sFromY, sFromM, sSpan, sWrap, slashes, events}` — every view difference is a state difference. This is the settings-not-code claim made literal; guard it.
+The saved `chronolog/1` JSON object has three domain nodes:
 
-## 4. Lens ladder as implemented
+- **Event** — intrinsic traits, payload, and typed magnitudes.
+- **Frame** — set, line, circle, graph, calendar, group, quantity system, or
+  composed timeline context.
+- **Pattern** — constants plus a pure `chronolog-formula/1` module.
 
-| Lens | Straight view | Grain | Navigation | Notes |
-|---|---|---|---|---|
-| **Intimate** | one day, vertical hour rail | hour/minute | ‹day / date / day› / today | Waking focus 7–21 as *focus not domain* — rail auto-extends to cover actual claims. Timed events: position = clock, height = duration (min 26px). Overlaps: greedy lane assignment, equal split. All-day claims in a band above the rail. Live coral now-line when viewing today. |
-| **Tactical** | 7 or 14 day columns | day, time-ordered within | ‹week / this week / week› | Past days **dimmed, not slashed** — ruling: the slash is a strategic-grain record mark; at tactical grain a spent day stays legible. |
-| **Strategic** | the path: months as rows × 31 day columns | day | from-month + span (1–18) | Weekend banding, today outline, auto record-slashes on past days (toggle). **Cycle is a wrap option inside Strategic** (`sWrap`), per Don's ruling this session: same window quotiented by 7, Monday-start; useful as an option, never primary. |
+Stable **Relation** records attach Events to Frames or compose Frames. Tasks and
+terminators are zero-duration Events with traits and relation roles, not new
+root types. Pattern output is virtual until a stable generated ID is suppressed
+and explicitly replaced.
 
-Not implemented, on purpose: the roll law (these are fixed windows, not a lattice with pans), warp/skew within a lens, detents between the named lenses, amplitude, density, groups. r1 is **detents without the warp** — three straight views. That's the honest gap to the real instrument.
+Coordinates are sparse nested level/value pairs with exact numeric strings.
+Frames define their own nesting and may reference formula exports for conversion
+and projection. Gregorian conversion uses arbitrary-size integers rather than
+JavaScript `Date`.
 
-## 5. Parser status and test record
+Lens, scale, focus, minimap, and inspector state live in `ViewSession`, never in
+the canonical document.
 
-Tested in Node against synthetic Outlook-style exports before shipping (this session's transcript has the harness; recreate as `parser.js` + `test.js` by extracting the script block).
+## Formula engine
 
-**Covered and verified:** line unfolding (CRLF + leading whitespace); VEVENT extraction; DTSTART/DTEND in DATE and DATE-TIME forms with or without TZID/Z; SUMMARY unescaping; all-day spans with exclusive DTEND (Aug 10 → DTEND Aug 15 renders Aug 10–14); multi-day timed spans; RRULE FREQ=WEEKLY with INTERVAL + BYDAY (the biweekly-Monday case), DAILY, MONTHLY (BYMONTHDAY or DTSTART's day), YEARLY; UNTIL and COUNT; EXDATE (comma lists); RECURRENCE-ID override replacing its generated instance; window clipping including first-occurrence-at-window-edge.
+`src/formula.js` parses and interprets a pure expression language. It never uses
+`eval` or `Function`. Modules support constants, named functions, records,
+lists, comprehensions, exact rationals, and deterministic transcendental math.
+Host constructors, prototype access, ambient globals, network, filesystem,
+clock, DOM, and randomness are inaccessible. Fuel and output limits bound each
+query.
 
-**Two bugs found and fixed in testing — do not reintroduce:** (1) first occurrence skipped when comparing loop day (midnight) against DTSTART (clock time) — compare at day granularity (`s0`); (2) recurring pushes not clipped to window start — `push()` takes the date and range-checks.
+Patterns export:
 
-**Known parser gaps (OPEN, roughly priority order):**
-- BYDAY with ordinals (`2MO` = second Monday) — parsed as plain `MO`; monthly-by-weekday patterns will land on the wrong day. Most likely real-world failure. Fix in `parseRRule` + MONTHLY branch.
-- BYSETPOS, WKST, BYMONTH, RDATE — unhandled.
-- COUNT semantics approximate: overrides/exdates increment `made`, matching common Outlook behavior but not audited against RFC 5545 edge cases.
-- True timezone handling: TZID stripped everywhere. A meeting entered in another zone renders at its foreign clock time.
-- VTIMEZONE blocks ignored (harmless — they contain no events).
-- Multi-day *recurring* events emit first day only.
+```text
+state(context) -> typed state values
+facts(context) -> virtual frames, events, or relations
+```
 
-## 6. Bake mechanism
+`fixtures/celestial.chronolog.json` is a compact Earth–Moon–Sun mean-orbit
+pattern. It produces state and lunar phase facts at query time for remote and
+negative years; no VEVENT horizon exists.
 
-`Bake static copy` serializes `{events, settings}` as JSON into the `/*DATA*/…/*ENDDATA*/` markers via regex on `document.documentElement.outerHTML`, downloads as `pocket-wall-baked.html`. Baked copy boots from `EMBEDDED`, hides the feed panel, opens at the lens/anchors it was baked with. `</script` in payload is escaped. **If you rename or reformat the DATA markers, update the bake regex or baking silently breaks.** No localStorage anywhere — state lives in the file or in memory, nothing else. Keep it that way; it's what makes the artifact durable and inspectable.
+## ICS and saving
 
-## 7. Next steps (proposed order)
+Chronolog JSON is canonical. The browser autosaves after the user grants a file
+handle and shows dirty/saving/error state; download is the fallback.
 
-1. **Ordinal BYDAY** (`2MO`, `-1FR`) — the highest-probability real-Outlook breakage.
-2. **Roll law, minimal form:** convert each lens's fixed window into a pan over the continuous day-line (swipe/drag = translate anchor; detents = named rests). This is the single biggest step from "three views" toward "one instrument."
-3. **Test against a real Outlook export.** Synthetic coverage is good; Outlook's actual emissions (X- properties, folding habits, VTIMEZONE bulk, attendee noise) are the truth. Expect SUMMARY prefixes like "Canceled:" as text rather than STATUS in some paths.
-4. **Refresh ergonomics:** a "re-feed" affordance on baked copies (unhide feed panel) so a stale bake updates in two actions.
-5. **Amplitude, first dose:** even a single-bit `busy/tentative` → render-weight mapping would let the strategic path stop rendering all claims equal. TRANSP/X-MICROSOFT-CDO-BUSYSTATUS are already in the ICS, currently discarded.
-6. **The tension flow decision** (§2, last bullet) — whether float/todo items enter this artifact at all. If yes, they are the first non-metric citizens and force the first hand-built layout, per the embedding law. Do not let them in casually.
+ICS is an adapter:
 
-## 8. Invariants — violate knowingly or not at all
+- VCALENDAR becomes a calendar Frame.
+- VEVENT becomes an Event and placement Relation.
+- VTODO becomes a task Event with distinct observed/completed Relations.
+- RRULE becomes a Pattern evaluated lazily.
+- EXDATE and RECURRENCE-ID become suppressions and replacements.
+- Unknown properties, components, VTIMEZONE, VALARM, and parameters survive
+  export.
 
-- No transcription. If data enters this system by a human retyping a display, the design has failed again.
-- Data layer never assumes one master timeline (schema-level Chronolog peerage), even while every shipped renderer is wall-time-first.
-- Actuals over defaults; jitter is information; cancellations render, they don't vanish.
-- Settings-not-code within an embedding regime; honest code at regime seams.
-- Single file, zero dependencies, fully offline. The artifact must survive an airplane.
+Matching UIDs produce staple suggestions but never merge identities. Formula
+patterns export only over the visible/selected finite window, while unchanged
+native RRULEs remain structural.
+
+## Instrument interaction
+
+The page is a fixed full-viewport canvas with no document scrolling:
+
+- Scale rail: continuous scale with Intimate, Tactical, and Strategic detents.
+- Projection dial: calendar, wall, topology/lines, and radial.
+- Minimap: surrounding facts, focus playhead, and draggable viewport.
+- Shared focus: on by default; projection-local focus is opt-in.
+
+Intimate wheel motion rolls through midnight. Tactical has three equal-height
+rows. Strategic and Wall fill the viewport. Lines use calendar/timeline Frames
+as the core lines; groups only annotate events. Radial defaults to one inward,
+one current, and one outward turn; wheel motion travels time, previous/next
+cycle buttons work in both variants, and past/future extent changes
+independently.
+
+Click or drag calendar space to create an Event. The responsive inspector edits
+Events, Frames, and Patterns. All model changes use command-based undo/redo
+before autosave.
+
+## Important boundaries
+
+- The celestial seed is exact to its stored model, not a physical ephemeris.
+- Native desktop binaries and network synchronization are future shells around
+  the browser-independent engine.
+- The old baked `{events, settings}` HTML payload is not canonical. Reimport its
+  original ICS source.
+- Personal `*.ics` files and GUI reference images are user data; do not alter or
+  commit them accidentally.

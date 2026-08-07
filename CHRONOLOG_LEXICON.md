@@ -2,6 +2,11 @@
 
 **What this is:** an inventory of ideas in circulation — vocabulary, sketches, and visual directions from every phase of the project. **Nothing here is a requirement or a settled decision.** The project is in a deliberate exploratory phase; documents from any single session (including this one) tend to overclaim settledness. This file exists so ideas survive artifact sweeps, not to bind future work.
 
+**Current implementation note (August 2026):** the model-first redesign in
+`POCKET_INSTRUMENT_HANDOFF.md` supersedes r4 storage, finite celestial fixtures,
+and tab-based lens mechanics. The historical entries below remain an idea and
+provenance inventory.
+
 **Provenance map:** the project has passed through at least four bodies: a .NET/C# incarnation (only fossil: dead `.vscode` configs, pre-git-history), the Java/JavaFX scaffold (swept from the working tree; lives at git tag of `main` history and branch `codex/implement-gui-mockup-for-tests` = local `pr-2-gui-mockup`, commit `a3c9bdb`), the concept mockups in `GUI_Mockup/`, and the current single-file HTML artifact (`pocket-instrument.html`, see `POCKET_INSTRUMENT_HANDOFF.md`).
 
 ---
