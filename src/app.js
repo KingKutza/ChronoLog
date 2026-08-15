@@ -101,6 +101,7 @@ let lensControlsSignature = "";
 const viewScroll = new Map();
 let pendingIntimateRebase = null;
 let provisionalEvent = null;
+let documentLoading = true;
 
 const store = new AutosaveStore({
   onStatus(status) {
@@ -154,7 +155,7 @@ function reconcileSession() {
 }
 
 function context() {
-  return { document: chronolog, engine, session };
+  return { document: chronolog, engine, session, loading: documentLoading };
 }
 
 function scheduleRender() {
@@ -2717,9 +2718,12 @@ async function loadWorkspaceDocument() {
   } catch (error) {
     store.attach(chronolog, LOCAL_WORKSPACE_TARGET);
     toast(`Workspace autoload unavailable: ${error.message}`, true);
+  } finally {
+    documentLoading = false;
   }
 }
 
+render();
 await loadWorkspaceDocument();
 const validation = validateDocument(chronolog);
 if (!validation.valid) toast(validation.errors.join(" · "), true);
