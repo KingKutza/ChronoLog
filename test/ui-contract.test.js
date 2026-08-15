@@ -171,16 +171,18 @@ test("event creation and editing use scoped deltas and expose calendar-language 
 });
 
 test("calendar lenses request overlaps, split duration spans, and radial offers useful fixed cycles", async () => {
-  const [app, projections] = await Promise.all([
+  const [app, projections, radial] = await Promise.all([
     readFile("src/app.js", "utf8"),
-    readFile("src/projections.js", "utf8")
+    readFile("src/projections.js", "utf8"),
+    readFile("src/radial.js", "utf8")
   ]);
   assert.match(projections, /includeOverlaps: true/);
   assert.match(projections, /segmentStartMinute/);
   assert.match(projections, /segmentEndMinute/);
-  for (const label of ["Day", "Work week", "Week", "Calendar month (mean)", "Quarter (mean)", "Year (mean)"]) {
-    assert.match(app, new RegExp(`title: "${label.replace(/[()]/g, "\\$&")}"`));
+  for (const label of ["Day", "Work week", "Week", "Month (fixed mean", "Quarter (fixed mean", "Year (fixed mean"]) {
+    assert.match(radial, new RegExp(`title: "${label.replace(/[()]/g, "\\$&")}`));
   }
+  assert.match(app, /fixedCycleDays\(frame\.period\)/);
 });
 
 test("lens rerenders preserve internal scroll and minimap range", async () => {
@@ -264,6 +266,9 @@ test("radial uses whole-cycle scrolling, populated calendar-group bands, collisi
   assert.match(projections, /radial-noon-tick/);
   assert.match(app, /ticks \(0 auto\)/);
   assert.match(app, /bold every \(0 auto\)/);
+  assert.match(projections, /dataset\.radialState/);
+  assert.match(projections, /radial-empty-ring/);
+  assert.match(projections, /Dense window · showing the first 350 events/);
 });
 
 test("interaction refinements expose continuous intimate scroll, tactical shift scroll, delete, and frame-owned importance", async () => {
