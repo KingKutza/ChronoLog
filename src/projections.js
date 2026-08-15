@@ -9,6 +9,7 @@ import {
   formatCivil,
   levelValue
 } from "./exact.js";
+import { radialGuideSettings, radialRenderState } from "./radial.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -960,16 +961,6 @@ function radialEventLabel(layer, fact, x, y, labels, anchor = "start") {
   layer.append(label);
 }
 
-function radialGuideSettings(session) {
-  const cycleDays = session.radialCycle.toNumber();
-  const divisions = session.radialDivisions || (cycleDays >= 5 ? Math.max(1, Math.round(cycleDays)) : 24);
-  const majorEvery = session.radialMajorEvery
-    || (cycleDays >= 20 ? 7 : cycleDays >= 5 ? 1 : Math.max(1, Math.round(divisions / 4)));
-  const dayNight = session.radialMarks === "day-night"
-    || (session.radialMarks === "auto" && (cycleDays <= 2 || cycleDays >= 20));
-  return { cycleDays, divisions, majorEvery, dayNight };
-}
-
 function currentDays() {
   const now = new Date();
   return new Rational(daysFromCivil(
@@ -1003,6 +994,7 @@ function renderRadial(target, context) {
     ? session.currentFocus().add(cycle.mul(session.radialFuture + 0.5))
     : session.currentFocus().add(cycle.div(2));
   const result = queryFacts(context, session.activeFrame, start, end, 350);
+  const renderState = radialRenderState(result.facts.length, result.truncated);
   const radialLabels = [];
   const labelLayer = svgElement("g", { class: "radial-label-layer" });
   const svg = svgElement("svg", {
@@ -1015,6 +1007,7 @@ function renderRadial(target, context) {
   svg.dataset.dropEnd = end.toJSON();
   svg.dataset.dropKind = "radial";
   svg.dataset.radialMode = session.radialMode;
+  svg.dataset.radialState = renderState;
   svg.append(svgElement("circle", {
     cx, cy, r: 54, fill: "#f5efe2", stroke: "#bdb19e", "stroke-width": 2
   }));
@@ -1151,6 +1144,11 @@ function renderRadial(target, context) {
     const outer = 278;
     const spacing = Math.min(48, 210 / Math.max(1, bands.length));
     const ringRadius = (index) => outer - (bands.length - 1 - index) * spacing;
+    if (bands.length === 0) {
+      svg.append(svgElement("circle", {
+        cx, cy, r: outer, fill: "none", class: "radial-empty-ring"
+      }));
+    }
     for (let ring = 0; ring < bands.length; ring += 1) {
       const radius = ringRadius(ring);
       svg.append(svgElement("circle", {
@@ -1201,6 +1199,15 @@ function renderRadial(target, context) {
         }
       }
     }
+  }
+  if (renderState !== "ordinary") {
+    const status = svgElement("text", {
+      x: cx, y: height - 24, "text-anchor": "middle", class: "radial-state-label"
+    });
+    status.textContent = renderState === "empty"
+      ? "No events in this cycle"
+      : "Dense window · showing the first 350 events";
+    svg.append(status);
   }
   svg.append(labelLayer);
   target.append(svg);
