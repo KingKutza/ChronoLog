@@ -31,6 +31,7 @@ import {
   renderMinimap,
   renderProjection
 } from "./projections.js";
+import { FIXED_RADIAL_CYCLES, fixedCycleDays, resolveRadialCycle } from "./radial.js";
 import {
   DETENTS,
   ViewSession,
@@ -143,6 +144,12 @@ function reconcileSession() {
     session.primeFrame = session.activeFrame;
   }
   if (!chronolog.frames[session.primeFrame]) session.primeFrame = session.activeFrame;
+  const cycles = radialCycleOptions();
+  const activeCycle = resolveRadialCycle(cycles, session.activeCycle);
+  if (activeCycle) {
+    session.activeCycle = activeCycle.id;
+    session.radialCycle = activeCycle.period;
+  }
   const open = session.inspector;
   if (!open?.id) return;
   const pool = open.type === "event"
@@ -558,30 +565,13 @@ function openThemeEditor() {
   openInspector("Color theme", form);
 }
 
-function magnitudeDays(magnitude) {
-  const factors = { week: "7", day: "1", hour: "1/24", minute: "1/1440", second: "1/86400" };
-  let total = Rational.parse(0);
-  for (const part of magnitude?.value?.levels || []) {
-    if (factors[part.level] !== undefined) {
-      total = total.add(Rational.parse(part.value).mul(String(factors[part.level])));
-    }
-  }
-  return total;
-}
-
 function radialCycleOptions() {
-  const fixed = [
-    { id: "fixed:day", title: "Day", days: "1" },
-    { id: "fixed:work-week", title: "Work week", days: "5" },
-    { id: "fixed:week", title: "Week", days: "7" },
-    { id: "fixed:month", title: "Calendar month (mean)", days: "243495/8000" },
-    { id: "fixed:quarter", title: "Quarter (mean)", days: "146097/1600" },
-    { id: "fixed:year", title: "Year (mean)", days: "146097/400" }
-  ];
   const documentCycles = Object.values(chronolog.frames)
-    .filter((frame) => frame.traits.includes("cycle"))
-    .map((frame) => ({ id: frame.id, title: frame.title, days: magnitudeDays(frame.period).toJSON() }));
-  return [...fixed, ...documentCycles];
+    .filter((frame) => frame.traits?.includes("cycle"))
+    .map((frame) => ({ frame, period: fixedCycleDays(frame.period) }))
+    .filter(({ period }) => period)
+    .map(({ frame, period }) => ({ id: frame.id, title: frame.title, days: period.toJSON() }));
+  return [...FIXED_RADIAL_CYCLES, ...documentCycles];
 }
 
 function selectCycle(cycleId) {
