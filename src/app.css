@@ -96,11 +96,6 @@ button {
 
 #hud::-webkit-scrollbar { display: none; }
 #active-calendar { min-width: 0; flex: 1 1 80px; }
-#save-status { width: 19px; min-height: 19px; padding: 5px; overflow: hidden; color: transparent; }
-#save-status::before { color: var(--green); }
-#save-status[data-state="dirty"]::before { color: #a46b12; }
-#save-status[data-state="saving"]::before { color: var(--blue); }
-#save-status[data-state="error"]::before { color: var(--now); }
 
 #brand {
   flex: none;
