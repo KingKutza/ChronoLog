@@ -197,14 +197,19 @@ test("lens rerenders preserve internal scroll and minimap range", async () => {
   assert.match(minimap, /previous\.start/);
 });
 
-test("Lines uses one calendar query partitioned onto Prime and group side lines", async () => {
+test("Lines uses the active leading calendar and explicitly selected companions", async () => {
   const projections = await readFile("src/projections.js", "utf8");
   const lines = sourceSlice(projections, "function renderSimpleLines", "function polar");
   assert.match(lines, /Prime/);
-  assert.match(lines, /composition/);
+  assert.match(lines, /lineFramePlan\(context\.document, context\.session\.activeFrame\)/);
   assert.match(lines, /staple/);
   assert.match(lines, /Math\.sin\(Math\.PI \* p\)/);
-  assert.equal((lines.match(/queryFacts\(/g) || []).length, 1);
+  assert.match(lines, /dataset\.linesState/);
+  assert.match(lines, /Loading timeline data/);
+  assert.match(lines, /No events in this window/);
+  assert.match(lines, /context\.session\.window\(\)/);
+  assert.match(lines, /bindFact\(dot, fact\)/);
+  assert.doesNotMatch(lines, /context\.document\s*=/);
 });
 
 test("workspace documents use a custom extension with autoload and attached autosave", async () => {
