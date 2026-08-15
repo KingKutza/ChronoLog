@@ -68,3 +68,14 @@ test("radial guide settings survive a view-session round trip", () => {
   assert.equal(restored.radialMajorEvery, 7);
   assert.equal(restored.radialMarks, "day-night");
 });
+
+test("the leading frame is canonical and survives a view-session round trip", () => {
+  const session = new ViewSession({ activeFrame: "calendar:first", primeFrame: "calendar:legacy" });
+  session.setLeadingFrame("calendar:second");
+  const saved = session.toJSON();
+  const restored = new ViewSession(saved);
+  assert.equal(restored.activeFrame, "calendar:second");
+  assert.equal(saved.activeFrame, "calendar:second");
+  assert.equal("primeFrame" in saved, false);
+  assert.equal("primeFrame" in restored, false);
+});

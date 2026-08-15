@@ -39,7 +39,6 @@ export function sanitizeSessionParameters(parameters, chronologDocument) {
   const frame = parameters.get("frame");
   if (frame && frames[frame]) {
     input.activeFrame = frame;
-    input.primeFrame = frame;
   }
   const projection = parameters.get("projection");
   if (PROJECTIONS.includes(projection)) input.projection = projection;
@@ -91,7 +90,6 @@ export class ViewSession {
       Object.entries(input.localFocus || {}).map(([key, value]) => [key, Rational.parse(value)])
     );
     this.activeFrame = input.activeFrame || "calendar:personal";
-    this.primeFrame = input.primeFrame || this.activeFrame;
     this.activeCycle = input.activeCycle || "cycle:lunar";
     this.radialMode = input.radialMode || "spiral";
     this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? 1)));
@@ -140,6 +138,10 @@ export class ViewSession {
     const next = Rational.parse(value);
     if (this.sharedFocus) this.focusDays = next;
     else this.localFocus[this.projection] = next;
+  }
+
+  setLeadingFrame(frameId) {
+    if (typeof frameId === "string" && frameId) this.activeFrame = frameId;
   }
 
   move(days) {
@@ -245,7 +247,6 @@ export class ViewSession {
         Object.entries(this.localFocus).map(([key, value]) => [key, value.toJSON()])
       ),
       activeFrame: this.activeFrame,
-      primeFrame: this.primeFrame,
       activeCycle: this.activeCycle,
       radialMode: this.radialMode,
       radialPast: this.radialPast,

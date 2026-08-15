@@ -74,6 +74,30 @@ test("history changes reconcile dangling inspector and frame state", async () =>
   assert.match(reconcile, /closeInspector\(\)/);
 });
 
+test("an open Frames panel and every projection share the toolbar leading frame", async () => {
+  const [app, projections] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/projections.js", "utf8")
+  ]);
+  const selection = sourceSlice(app, "function selectLeadingFrame", "function updateChrome");
+  assert.match(selection, /session\.setLeadingFrame\(frameId\)/);
+  assert.match(selection, /refreshFramesPanel\(\)/);
+  assert.match(selection, /scheduleRender\(\)/);
+  const toolbar = sourceSlice(app, 'byId("active-calendar").addEventListener', 'byId("shared-focus").addEventListener');
+  assert.match(toolbar, /selectLeadingFrame\(event\.target\.value\)/);
+  const viewCard = sourceSlice(app, "function frameViewCard", "function openObjectBrowser");
+  assert.match(viewCard, /leadingSelect\.id = "frame-leading-select"/);
+  assert.match(viewCard, /selectLeadingFrame\(leadingSelect\.value\)/);
+  assert.match(viewCard, /const display = active\?\.display \|\| \{\}/);
+  assert.match(viewCard, /const activeFrameId = session\.activeFrame/);
+  assert.match(viewCard, /documentValue\.frames\[activeFrameId\]/);
+  assert.match(viewCard, /target\.display = \{ \.\.\.\(target\.display \|\| \{\}\), overlays: \[\.\.\.overlays\] \}/);
+  const refresh = sourceSlice(app, "function refreshFramesPanel", "function openStapleSuggestions");
+  assert.match(refresh, /current\.replaceWith\(frameViewCard\(\)\)/);
+  assert.doesNotMatch(app, /primeFrame/);
+  assert.doesNotMatch(projections, /primeFrame/);
+});
+
 test("openInspector only accepts DOM nodes", async () => {
   const app = await readFile("src/app.js", "utf8");
   const inspectorSource = sourceSlice(app, "function openInspector", "function escapeHTML");
@@ -230,12 +254,13 @@ test("frame manager exposes contextual calendar inclusion, group visibility, str
     assert.match(manager, new RegExp(phrase));
   }
   const browser = sourceSlice(app, "function openObjectBrowser", "function openStapleSuggestions");
+  const viewCard = sourceSlice(app, "function frameViewCard", "function openObjectBrowser");
   assert.match(browser, /Current lens/);
-  assert.match(browser, /Shown with/);
-  assert.match(browser, /Include calendars and lines/);
-  assert.match(browser, /Automatic/);
-  assert.match(browser, /Strategic: promote/);
-  assert.doesNotMatch(browser, /Layer mode/);
+  assert.match(viewCard, /Shown with/);
+  assert.match(viewCard, /Include calendars and lines/);
+  assert.match(viewCard, /Automatic/);
+  assert.match(viewCard, /Strategic: promote/);
+  assert.doesNotMatch(viewCard, /Layer mode/);
 });
 
 test("empty drag creates an interval, shift-drag pans, and untouched drafts are discarded", async () => {

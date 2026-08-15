@@ -88,7 +88,6 @@ let engine = new ChronologEngine(chronolog);
 const initialFrame = calendarFrames(chronolog)[0]?.id || "";
 const session = new ViewSession({
   activeFrame: initialFrame,
-  primeFrame: initialFrame,
   projection: "calendar",
   scale: 1,
   radialMode: "spiral",
@@ -138,11 +137,10 @@ function replaceDocument(next, storageTarget = {}) {
 }
 
 function reconcileSession() {
-  if (!chronolog.frames[session.activeFrame]) {
-    session.activeFrame = calendarFrames(chronolog)[0]?.id || "";
-    session.primeFrame = session.activeFrame;
-  }
-  if (!chronolog.frames[session.primeFrame]) session.primeFrame = session.activeFrame;
+  const leadingFrame = chronolog.frames[session.activeFrame]
+    ? session.activeFrame
+    : calendarFrames(chronolog)[0]?.id || "";
+  session.setLeadingFrame(leadingFrame);
   const open = session.inspector;
   if (!open?.id) return;
   const pool = open.type === "event"
@@ -220,6 +218,17 @@ function updateCalendarSelect() {
     });
   }
   select.value = session.activeFrame;
+}
+
+function selectLeadingFrame(frameId) {
+  if (!calendarFrames(chronolog).some((frame) => frame.id === frameId)) return;
+  session.setLeadingFrame(frameId);
+  const matchingCycle = Object.values(chronolog.frames).find(
+    (frame) => frame.traits.includes("cycle") && frame.calendar === session.activeFrame
+  );
+  if (matchingCycle) selectCycle(matchingCycle.id);
+  refreshFramesPanel();
+  scheduleRender();
 }
 
 function updateChrome() {
@@ -475,6 +484,7 @@ function closeInspector() {
 
 function dismissInspector() {
   inspector.classList.remove("open");
+  delete inspector.dataset.objectBrowser;
   session.inspector = null;
 }
 
@@ -496,9 +506,11 @@ function resolveProvisionalDraft(nextEventId = null) {
   return true;
 }
 
-function openInspector(title, body) {
+function openInspector(title, body, objectBrowser = "") {
   inspectorTitle.textContent = title;
   inspectorBody.replaceChildren(body);
+  if (objectBrowser) inspector.dataset.objectBrowser = objectBrowser;
+  else delete inspector.dataset.objectBrowser;
   inspector.classList.add("open");
 }
 
@@ -1687,6 +1699,116 @@ function frameRelevantToLens(frame) {
   );
 }
 
+function frameViewCard() {
+  const activeFrameId = session.activeFrame;
+  const active = chronolog.frames[activeFrameId];
+  const display = active?.display || {};
+  const viewCard = document.createElement("section");
+  viewCard.className = "frame-view-card";
+  const leading = document.createElement("label");
+  leading.className = "field";
+  const leadingLabel = document.createElement("span");
+  leadingLabel.textContent = "Leading frame";
+  const leadingSelect = document.createElement("select");
+  leadingSelect.id = "frame-leading-select";
+  for (const frame of calendarFrames(chronolog)) {
+    const option = document.createElement("option");
+    option.value = frame.id;
+    option.textContent = frame.title;
+    option.selected = frame.id === activeFrameId;
+    leadingSelect.append(option);
+  }
+  leadingSelect.addEventListener("change", () => selectLeadingFrame(leadingSelect.value));
+  leading.append(leadingLabel, leadingSelect);
+  const heading = document.createElement("h3");
+  heading.textContent = `Shown with ${active?.title || "active calendar"}`;
+  const note = document.createElement("p");
+  note.className = "field-note";
+  note.textContent = "Events on this calendar bring their groups automatically. Include another calendar or line, force a whole group into this view, or hide a group here.";
+  viewCard.append(leading, heading, note);
+  const included = new Set(display.overlays || []);
+  const related = Object.values(chronolog.frames).filter((frame) => frame.id !== activeFrameId
+    && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline")));
+  if (related.length) {
+    const label = document.createElement("strong");
+    label.className = "fieldset-title";
+    label.textContent = "Include calendars and lines";
+    const choices = document.createElement("div");
+    choices.className = "frame-view-grid";
+    for (const frame of related.sort((left, right) => left.title.localeCompare(right.title))) {
+      const choice = document.createElement("label");
+      choice.className = "check-chip";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = included.has(frame.id);
+      input.addEventListener("change", () => {
+        executeRecordChange("Change calendar view", "frames", activeFrameId, (documentValue) => {
+          const target = documentValue.frames[activeFrameId];
+          const overlays = new Set(target.display?.overlays || []);
+          if (input.checked) overlays.add(frame.id);
+          else overlays.delete(frame.id);
+          target.display = { ...(target.display || {}), overlays: [...overlays] };
+        }, { viewOnly: true });
+      });
+      choice.append(input, document.createTextNode(`${frame.title} · ${frameKind(frame)}`));
+      choices.append(choice);
+    }
+    viewCard.append(label, choices);
+  }
+  const groups = groupFrames(chronolog);
+  if (groups.length) {
+    const label = document.createElement("strong");
+    label.className = "fieldset-title";
+    label.textContent = "Groups in this view";
+    const groupList = document.createElement("div");
+    groupList.className = "frame-group-list";
+    for (const group of groups) {
+      const row = document.createElement("div");
+      row.className = "frame-group-row";
+      const name = document.createElement("strong");
+      name.textContent = group.title;
+      name.style.setProperty("--group-color", group.color || "#2e8b57");
+      const presence = document.createElement("select");
+      presence.title = `${group.title} in ${active?.title || "this calendar"}`;
+      for (const [value, text] of [["auto", "Automatic"], ["show", "Include all"], ["hide", "Hide here"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        option.selected = (display.groupModes?.[group.id] || "auto") === value;
+        presence.append(option);
+      }
+      presence.addEventListener("change", () => {
+        executeRecordChange("Change group visibility", "frames", activeFrameId, (documentValue) => {
+          const target = documentValue.frames[activeFrameId];
+          const groupModes = { ...(target.display?.groupModes || {}) };
+          if (presence.value === "auto") delete groupModes[group.id];
+          else groupModes[group.id] = presence.value;
+          target.display = { ...(target.display || {}), groupModes };
+        }, { viewOnly: true });
+      });
+      const strategic = document.createElement("select");
+      strategic.title = `${group.title} in Strategic`;
+      for (const [value, text] of [["auto", "Strategic: automatic"], ["show", "Strategic: promote"], ["hide", "Strategic: demote"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        option.selected = (group.display?.strategic || "auto") === value;
+        strategic.append(option);
+      }
+      strategic.addEventListener("change", () => {
+        executeRecordChange("Change strategic priority", "frames", group.id, (documentValue) => {
+          const target = documentValue.frames[group.id];
+          target.display = { ...(target.display || {}), strategic: strategic.value };
+        }, { viewOnly: true });
+      });
+      row.append(name, presence, strategic);
+      groupList.append(row);
+    }
+    viewCard.append(label, groupList);
+  }
+  return viewCard;
+}
+
 function openObjectBrowser(kind) {
   if (!resolveProvisionalDraft()) return;
   const wrapper = document.createElement("div");
@@ -1707,97 +1829,7 @@ function openObjectBrowser(kind) {
   toolbar.append(search, scope);
   wrapper.append(toolbar);
   if (kind === "frame") {
-    const active = chronolog.frames[session.activeFrame];
-    const display = active?.display || {};
-    const viewCard = document.createElement("section");
-    viewCard.className = "frame-view-card";
-    const heading = document.createElement("h3");
-    heading.textContent = `Shown with ${active?.title || "active calendar"}`;
-    const note = document.createElement("p");
-    note.className = "field-note";
-    note.textContent = "Events on this calendar bring their groups automatically. Include another calendar or line, force a whole group into this view, or hide a group here.";
-    viewCard.append(heading, note);
-    const included = new Set(display.overlays || []);
-    const related = Object.values(chronolog.frames).filter((frame) => frame.id !== session.activeFrame
-      && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline")));
-    if (related.length) {
-      const label = document.createElement("strong");
-      label.className = "fieldset-title";
-      label.textContent = "Include calendars and lines";
-      const choices = document.createElement("div");
-      choices.className = "frame-view-grid";
-      for (const frame of related.sort((left, right) => left.title.localeCompare(right.title))) {
-        const choice = document.createElement("label");
-        choice.className = "check-chip";
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.checked = included.has(frame.id);
-        input.addEventListener("change", () => {
-          executeRecordChange("Change calendar view", "frames", session.activeFrame, (documentValue) => {
-            const target = documentValue.frames[session.activeFrame];
-            const overlays = new Set(target.display?.overlays || []);
-            if (input.checked) overlays.add(frame.id);
-            else overlays.delete(frame.id);
-            target.display = { ...(target.display || {}), overlays: [...overlays] };
-          }, { viewOnly: true });
-        });
-        choice.append(input, document.createTextNode(`${frame.title} · ${frameKind(frame)}`));
-        choices.append(choice);
-      }
-      viewCard.append(label, choices);
-    }
-    const groups = groupFrames(chronolog);
-    if (groups.length) {
-      const label = document.createElement("strong");
-      label.className = "fieldset-title";
-      label.textContent = "Groups in this view";
-      const groupList = document.createElement("div");
-      groupList.className = "frame-group-list";
-      for (const group of groups) {
-        const row = document.createElement("div");
-        row.className = "frame-group-row";
-        const name = document.createElement("strong");
-        name.textContent = group.title;
-        name.style.setProperty("--group-color", group.color || "#2e8b57");
-        const presence = document.createElement("select");
-        presence.title = `${group.title} in ${active?.title || "this calendar"}`;
-        for (const [value, text] of [["auto", "Automatic"], ["show", "Include all"], ["hide", "Hide here"]]) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = text;
-          option.selected = (display.groupModes?.[group.id] || "auto") === value;
-          presence.append(option);
-        }
-        presence.addEventListener("change", () => {
-          executeRecordChange("Change group visibility", "frames", session.activeFrame, (documentValue) => {
-            const target = documentValue.frames[session.activeFrame];
-            const groupModes = { ...(target.display?.groupModes || {}) };
-            if (presence.value === "auto") delete groupModes[group.id];
-            else groupModes[group.id] = presence.value;
-            target.display = { ...(target.display || {}), groupModes };
-          }, { viewOnly: true });
-        });
-        const strategic = document.createElement("select");
-        strategic.title = `${group.title} in Strategic`;
-        for (const [value, text] of [["auto", "Strategic: automatic"], ["show", "Strategic: promote"], ["hide", "Strategic: demote"]]) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = text;
-          option.selected = (group.display?.strategic || "auto") === value;
-          strategic.append(option);
-        }
-        strategic.addEventListener("change", () => {
-          executeRecordChange("Change strategic priority", "frames", group.id, (documentValue) => {
-            const target = documentValue.frames[group.id];
-            target.display = { ...(target.display || {}), strategic: strategic.value };
-          }, { viewOnly: true });
-        });
-        row.append(name, presence, strategic);
-        groupList.append(row);
-      }
-      viewCard.append(label, groupList);
-    }
-    wrapper.append(viewCard);
+    wrapper.append(frameViewCard());
     const createRow = document.createElement("div");
     createRow.className = "object-create-row";
     for (const [value, label] of [["calendar", "+ Calendar"], ["group", "+ Group"], ["importance", "+ Importance"], ["cycle", "+ Cycle"], ["line", "+ Line"]]) {
@@ -1857,7 +1889,14 @@ function openObjectBrowser(kind) {
   search.addEventListener("input", paint);
   scope.addEventListener("change", paint);
   paint();
-  openInspector(kind === "frame" ? "Frames" : "Patterns", wrapper);
+  openInspector(kind === "frame" ? "Frames" : "Patterns", wrapper, kind);
+}
+
+function refreshFramesPanel() {
+  if (inspector.classList.contains("open") && inspector.dataset.objectBrowser === "frame") {
+    const current = inspectorBody.querySelector(".frame-view-card");
+    if (current) current.replaceWith(frameViewCard());
+  }
 }
 
 function openStapleSuggestions(suggestions) {
@@ -2052,13 +2091,7 @@ document.querySelectorAll("[data-lens]").forEach((button) => {
 });
 
 byId("active-calendar").addEventListener("change", (event) => {
-  session.activeFrame = event.target.value;
-  session.primeFrame = session.activeFrame;
-  const matchingCycle = Object.values(chronolog.frames).find(
-    (frame) => frame.traits.includes("cycle") && frame.calendar === session.activeFrame
-  );
-  if (matchingCycle) selectCycle(matchingCycle.id);
-  scheduleRender();
+  selectLeadingFrame(event.target.value);
 });
 
 byId("shared-focus").addEventListener("change", (event) => {
@@ -2628,8 +2661,7 @@ byId("ics-file").addEventListener("change", async (event) => {
     try {
       const text = await file.text();
       const result = importCalendar(text, file.name.replace(/\.ics$/i, ""));
-      session.activeFrame = result.frames[0] || session.activeFrame;
-      session.primeFrame = session.activeFrame;
+      selectLeadingFrame(result.frames[0] || session.activeFrame);
       toast(
         `Imported ${result.events.length} items from ${file.name}`
         + (result.suggestions.length ? ` · ${result.suggestions.length} staple suggestion(s)` : "")

@@ -638,7 +638,7 @@ function renderWall(target, context) {
 
 function renderLines(target, context) {
   const frames = calendarFrames(context.document);
-  const prime = context.document.frames[context.session.primeFrame] || frames[0];
+  const prime = context.document.frames[context.session.activeFrame] || frames[0];
   const ordered = [prime, ...frames.filter((frame) => frame.id !== prime?.id)].filter(Boolean);
   const window = context.session.window();
   const width = 1200;
@@ -841,7 +841,7 @@ function renderSimpleLines(target, context) {
   const height = 620;
   const primeY = height / 2;
   const xFor = (day) => 145 + Rational.parse(day).sub(window.start).div(window.end.sub(window.start)).toNumber() * 995;
-  const prime = context.document.frames[context.session.primeFrame] || context.document.frames[context.session.activeFrame];
+  const prime = context.document.frames[context.session.activeFrame];
   const relatedIds = new Set();
   for (const relation of Object.values(context.document.relations)) {
     if (relation.type !== "composition") continue;
