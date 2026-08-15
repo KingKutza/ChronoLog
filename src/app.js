@@ -351,6 +351,7 @@ function updateLensControls() {
   };
 
   const controls = [];
+  let primaryControlIndexes = [];
   const hourLabel = (hour) => hour === 0 || hour === 24 ? "12 AM" : hour === 12 ? "12 PM" : `${hour % 12} ${hour < 12 ? "AM" : "PM"}`;
   const todayControl = button("◎", goToToday, "Center this lens on today");
   todayControl.id = "today";
@@ -372,6 +373,7 @@ function updateLensControls() {
         session.intimateEndHour = Math.max(Number(value), session.intimateStartHour + 1);
       })
     );
+    primaryControlIndexes = [1, 2, 3];
   } else if (lens === "tactical") {
     controls.push(
       button("‹ row", () => session.move(-session.tacticalColumns)),
@@ -380,6 +382,7 @@ function updateLensControls() {
       number("rows", session.tacticalRows, 1, 8, (value) => { session.tacticalRows = value; }),
       number("days / row", session.tacticalColumns, 1, 14, (value) => { session.tacticalColumns = value; })
     );
+    primaryControlIndexes = [0, 1, 2];
   } else if (lens === "lines") {
     controls.push(
       button("‹ fortnight", () => session.move(-14)),
@@ -387,6 +390,7 @@ function updateLensControls() {
       button("fortnight ›", () => session.move(14)),
       number("window", session.linesDays, 3, 90, (value) => { session.linesDays = value; })
     );
+    primaryControlIndexes = [0, 1, 2];
   } else if (["strategic", "wall"].includes(lens)) {
     const property = lens === "strategic" ? "strategicMonths" : "wallMonths";
     const maximum = lens === "wall" ? 12 : 18;
@@ -413,6 +417,7 @@ function updateLensControls() {
         checkbox("zone fill", session.wallZoneFill, (value) => { session.wallZoneFill = value; })
       );
     }
+    primaryControlIndexes = [0, 1, 2];
   } else if (["spiral", "radial"].includes(lens)) {
     const cycleDays = session.radialCycle.toNumber();
     const divisions = session.radialDivisions || (cycleDays >= 5 ? Math.max(1, Math.round(cycleDays)) : 24);
@@ -438,11 +443,22 @@ function updateLensControls() {
       number("bold every (0 auto)", session.radialMajorEvery, 0, 16, (value) => { session.radialMajorEvery = value; }),
       select("marks", [["auto", "Cycle aware"], ["day-night", "Midnight + noon"], ["plain", "Plain"]], session.radialMarks, (value) => { session.radialMarks = value; })
     );
+    primaryControlIndexes = [0, 2, 3];
   }
   if (lens === "intimate") controls.push(checkbox("zone fill", session.intimateZoneFill, (value) => { session.intimateZoneFill = value; }));
   if (lens === "tactical") controls.push(checkbox("zone fill", session.tacticalZoneFill, (value) => { session.tacticalZoneFill = value; }));
-  controls.push(todayControl);
-  lensControls.append(...controls);
+  const primaryControls = primaryControlIndexes.map((index) => controls[index]);
+  const optionControls = controls.filter((_, index) => !primaryControlIndexes.includes(index));
+  const options = document.createElement("details");
+  options.className = "lens-control-overflow";
+  const summary = document.createElement("summary");
+  summary.textContent = "Options";
+  summary.title = `More ${lens} controls`;
+  const optionPanel = document.createElement("div");
+  optionPanel.className = "lens-control-overflow-panel";
+  optionPanel.append(...optionControls);
+  options.append(summary, optionPanel);
+  lensControls.append(...primaryControls, options, todayControl);
 }
 
 function toast(message, error = false) {
