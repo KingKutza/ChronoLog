@@ -48,6 +48,24 @@ test("application shell exposes seven explicit lenses with contextual window con
   assert.match(app, /localStorage\.setItem/);
 });
 
+test("save status remains a legible, accessible status badge", async () => {
+  const [html, css, app] = await Promise.all([
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("src/app.css", "utf8"),
+    readFile("src/app.js", "utf8")
+  ]);
+  assert.match(html, /id="save-status"[^>]*role="status"/);
+  assert.match(html, /id="save-status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="save-status"[^>]*aria-label="Save status"/);
+  assert.match(html, /id="save-status"[^>]*title="Current save status"/);
+  assert.match(html, /id="save-status"[^>]*>Saved<\/span>/);
+  assert.doesNotMatch(css, /#save-status\s*\{[^}]*color:\s*transparent/);
+  assert.doesNotMatch(css, /#save-status\s*\{[^}]*width:\s*19px/);
+  const statusUpdate = sourceSlice(app, "onStatus(status)", "store.attach");
+  assert.match(statusUpdate, /node\.dataset\.state = status\.state/);
+  assert.match(statusUpdate, /node\.textContent = status\.message/);
+});
+
 test("URL parameters pass through the sanitizer before reaching the session", async () => {
   const app = await readFile("src/app.js", "utf8");
   assert.match(app, /sanitizeSessionParameters\(new URLSearchParams\(location\.search\), chronolog\)/);
