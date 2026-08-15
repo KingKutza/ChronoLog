@@ -953,6 +953,9 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
 .line-event:hover,
 .radial-event:hover { stroke: var(--ink); stroke-width: 3; }
 .line-tick { stroke: var(--hair); stroke-width: 1; stroke-dasharray: 2 6; }
+.lines-state { fill: var(--muted); font: 700 12px/1 var(--data); }
+.lines-state-error { fill: var(--now); }
+.lines-state-unsupported { fill: #a46b12; }
 
 .radial-event-arc { cursor: pointer; fill: none; stroke-linecap: round; stroke-dasharray: 1; animation: radial-slide 220ms ease-out both; }
 .radial-event-arc:hover { filter: brightness(.72); }
