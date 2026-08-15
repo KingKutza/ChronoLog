@@ -48,6 +48,25 @@ test("application shell exposes seven explicit lenses with contextual window con
   assert.match(app, /localStorage\.setItem/);
 });
 
+test("lens controls use an explicit accessible overflow menu instead of clipped horizontal controls", async () => {
+  const [css, app] = await Promise.all([
+    readFile("src/app.css", "utf8"),
+    readFile("src/app.js", "utf8")
+  ]);
+  const updateControls = sourceSlice(app, "function updateLensControls", "function toast");
+  assert.match(updateControls, /lens-control-overflow/);
+  assert.match(updateControls, /primaryControlIndexes/);
+  assert.match(updateControls, /lensControls\.append\(\.\.\.primaryControls, options, todayControl\)/);
+  assert.match(cssBlock(css, "#lens-controls"), /overflow: visible/);
+  assert.doesNotMatch(cssBlock(css, "#lens-controls"), /overflow-x: auto/);
+  assert.match(cssBlock(css, ".lens-control-overflow > summary"), /cursor: pointer/);
+  assert.match(css, /\.lens-readout\s*\{\s*min-width: 0;[\s\S]*?text-overflow: ellipsis/);
+  const today = cssBlock(css, "#today");
+  assert.doesNotMatch(today, /position: sticky/);
+  assert.doesNotMatch(today, /margin-left: auto/);
+  assert.match(today, /place-items: center/);
+});
+
 test("URL parameters pass through the sanitizer before reaching the session", async () => {
   const app = await readFile("src/app.js", "utf8");
   assert.match(app, /sanitizeSessionParameters\(new URLSearchParams\(location\.search\), chronolog\)/);
