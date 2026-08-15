@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Rational } from "../src/exact.js";
-import { ViewSession } from "../src/session.js";
+import {
+  INTIMATE_HOUR_PIXELS_MAX,
+  INTIMATE_HOUR_PIXELS_MIN,
+  ViewSession
+} from "../src/session.js";
 
 test("shared focus remains constant between projections by default", () => {
   const session = new ViewSession({ focusDays: "12345/2", projection: "calendar" });
@@ -67,4 +71,26 @@ test("radial guide settings survive a view-session round trip", () => {
   assert.equal(restored.radialDivisions, 30);
   assert.equal(restored.radialMajorEvery, 7);
   assert.equal(restored.radialMarks, "day-night");
+});
+
+test("the leading frame is canonical and survives a view-session round trip", () => {
+  const session = new ViewSession({ activeFrame: "calendar:first", primeFrame: "calendar:legacy" });
+  session.setLeadingFrame("calendar:second");
+  const saved = session.toJSON();
+  const restored = new ViewSession(saved);
+  assert.equal(restored.activeFrame, "calendar:second");
+  assert.equal(saved.activeFrame, "calendar:second");
+  assert.equal("primeFrame" in saved, false);
+  assert.equal("primeFrame" in restored, false);
+});
+
+test("Intimate vertical zoom clamps at usable extremes and survives restoration", () => {
+  const session = new ViewSession({ intimateHourPixels: 56 });
+  session.setIntimateHourPixels(1);
+  assert.equal(session.intimateHourPixels, INTIMATE_HOUR_PIXELS_MIN);
+  session.setIntimateHourPixels(1000);
+  assert.equal(session.intimateHourPixels, INTIMATE_HOUR_PIXELS_MAX);
+  session.setIntimateHourPixels(42.5);
+  const restored = new ViewSession(session.toJSON());
+  assert.equal(restored.intimateHourPixels, 42.5);
 });
