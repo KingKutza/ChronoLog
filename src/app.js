@@ -104,6 +104,7 @@ let lensControlsSignature = "";
 const viewScroll = new Map();
 let pendingIntimateRebase = null;
 let pendingIntimateZoom = null;
+let intimateScrollGuard = 0;
 let provisionalEvent = null;
 let documentLoading = true;
 
@@ -203,6 +204,8 @@ function render() {
       };
     }
     if (saved) {
+      const intimateProgrammaticScroll = nextScroll.dataset.scrollKey === "intimate";
+      const scrollGuard = intimateProgrammaticScroll ? ++intimateScrollGuard : 0;
       nextScroll.scrollTop = saved.top;
       nextScroll.scrollLeft = saved.left;
       if (nextScroll.dataset.scrollKey === "intimate" && (pendingIntimateRebase || pendingIntimateZoom)) {
@@ -210,11 +213,20 @@ function render() {
         pendingIntimateRebase = null;
         pendingIntimateZoom = null;
       }
+      if (intimateProgrammaticScroll) {
+        requestAnimationFrame(() => {
+          if (intimateScrollGuard === scrollGuard) intimateScrollGuard = 0;
+        });
+      }
     } else if (nextScroll.dataset.scrollKey === "intimate") {
       const bufferHours = Number(nextScroll.dataset.bufferHours || 0);
       const hourPixels = Number(nextScroll.dataset.hourPixels || 56);
       const initialHour = Number(nextScroll.dataset.initialHour || session.intimateStartHour);
+      const scrollGuard = ++intimateScrollGuard;
       nextScroll.scrollTop = Math.max(0, 70 + (bufferHours + initialHour) * hourPixels - nextScroll.clientHeight / 2);
+      requestAnimationFrame(() => {
+        if (intimateScrollGuard === scrollGuard) intimateScrollGuard = 0;
+      });
     }
   }
   renderMinimap(minimap, context());
@@ -276,6 +288,9 @@ function shiftFocusMonths(offset) {
 
 function updateLensControls() {
   const lens = session.currentLens();
+  const previousLens = lensControls.dataset.lens;
+  const optionsWasOpen = previousLens === lens
+    && Boolean(lensControls.querySelector(".lens-control-overflow")?.open);
   const cycles = radialCycleOptions();
   const signature = JSON.stringify({
     lens,
@@ -312,6 +327,7 @@ function updateLensControls() {
   });
   if (signature === lensControlsSignature) return;
   lensControlsSignature = signature;
+  lensControls.dataset.lens = lens;
   lensControls.replaceChildren();
 
   const button = (text, action, title = "") => {
@@ -491,6 +507,7 @@ function updateLensControls() {
   const optionControls = controls.filter((_, index) => !primaryControlIndexes.includes(index));
   const options = document.createElement("details");
   options.className = "lens-control-overflow";
+  options.open = optionsWasOpen;
   const summary = document.createElement("summary");
   summary.textContent = "Options";
   summary.title = `More ${lens} controls`;
@@ -2198,7 +2215,11 @@ byId("theme-settings").addEventListener("click", () => {
 projection.addEventListener("wheel", panFromWheel, { passive: false });
 projection.addEventListener("scroll", (event) => {
   const scroll = event.target;
-  if (!(scroll instanceof HTMLElement) || !scroll.classList.contains("intimate-scroll") || pendingIntimateRebase || pendingIntimateZoom) return;
+  if (!(scroll instanceof HTMLElement)
+    || !scroll.classList.contains("intimate-scroll")
+    || intimateScrollGuard
+    || pendingIntimateRebase
+    || pendingIntimateZoom) return;
   const hourPixels = Number(scroll.dataset.hourPixels || 56);
   const edge = hourPixels * 6;
   if (scroll.scrollTop < edge) {

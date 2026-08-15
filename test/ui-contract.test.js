@@ -66,6 +66,20 @@ test("save status remains a legible, accessible status badge", async () => {
   assert.match(statusUpdate, /node\.textContent = status\.message/);
 });
 
+test("Intimate programmatic scrolling is guarded through the next animation frame", async () => {
+  const app = await readFile("src/app.js", "utf8");
+  assert.match(app, /let intimateScrollGuard = 0/);
+  assert.match(app, /const scrollGuard = intimateProgrammaticScroll \? \+\+intimateScrollGuard : 0/);
+  assert.match(app, /requestAnimationFrame\(\(\) => \{\s*if \(intimateScrollGuard === scrollGuard\) intimateScrollGuard = 0/);
+  assert.match(app, /\|\| intimateScrollGuard\s*\|\| pendingIntimateRebase/);
+});
+
+test("lens Options remains open when an option rerenders its controls", async () => {
+  const app = await readFile("src/app.js", "utf8");
+  assert.match(app, /const optionsWasOpen = previousLens === lens/);
+  assert.match(app, /options\.open = optionsWasOpen/);
+});
+
 test("lens controls use an explicit accessible overflow menu instead of clipped horizontal controls", async () => {
   const [css, app] = await Promise.all([
     readFile("src/app.css", "utf8"),
