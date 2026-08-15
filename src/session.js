@@ -4,6 +4,7 @@ import {
   daysFromCivil,
   daysToCivilCoordinate
 } from "./exact.js";
+import { positiveRadialCycle } from "./radial.js";
 
 const DETENTS = [
   { name: "Intimate", scale: 0, span: 5 },
@@ -32,6 +33,8 @@ export function scaleForSpan(span) {
 const PROJECTIONS = ["calendar", "wall", "lines", "radial"];
 const LENSES = ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"];
 const RADIAL_MODES = ["spiral", "concentric"];
+const INTIMATE_HOUR_PIXELS_MIN = 8;
+const INTIMATE_HOUR_PIXELS_MAX = 144;
 
 export function sanitizeSessionParameters(parameters, chronologDocument) {
   const frames = chronologDocument?.frames || {};
@@ -39,7 +42,6 @@ export function sanitizeSessionParameters(parameters, chronologDocument) {
   const frame = parameters.get("frame");
   if (frame && frames[frame]) {
     input.activeFrame = frame;
-    input.primeFrame = frame;
   }
   const projection = parameters.get("projection");
   if (PROJECTIONS.includes(projection)) input.projection = projection;
@@ -91,12 +93,11 @@ export class ViewSession {
       Object.entries(input.localFocus || {}).map(([key, value]) => [key, Rational.parse(value)])
     );
     this.activeFrame = input.activeFrame || "calendar:personal";
-    this.primeFrame = input.primeFrame || this.activeFrame;
     this.activeCycle = input.activeCycle || "cycle:lunar";
     this.radialMode = input.radialMode || "spiral";
     this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? 1)));
     this.radialFuture = Math.max(0, Math.floor(Number(input.radialFuture ?? 1)));
-    this.radialCycle = Rational.parse(input.radialCycle || "29.530588853");
+    this.radialCycle = positiveRadialCycle(input.radialCycle || "29.530588853");
     this.radialDivisions = Math.max(0, Math.min(64, Math.floor(Number(input.radialDivisions ?? 0))));
     this.radialMajorEvery = Math.max(0, Math.min(16, Math.floor(Number(input.radialMajorEvery ?? 0))));
     this.radialMarks = ["auto", "plain", "day-night"].includes(input.radialMarks) ? input.radialMarks : "auto";
@@ -105,6 +106,10 @@ export class ViewSession {
     this.intimateGrain = [15, 30, 60].includes(Number(input.intimateGrain))
       ? Number(input.intimateGrain)
       : 15;
+    this.intimateHourPixels = Math.max(
+      INTIMATE_HOUR_PIXELS_MIN,
+      Math.min(INTIMATE_HOUR_PIXELS_MAX, Number(input.intimateHourPixels) || 28)
+    );
     this.intimateStartHour = Math.max(0, Math.min(23, Math.floor(Number(input.intimateStartHour ?? 0))));
     this.intimateEndHour = Math.max(this.intimateStartHour + 1, Math.min(24, Math.floor(Number(input.intimateEndHour ?? 24))));
     this.tacticalRows = Math.max(1, Math.floor(Number(input.tacticalRows ?? 3)));
@@ -142,8 +147,19 @@ export class ViewSession {
     else this.localFocus[this.projection] = next;
   }
 
+  setLeadingFrame(frameId) {
+    if (typeof frameId === "string" && frameId) this.activeFrame = frameId;
+  }
+
   move(days) {
     this.setFocus(this.currentFocus().add(days));
+  }
+
+  setIntimateHourPixels(value) {
+    this.intimateHourPixels = Math.max(
+      INTIMATE_HOUR_PIXELS_MIN,
+      Math.min(INTIMATE_HOUR_PIXELS_MAX, Number(value) || this.intimateHourPixels)
+    );
   }
 
   setProjection(projection) {
@@ -245,7 +261,6 @@ export class ViewSession {
         Object.entries(this.localFocus).map(([key, value]) => [key, value.toJSON()])
       ),
       activeFrame: this.activeFrame,
-      primeFrame: this.primeFrame,
       activeCycle: this.activeCycle,
       radialMode: this.radialMode,
       radialPast: this.radialPast,
@@ -257,6 +272,7 @@ export class ViewSession {
       intimateBack: this.intimateBack,
       intimateForward: this.intimateForward,
       intimateGrain: this.intimateGrain,
+      intimateHourPixels: this.intimateHourPixels,
       intimateStartHour: this.intimateStartHour,
       intimateEndHour: this.intimateEndHour,
       tacticalRows: this.tacticalRows,
@@ -280,4 +296,4 @@ export class ViewSession {
   }
 }
 
-export { DETENTS };
+export { DETENTS, INTIMATE_HOUR_PIXELS_MIN, INTIMATE_HOUR_PIXELS_MAX };
