@@ -9,6 +9,7 @@ import {
   formatCivil,
   levelValue
 } from "./exact.js";
+import { lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -840,18 +841,10 @@ function renderSimpleLines(target, context) {
   const width = 1200;
   const height = 620;
   const primeY = height / 2;
-  const xFor = (day) => 145 + Rational.parse(day).sub(window.start).div(window.end.sub(window.start)).toNumber() * 995;
-  const prime = context.document.frames[context.session.primeFrame] || context.document.frames[context.session.activeFrame];
-  const relatedIds = new Set();
-  for (const relation of Object.values(context.document.relations)) {
-    if (relation.type !== "composition") continue;
-    if (relation.parent === prime?.id) relatedIds.add(relation.child);
-    if (relation.child === prime?.id) relatedIds.add(relation.parent);
-  }
-  for (const frame of calendarFrames(context.document)) {
-    if (frame.id !== prime?.id && ["overlay", "underlay"].includes(frame.display?.mode)) relatedIds.add(frame.id);
-  }
-  const secondaryFrames = [...relatedIds].map((id) => context.document.frames[id]).filter(Boolean).slice(0, 8);
+  const xFor = (day) => 145 + lineProgress(day, window.start, window.end) * 995;
+  const plan = lineFramePlan(context.document, context.session.activeFrame);
+  const prime = plan.leading;
+  const secondaryFrames = plan.companions;
   const directQuery = (frame, limit) => context.engine.queryFacts({
     frame: frame.id,
     start: daysToCivilCoordinate(window.start),
@@ -859,8 +852,6 @@ function renderSimpleLines(target, context) {
     includeOverlaps: true,
     limit
   });
-  const primeResult = directQuery(prime, 260);
-  const secondary = secondaryFrames.map((frame) => ({ frame, result: directQuery(frame, 140) }));
   const svg = svgElement("svg", {
     class: "lines-svg", viewBox: `0 0 ${width} ${height}`, role: "img",
     "aria-label": "Prime frame with related frames entering and leaving at staple points"
@@ -868,6 +859,25 @@ function renderSimpleLines(target, context) {
   svg.dataset.dropStart = window.start.toJSON();
   svg.dataset.dropEnd = window.end.toJSON();
   svg.dataset.dropKind = "linear";
+  const appendState = (state, message) => {
+    svg.dataset.linesState = state;
+    const label = svgElement("text", {
+      x: width / 2, y: height / 2 + 5, "text-anchor": "middle", class: `lines-state lines-state-${state}`
+    });
+    label.textContent = message;
+    svg.append(label);
+    target.append(svg);
+  };
+  if (context.loading) {
+    appendState(linesRenderState({ loading: true }), "Loading timeline data…");
+    return;
+  }
+  if (!plan.supported) {
+    appendState(linesRenderState({ supported: false }), "Lines requires an active calendar frame");
+    return;
+  }
+  const primeResult = directQuery(prime, 260);
+  const secondary = secondaryFrames.map((frame) => ({ frame, result: directQuery(frame, 140) }));
   for (let index = 0; index < 8; index += 1) {
     const progress = index / 7;
     const x = 145 + progress * 995;
@@ -896,11 +906,9 @@ function renderSimpleLines(target, context) {
     svg.append(dot);
   }
   secondary.forEach(({ frame, result }, index) => {
-    if (!result.facts.length) return;
     const xs = result.facts.map((fact) => xFor(fact.day)).filter((x) => x >= 145 && x <= 1140);
-    if (!xs.length) return;
-    const firstX = Math.max(145, Math.min(...xs) - 24);
-    const lastX = Math.min(1140, Math.max(...xs) + 24);
+    const firstX = xs.length ? Math.max(145, Math.min(...xs) - 24) : 145;
+    const lastX = xs.length ? Math.min(1140, Math.max(...xs) + 24) : 1140;
     const apexY = primeY + (index % 2 ? 1 : -1) * (75 + Math.floor(index / 2) * 52);
     const middleX = (firstX + lastX) / 2;
     const path = `M ${firstX} ${primeY} C ${firstX + 35} ${primeY}, ${firstX + 35} ${apexY}, ${middleX} ${apexY} C ${lastX - 35} ${apexY}, ${lastX - 35} ${primeY}, ${lastX} ${primeY}`;
@@ -923,10 +931,32 @@ function renderSimpleLines(target, context) {
       svg.append(dot);
     }
   });
+  const results = [primeResult, ...secondary.map((item) => item.result)];
+  const errors = results.flatMap((result) => result.errors || []);
+  const factCount = results.reduce((total, result) => total + result.facts.length, 0);
+  const truncated = results.some((result) => result.truncated);
+  const state = linesRenderState({ factCount, errorCount: errors.length, truncated });
+  svg.dataset.linesState = state;
+  if (state !== "ordinary") {
+    const status = svgElement("text", {
+      x: width / 2, y: height - 15, "text-anchor": "middle", class: `lines-state lines-state-${state}`
+    });
+    status.textContent = state === "empty" ? "No events in this window"
+      : state === "dense" ? "Dense window · some events are not shown"
+      : "Some timeline data could not be rendered";
+    svg.append(status);
+  }
+  if (plan.unsupportedCompanions.length) {
+    const unsupported = svgElement("text", {
+      x: width - 60, y: 30, "text-anchor": "end", class: "lines-state lines-state-unsupported"
+    });
+    unsupported.textContent = `${plan.unsupportedCompanions.length} unsupported companion selection${plan.unsupportedCompanions.length === 1 ? "" : "s"}`;
+    svg.append(unsupported);
+  }
   target.append(svg);
   renderErrors(target, {
-    errors: [primeResult, ...secondary.map((item) => item.result)].flatMap((result) => result.errors || []),
-    truncated: primeResult.truncated || secondary.some((item) => item.result.truncated)
+    errors,
+    truncated
   });
 }
 
