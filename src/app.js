@@ -11,6 +11,7 @@ import {
   levelValue
 } from "./exact.js";
 import { exportICS, importICS } from "./ics.js";
+import { additiveFrameTraits, preservedFrameSchema } from "./frame-edit.js";
 import {
   CommandHistory,
   addEvent,
@@ -31,8 +32,11 @@ import {
   renderMinimap,
   renderProjection
 } from "./projections.js";
+import { FIXED_RADIAL_CYCLES, cyclePeriodHint, resolveRadialCycle } from "./radial.js";
 import {
   DETENTS,
+  INTIMATE_HOUR_PIXELS_MAX,
+  INTIMATE_HOUR_PIXELS_MIN,
   ViewSession,
   minimapDragFocus,
   minimapDragState,
@@ -88,7 +92,6 @@ let engine = new ChronologEngine(chronolog);
 const initialFrame = calendarFrames(chronolog)[0]?.id || "";
 const session = new ViewSession({
   activeFrame: initialFrame,
-  primeFrame: initialFrame,
   projection: "calendar",
   scale: 1,
   radialMode: "spiral",
@@ -100,7 +103,9 @@ let toastTimer = null;
 let lensControlsSignature = "";
 const viewScroll = new Map();
 let pendingIntimateRebase = null;
+let pendingIntimateZoom = null;
 let provisionalEvent = null;
+let documentLoading = true;
 
 const store = new AutosaveStore({
   onStatus(status) {
@@ -138,11 +143,16 @@ function replaceDocument(next, storageTarget = {}) {
 }
 
 function reconcileSession() {
-  if (!chronolog.frames[session.activeFrame]) {
-    session.activeFrame = calendarFrames(chronolog)[0]?.id || "";
-    session.primeFrame = session.activeFrame;
+  const leadingFrame = chronolog.frames[session.activeFrame]
+    ? session.activeFrame
+    : calendarFrames(chronolog)[0]?.id || "";
+  session.setLeadingFrame(leadingFrame);
+  const cycles = radialCycleOptions();
+  const activeCycle = resolveRadialCycle(cycles, session.activeCycle);
+  if (activeCycle) {
+    session.activeCycle = activeCycle.id;
+    session.radialCycle = activeCycle.period;
   }
-  if (!chronolog.frames[session.primeFrame]) session.primeFrame = session.activeFrame;
   const open = session.inspector;
   if (!open?.id) return;
   const pool = open.type === "event"
@@ -154,7 +164,7 @@ function reconcileSession() {
 }
 
 function context() {
-  return { document: chronolog, engine, session };
+  return { document: chronolog, engine, session, loading: documentLoading };
 }
 
 function scheduleRender() {
@@ -169,7 +179,7 @@ function scheduleRender() {
 
 function render() {
   const previousScroll = projection.querySelector("[data-scroll-key]");
-  if (previousScroll && !(previousScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase)) {
+  if (previousScroll && !(previousScroll.dataset.scrollKey === "intimate" && (pendingIntimateRebase || pendingIntimateZoom))) {
     viewScroll.set(previousScroll.dataset.scrollKey, {
       top: previousScroll.scrollTop,
       left: previousScroll.scrollLeft
@@ -181,15 +191,24 @@ function render() {
   renderProjection(projection, context());
   const nextScroll = projection.querySelector("[data-scroll-key]");
   if (nextScroll) {
-    const saved = nextScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase
-      ? pendingIntimateRebase
-      : viewScroll.get(nextScroll.dataset.scrollKey);
+    let saved = viewScroll.get(nextScroll.dataset.scrollKey);
+    if (nextScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase) saved = pendingIntimateRebase;
+    if (nextScroll.dataset.scrollKey === "intimate" && pendingIntimateZoom) {
+      const hourPixels = Number(nextScroll.dataset.hourPixels || 28);
+      const bufferHours = Number(nextScroll.dataset.bufferHours || 24);
+      const headerPixels = Number(nextScroll.dataset.headerPixels || 70);
+      saved = {
+        top: headerPixels + (bufferHours + pendingIntimateZoom.localHour) * hourPixels - pendingIntimateZoom.offset,
+        left: pendingIntimateZoom.left
+      };
+    }
     if (saved) {
       nextScroll.scrollTop = saved.top;
       nextScroll.scrollLeft = saved.left;
-      if (nextScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase) {
+      if (nextScroll.dataset.scrollKey === "intimate" && (pendingIntimateRebase || pendingIntimateZoom)) {
         viewScroll.set("intimate", { top: nextScroll.scrollTop, left: nextScroll.scrollLeft });
         pendingIntimateRebase = null;
+        pendingIntimateZoom = null;
       }
     } else if (nextScroll.dataset.scrollKey === "intimate") {
       const bufferHours = Number(nextScroll.dataset.bufferHours || 0);
@@ -222,6 +241,17 @@ function updateCalendarSelect() {
   select.value = session.activeFrame;
 }
 
+function selectLeadingFrame(frameId) {
+  if (!calendarFrames(chronolog).some((frame) => frame.id === frameId)) return;
+  session.setLeadingFrame(frameId);
+  const matchingCycle = Object.values(chronolog.frames).find(
+    (frame) => frame.traits.includes("cycle") && frame.calendar === session.activeFrame
+  );
+  if (matchingCycle) selectCycle(matchingCycle.id);
+  refreshFramesPanel();
+  scheduleRender();
+}
+
 function updateChrome() {
   byId("shared-focus").checked = session.sharedFocus;
   byId("focus-readout").textContent = formatCivil(daysToCivilCoordinate(session.currentFocus()), true);
@@ -252,6 +282,7 @@ function updateLensControls() {
     intimateBack: session.intimateBack,
     intimateForward: session.intimateForward,
     intimateGrain: session.intimateGrain,
+    intimateHourPixels: session.intimateHourPixels,
     intimateStartHour: session.intimateStartHour,
     intimateEndHour: session.intimateEndHour,
     tacticalRows: session.tacticalRows,
@@ -351,15 +382,25 @@ function updateLensControls() {
   };
 
   const controls = [];
+  let primaryControlIndexes = [];
   const hourLabel = (hour) => hour === 0 || hour === 24 ? "12 AM" : hour === 12 ? "12 PM" : `${hour % 12} ${hour < 12 ? "AM" : "PM"}`;
   const todayControl = button("◎", goToToday, "Center this lens on today");
   todayControl.id = "today";
   todayControl.classList.add("today-target");
   if (lens === "intimate") {
+    const visibleHours = Math.max(1, (projection.clientHeight - 70) / session.intimateHourPixels);
+    const zoomOut = button("−", () => adjustWindow(1), "Zoom Intimate out (keyboard: −)");
+    zoomOut.setAttribute("aria-label", "Zoom Intimate out");
+    const zoomIn = button("+", () => adjustWindow(-1), "Zoom Intimate in (keyboard: +)");
+    zoomIn.setAttribute("aria-label", "Zoom Intimate in");
+    todayControl.title = "Center Intimate on today and now";
+    todayControl.setAttribute("aria-label", "Center Intimate on today and now");
     controls.push(
       button("« week", () => session.move(-7)),
       button("‹ day", () => session.move(-1)),
-      readout(`${session.intimateBack + session.intimateForward + 1} days · ${session.intimateGrain} min`),
+      zoomOut,
+      readout(`~${visibleHours < 10 ? visibleHours.toFixed(1) : Math.round(visibleHours)} hr screen`),
+      zoomIn,
       button("day ›", () => session.move(1)),
       button("week »", () => session.move(7)),
       number("back", session.intimateBack, 0, 14, (value) => { session.intimateBack = value; }),
@@ -372,6 +413,7 @@ function updateLensControls() {
         session.intimateEndHour = Math.max(Number(value), session.intimateStartHour + 1);
       })
     );
+    primaryControlIndexes = [1, 2, 3];
   } else if (lens === "tactical") {
     controls.push(
       button("‹ row", () => session.move(-session.tacticalColumns)),
@@ -380,6 +422,7 @@ function updateLensControls() {
       number("rows", session.tacticalRows, 1, 8, (value) => { session.tacticalRows = value; }),
       number("days / row", session.tacticalColumns, 1, 14, (value) => { session.tacticalColumns = value; })
     );
+    primaryControlIndexes = [0, 1, 2];
   } else if (lens === "lines") {
     controls.push(
       button("‹ fortnight", () => session.move(-14)),
@@ -387,6 +430,7 @@ function updateLensControls() {
       button("fortnight ›", () => session.move(14)),
       number("window", session.linesDays, 3, 90, (value) => { session.linesDays = value; })
     );
+    primaryControlIndexes = [0, 1, 2];
   } else if (["strategic", "wall"].includes(lens)) {
     const property = lens === "strategic" ? "strategicMonths" : "wallMonths";
     const maximum = lens === "wall" ? 12 : 18;
@@ -413,6 +457,7 @@ function updateLensControls() {
         checkbox("zone fill", session.wallZoneFill, (value) => { session.wallZoneFill = value; })
       );
     }
+    primaryControlIndexes = [0, 1, 2];
   } else if (["spiral", "radial"].includes(lens)) {
     const cycleDays = session.radialCycle.toNumber();
     const divisions = session.radialDivisions || (cycleDays >= 5 ? Math.max(1, Math.round(cycleDays)) : 24);
@@ -438,11 +483,22 @@ function updateLensControls() {
       number("bold every (0 auto)", session.radialMajorEvery, 0, 16, (value) => { session.radialMajorEvery = value; }),
       select("marks", [["auto", "Cycle aware"], ["day-night", "Midnight + noon"], ["plain", "Plain"]], session.radialMarks, (value) => { session.radialMarks = value; })
     );
+    primaryControlIndexes = [0, 2, 3];
   }
   if (lens === "intimate") controls.push(checkbox("zone fill", session.intimateZoneFill, (value) => { session.intimateZoneFill = value; }));
   if (lens === "tactical") controls.push(checkbox("zone fill", session.tacticalZoneFill, (value) => { session.tacticalZoneFill = value; }));
-  controls.push(todayControl);
-  lensControls.append(...controls);
+  const primaryControls = primaryControlIndexes.map((index) => controls[index]);
+  const optionControls = controls.filter((_, index) => !primaryControlIndexes.includes(index));
+  const options = document.createElement("details");
+  options.className = "lens-control-overflow";
+  const summary = document.createElement("summary");
+  summary.textContent = "Options";
+  summary.title = `More ${lens} controls`;
+  const optionPanel = document.createElement("div");
+  optionPanel.className = "lens-control-overflow-panel";
+  optionPanel.append(...optionControls);
+  options.append(summary, optionPanel);
+  lensControls.append(...primaryControls, options, todayControl);
 }
 
 function toast(message, error = false) {
@@ -474,8 +530,12 @@ function closeInspector() {
 }
 
 function dismissInspector() {
+  const wasFramesBrowser = inspector.dataset.panel === "frames-browser";
   inspector.classList.remove("open");
+  delete inspector.dataset.panel;
   session.inspector = null;
+  byId("new-frame").setAttribute("aria-expanded", "false");
+  if (wasFramesBrowser) byId("new-frame").focus();
 }
 
 function resolveProvisionalDraft(nextEventId = null) {
@@ -496,9 +556,10 @@ function resolveProvisionalDraft(nextEventId = null) {
   return true;
 }
 
-function openInspector(title, body) {
+function openInspector(title, body, panel = "object") {
   inspectorTitle.textContent = title;
   inspectorBody.replaceChildren(body);
+  inspector.dataset.panel = panel;
   inspector.classList.add("open");
 }
 
@@ -558,30 +619,19 @@ function openThemeEditor() {
   openInspector("Color theme", form);
 }
 
-function magnitudeDays(magnitude) {
-  const factors = { week: "7", day: "1", hour: "1/24", minute: "1/1440", second: "1/86400" };
-  let total = Rational.parse(0);
-  for (const part of magnitude?.value?.levels || []) {
-    if (factors[part.level] !== undefined) {
-      total = total.add(Rational.parse(part.value).mul(String(factors[part.level])));
-    }
-  }
-  return total;
-}
-
 function radialCycleOptions() {
-  const fixed = [
-    { id: "fixed:day", title: "Day", days: "1" },
-    { id: "fixed:work-week", title: "Work week", days: "5" },
-    { id: "fixed:week", title: "Week", days: "7" },
-    { id: "fixed:month", title: "Calendar month (mean)", days: "243495/8000" },
-    { id: "fixed:quarter", title: "Quarter (mean)", days: "146097/1600" },
-    { id: "fixed:year", title: "Year (mean)", days: "146097/400" }
-  ];
   const documentCycles = Object.values(chronolog.frames)
-    .filter((frame) => frame.traits.includes("cycle"))
-    .map((frame) => ({ id: frame.id, title: frame.title, days: magnitudeDays(frame.period).toJSON() }));
-  return [...fixed, ...documentCycles];
+    .filter((frame) => frame.traits?.includes("cycle"))
+    .map((frame) => {
+      const period = cyclePeriodHint(frame.period);
+      return {
+        id: frame.id,
+        title: period ? frame.title : `${frame.title} (variable)` ,
+        days: (period || session.radialCycle).toJSON(),
+        variable: !period
+      };
+    });
+  return [...FIXED_RADIAL_CYCLES, ...documentCycles];
 }
 
 function selectCycle(cycleId) {
@@ -1192,13 +1242,7 @@ function frameKind(frame) {
 }
 
 function frameKindTraits(kind, existing = []) {
-  const structural = new Set(["set", "calendar", "group", "importance", "circle", "cycle", "line", "timeline", "measure"]);
-  const extras = existing.filter((trait) => !structural.has(trait));
-  const required = {
-    calendar: ["set", "calendar"], group: ["set", "group"], importance: ["set", "group", "importance"], cycle: ["circle", "cycle"],
-    line: ["line", "timeline"], measure: ["measure"], other: []
-  }[kind] || [];
-  return [...new Set([...required, ...extras])];
+  return additiveFrameTraits(kind, [], existing);
 }
 
 function captureFrameBundle(documentValue, frameId) {
@@ -1416,7 +1460,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     <p class="field-note">Choose what appears together from Frames while viewing a calendar. This editor changes the frame itself.</p>
     <label class="field"><span>Basis frame</span><select name="basis"><option value="">None</option>${Object.values(chronolog.frames)
       .filter((item) => item.id !== value.id).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === value.basis ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}</select></label>
-    <label class="field"><span>Cycle period in days</span><input name="period" value="${escapeHTML(value.period?.value?.levels?.find((part) => part.level === "day")?.value || "")}"></label>
+    <label class="field"><span>Cycle period data (JSON)</span><textarea name="period" class="code" placeholder="Leave blank to preserve existing period">${escapeHTML(value.period ? JSON.stringify(value.period, null, 2) : "")}</textarea></label>
     <details class="advanced-fields"><summary>Advanced frame data</summary>
       <label class="field"><span>Traits</span><input name="traits" value="${escapeHTML(value.traits.join(", "))}"></label>
       <label class="field"><span>Coordinate nesting (JSON)</span><textarea name="coordinate" class="code">${escapeHTML(value.coordinate ? JSON.stringify(value.coordinate, null, 2) : "")}</textarea></label>
@@ -1427,7 +1471,6 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     event.preventDefault();
     const data = new FormData(wrapper);
     try {
-      const coordinateSchema = data.get("coordinate") ? JSON.parse(String(data.get("coordinate"))) : undefined;
       executeRecordChange(isNew ? "Create frame" : "Edit frame", "frames", recordId, (documentValue) => {
         const selectedKind = String(data.get("kind") || "other");
         const priorDisplay = documentValue.frames[recordId]?.display || {};
@@ -1442,15 +1485,20 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
           if (String(data.get("radialMaxDays") || "").trim()) display.radialMaxDays = Number(data.get("radialMaxDays"));
           else delete display.radialMaxDays;
         }
+        const existing = documentValue.frames[recordId] || {};
+        const schema = preservedFrameSchema(existing, data.get("coordinate"), data.get("period"));
         const payload = {
-          ...(documentValue.frames[recordId] || {}), id: recordId,
+          ...existing, id: recordId,
           title: String(data.get("title") || "Untitled frame"),
-          traits: frameKindTraits(selectedKind, String(data.get("traits") || "").split(",").map((item) => item.trim()).filter(Boolean)),
+          traits: additiveFrameTraits(
+            selectedKind,
+            String(data.get("traits") || "").split(",").map((item) => item.trim()).filter(Boolean),
+            existing.traits || []
+          ),
           basis: String(data.get("basis") || "") || undefined,
           color: String(data.get("color") || "#2e8b57"),
           display,
-          coordinate: coordinateSchema,
-          period: data.get("period") ? { frame: "measure:human-time", value: coordinate([{ level: "day", value: String(data.get("period")) }]) } : undefined
+          ...schema
         };
         if (isNew) addFrame(documentValue, payload);
         else Object.assign(documentValue.frames[recordId], payload);
@@ -1687,6 +1735,116 @@ function frameRelevantToLens(frame) {
   );
 }
 
+function frameViewCard() {
+  const activeFrameId = session.activeFrame;
+  const active = chronolog.frames[activeFrameId];
+  const display = active?.display || {};
+  const viewCard = document.createElement("section");
+  viewCard.className = "frame-view-card";
+  const leading = document.createElement("label");
+  leading.className = "field";
+  const leadingLabel = document.createElement("span");
+  leadingLabel.textContent = "Leading frame";
+  const leadingSelect = document.createElement("select");
+  leadingSelect.id = "frame-leading-select";
+  for (const frame of calendarFrames(chronolog)) {
+    const option = document.createElement("option");
+    option.value = frame.id;
+    option.textContent = frame.title;
+    option.selected = frame.id === activeFrameId;
+    leadingSelect.append(option);
+  }
+  leadingSelect.addEventListener("change", () => selectLeadingFrame(leadingSelect.value));
+  leading.append(leadingLabel, leadingSelect);
+  const heading = document.createElement("h3");
+  heading.textContent = `Shown with ${active?.title || "active calendar"}`;
+  const note = document.createElement("p");
+  note.className = "field-note";
+  note.textContent = "Events on this calendar bring their groups automatically. Include another calendar or line, force a whole group into this view, or hide a group here.";
+  viewCard.append(leading, heading, note);
+  const included = new Set(display.overlays || []);
+  const related = Object.values(chronolog.frames).filter((frame) => frame.id !== activeFrameId
+    && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline")));
+  if (related.length) {
+    const label = document.createElement("strong");
+    label.className = "fieldset-title";
+    label.textContent = "Include calendars and lines";
+    const choices = document.createElement("div");
+    choices.className = "frame-view-grid";
+    for (const frame of related.sort((left, right) => left.title.localeCompare(right.title))) {
+      const choice = document.createElement("label");
+      choice.className = "check-chip";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = included.has(frame.id);
+      input.addEventListener("change", () => {
+        executeRecordChange("Change calendar view", "frames", activeFrameId, (documentValue) => {
+          const target = documentValue.frames[activeFrameId];
+          const overlays = new Set(target.display?.overlays || []);
+          if (input.checked) overlays.add(frame.id);
+          else overlays.delete(frame.id);
+          target.display = { ...(target.display || {}), overlays: [...overlays] };
+        }, { viewOnly: true });
+      });
+      choice.append(input, document.createTextNode(`${frame.title} · ${frameKind(frame)}`));
+      choices.append(choice);
+    }
+    viewCard.append(label, choices);
+  }
+  const groups = groupFrames(chronolog);
+  if (groups.length) {
+    const label = document.createElement("strong");
+    label.className = "fieldset-title";
+    label.textContent = "Groups in this view";
+    const groupList = document.createElement("div");
+    groupList.className = "frame-group-list";
+    for (const group of groups) {
+      const row = document.createElement("div");
+      row.className = "frame-group-row";
+      const name = document.createElement("strong");
+      name.textContent = group.title;
+      name.style.setProperty("--group-color", group.color || "#2e8b57");
+      const presence = document.createElement("select");
+      presence.title = `${group.title} in ${active?.title || "this calendar"}`;
+      for (const [value, text] of [["auto", "Automatic"], ["show", "Include all"], ["hide", "Hide here"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        option.selected = (display.groupModes?.[group.id] || "auto") === value;
+        presence.append(option);
+      }
+      presence.addEventListener("change", () => {
+        executeRecordChange("Change group visibility", "frames", activeFrameId, (documentValue) => {
+          const target = documentValue.frames[activeFrameId];
+          const groupModes = { ...(target.display?.groupModes || {}) };
+          if (presence.value === "auto") delete groupModes[group.id];
+          else groupModes[group.id] = presence.value;
+          target.display = { ...(target.display || {}), groupModes };
+        }, { viewOnly: true });
+      });
+      const strategic = document.createElement("select");
+      strategic.title = `${group.title} in Strategic`;
+      for (const [value, text] of [["auto", "Strategic: automatic"], ["show", "Strategic: promote"], ["hide", "Strategic: demote"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        option.selected = (group.display?.strategic || "auto") === value;
+        strategic.append(option);
+      }
+      strategic.addEventListener("change", () => {
+        executeRecordChange("Change strategic priority", "frames", group.id, (documentValue) => {
+          const target = documentValue.frames[group.id];
+          target.display = { ...(target.display || {}), strategic: strategic.value };
+        }, { viewOnly: true });
+      });
+      row.append(name, presence, strategic);
+      groupList.append(row);
+    }
+    viewCard.append(label, groupList);
+  }
+  return viewCard;
+}
+
 function openObjectBrowser(kind) {
   if (!resolveProvisionalDraft()) return;
   const wrapper = document.createElement("div");
@@ -1707,97 +1865,7 @@ function openObjectBrowser(kind) {
   toolbar.append(search, scope);
   wrapper.append(toolbar);
   if (kind === "frame") {
-    const active = chronolog.frames[session.activeFrame];
-    const display = active?.display || {};
-    const viewCard = document.createElement("section");
-    viewCard.className = "frame-view-card";
-    const heading = document.createElement("h3");
-    heading.textContent = `Shown with ${active?.title || "active calendar"}`;
-    const note = document.createElement("p");
-    note.className = "field-note";
-    note.textContent = "Events on this calendar bring their groups automatically. Include another calendar or line, force a whole group into this view, or hide a group here.";
-    viewCard.append(heading, note);
-    const included = new Set(display.overlays || []);
-    const related = Object.values(chronolog.frames).filter((frame) => frame.id !== session.activeFrame
-      && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline")));
-    if (related.length) {
-      const label = document.createElement("strong");
-      label.className = "fieldset-title";
-      label.textContent = "Include calendars and lines";
-      const choices = document.createElement("div");
-      choices.className = "frame-view-grid";
-      for (const frame of related.sort((left, right) => left.title.localeCompare(right.title))) {
-        const choice = document.createElement("label");
-        choice.className = "check-chip";
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.checked = included.has(frame.id);
-        input.addEventListener("change", () => {
-          executeRecordChange("Change calendar view", "frames", session.activeFrame, (documentValue) => {
-            const target = documentValue.frames[session.activeFrame];
-            const overlays = new Set(target.display?.overlays || []);
-            if (input.checked) overlays.add(frame.id);
-            else overlays.delete(frame.id);
-            target.display = { ...(target.display || {}), overlays: [...overlays] };
-          }, { viewOnly: true });
-        });
-        choice.append(input, document.createTextNode(`${frame.title} · ${frameKind(frame)}`));
-        choices.append(choice);
-      }
-      viewCard.append(label, choices);
-    }
-    const groups = groupFrames(chronolog);
-    if (groups.length) {
-      const label = document.createElement("strong");
-      label.className = "fieldset-title";
-      label.textContent = "Groups in this view";
-      const groupList = document.createElement("div");
-      groupList.className = "frame-group-list";
-      for (const group of groups) {
-        const row = document.createElement("div");
-        row.className = "frame-group-row";
-        const name = document.createElement("strong");
-        name.textContent = group.title;
-        name.style.setProperty("--group-color", group.color || "#2e8b57");
-        const presence = document.createElement("select");
-        presence.title = `${group.title} in ${active?.title || "this calendar"}`;
-        for (const [value, text] of [["auto", "Automatic"], ["show", "Include all"], ["hide", "Hide here"]]) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = text;
-          option.selected = (display.groupModes?.[group.id] || "auto") === value;
-          presence.append(option);
-        }
-        presence.addEventListener("change", () => {
-          executeRecordChange("Change group visibility", "frames", session.activeFrame, (documentValue) => {
-            const target = documentValue.frames[session.activeFrame];
-            const groupModes = { ...(target.display?.groupModes || {}) };
-            if (presence.value === "auto") delete groupModes[group.id];
-            else groupModes[group.id] = presence.value;
-            target.display = { ...(target.display || {}), groupModes };
-          }, { viewOnly: true });
-        });
-        const strategic = document.createElement("select");
-        strategic.title = `${group.title} in Strategic`;
-        for (const [value, text] of [["auto", "Strategic: automatic"], ["show", "Strategic: promote"], ["hide", "Strategic: demote"]]) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = text;
-          option.selected = (group.display?.strategic || "auto") === value;
-          strategic.append(option);
-        }
-        strategic.addEventListener("change", () => {
-          executeRecordChange("Change strategic priority", "frames", group.id, (documentValue) => {
-            const target = documentValue.frames[group.id];
-            target.display = { ...(target.display || {}), strategic: strategic.value };
-          }, { viewOnly: true });
-        });
-        row.append(name, presence, strategic);
-        groupList.append(row);
-      }
-      viewCard.append(label, groupList);
-    }
-    wrapper.append(viewCard);
+    wrapper.append(frameViewCard());
     const createRow = document.createElement("div");
     createRow.className = "object-create-row";
     for (const [value, label] of [["calendar", "+ Calendar"], ["group", "+ Group"], ["importance", "+ Importance"], ["cycle", "+ Cycle"], ["line", "+ Line"]]) {
@@ -1857,7 +1925,19 @@ function openObjectBrowser(kind) {
   search.addEventListener("input", paint);
   scope.addEventListener("change", paint);
   paint();
-  openInspector(kind === "frame" ? "Frames" : "Patterns", wrapper);
+  const isFramesBrowser = kind === "frame";
+  openInspector(kind === "frame" ? "Frames" : "Patterns", wrapper, isFramesBrowser ? "frames-browser" : "object-browser");
+  if (isFramesBrowser) {
+    byId("new-frame").setAttribute("aria-expanded", "true");
+    search.focus();
+  }
+}
+
+function refreshFramesPanel() {
+  if (inspector.classList.contains("open") && inspector.dataset.panel === "frames-browser") {
+    const current = inspectorBody.querySelector(".frame-view-card");
+    if (current) current.replaceWith(frameViewCard());
+  }
 }
 
 function openStapleSuggestions(suggestions) {
@@ -1998,10 +2078,24 @@ function animateRadialWheel(delta) {
   radialWheelAnimation.frame = requestAnimationFrame(advance);
 }
 
+function prepareIntimateZoom(value, pointerOffset = null) {
+  const scroll = projection.querySelector(".intimate-scroll");
+  const offset = pointerOffset ?? scroll?.clientHeight / 2 ?? projection.clientHeight / 2;
+  const hourPixels = Number(scroll?.dataset.hourPixels || session.intimateHourPixels);
+  const bufferHours = Number(scroll?.dataset.bufferHours || 24);
+  const headerPixels = Number(scroll?.dataset.headerPixels || 70);
+  const localHour = scroll
+    ? (scroll.scrollTop + offset - headerPixels) / hourPixels - bufferHours
+    : (session.intimateStartHour + session.intimateEndHour) / 2;
+  pendingIntimateRebase = null;
+  pendingIntimateZoom = { localHour, offset, left: scroll?.scrollLeft || 0 };
+  session.setIntimateHourPixels(value);
+}
+
 function adjustWindow(steps) {
   const lens = session.currentLens();
   if (lens === "intimate") {
-    session.intimateForward = Math.max(0, Math.min(14, session.intimateForward + steps));
+    prepareIntimateZoom(session.intimateHourPixels * 1.2 ** (-steps));
   } else if (lens === "tactical") {
     session.tacticalRows = Math.max(1, Math.min(8, session.tacticalRows + steps));
   } else if (lens === "strategic") {
@@ -2019,6 +2113,15 @@ function panFromWheel(event) {
   if (session.currentLens() === "intimate" && !event.ctrlKey && !event.metaKey) return;
   event.preventDefault();
   if (event.ctrlKey || event.metaKey) {
+    if (session.currentLens() === "intimate") {
+      const scroll = projection.querySelector(".intimate-scroll");
+      const offset = scroll
+        ? Math.max(0, Math.min(scroll.clientHeight, event.clientY - scroll.getBoundingClientRect().top))
+        : null;
+      prepareIntimateZoom(session.intimateHourPixels * Math.exp(-event.deltaY * 0.002), offset);
+      scheduleRender();
+      return;
+    }
     zoomWheel += event.deltaY;
     const steps = Math.trunc(zoomWheel / 90);
     if (!steps) return;
@@ -2052,13 +2155,7 @@ document.querySelectorAll("[data-lens]").forEach((button) => {
 });
 
 byId("active-calendar").addEventListener("change", (event) => {
-  session.activeFrame = event.target.value;
-  session.primeFrame = session.activeFrame;
-  const matchingCycle = Object.values(chronolog.frames).find(
-    (frame) => frame.traits.includes("cycle") && frame.calendar === session.activeFrame
-  );
-  if (matchingCycle) selectCycle(matchingCycle.id);
-  scheduleRender();
+  selectLeadingFrame(event.target.value);
 });
 
 byId("shared-focus").addEventListener("change", (event) => {
@@ -2071,13 +2168,27 @@ function goToToday() {
   session.setFocus(new Rational(daysFromCivil(
     BigInt(now.getFullYear()), BigInt(now.getMonth() + 1), BigInt(now.getDate())
   )));
+  if (session.currentLens() === "intimate") {
+    const scroll = projection.querySelector(".intimate-scroll");
+    pendingIntimateZoom = {
+      localHour: now.getHours() + now.getMinutes() / 60,
+      offset: scroll?.clientHeight / 2 || projection.clientHeight / 2,
+      left: scroll?.scrollLeft || 0
+    };
+  }
 }
 
 byId("undo").addEventListener("click", () => history.undo());
 byId("redo").addEventListener("click", () => history.redo());
 byId("close-inspector").addEventListener("click", closeInspector);
 byId("new-event").addEventListener("click", () => createEventAt(session.currentFocus()));
-byId("new-frame").addEventListener("click", () => openObjectBrowser("frame"));
+byId("new-frame").addEventListener("click", () => {
+  if (inspector.classList.contains("open") && inspector.dataset.panel === "frames-browser") {
+    closeInspector();
+    return;
+  }
+  openObjectBrowser("frame");
+});
 byId("new-pattern").addEventListener("click", () => openObjectBrowser("pattern"));
 byId("theme-settings").addEventListener("click", () => {
   byId("app-menu").open = false;
@@ -2087,7 +2198,7 @@ byId("theme-settings").addEventListener("click", () => {
 projection.addEventListener("wheel", panFromWheel, { passive: false });
 projection.addEventListener("scroll", (event) => {
   const scroll = event.target;
-  if (!(scroll instanceof HTMLElement) || !scroll.classList.contains("intimate-scroll") || pendingIntimateRebase) return;
+  if (!(scroll instanceof HTMLElement) || !scroll.classList.contains("intimate-scroll") || pendingIntimateRebase || pendingIntimateZoom) return;
   const hourPixels = Number(scroll.dataset.hourPixels || 56);
   const edge = hourPixels * 6;
   if (scroll.scrollTop < edge) {
@@ -2221,13 +2332,13 @@ function destinationForDrop(cell, clientX, clientY, sourceDay) {
   if (cell.classList.contains("intimate-day-column")) {
     const bounds = cell.getBoundingClientRect();
     const fraction = Math.max(0, Math.min(0.999999, (clientY - bounds.top) / bounds.height));
-    const visibleStart = session.intimateStartHour * 60;
-    const visibleMinutes = (session.intimateEndHour - session.intimateStartHour) * 60;
+    const timelineStart = Rational.parse(cell.dataset.timelineStart || base);
+    const timelineMinutes = Number(cell.dataset.timelineHours || 24) * 60;
     const minute = Math.min(
-      session.intimateEndHour * 60 - session.intimateGrain,
-      Math.max(visibleStart, visibleStart + Math.round(fraction * visibleMinutes / session.intimateGrain) * session.intimateGrain)
+      timelineMinutes - session.intimateGrain,
+      Math.max(0, Math.round(fraction * timelineMinutes / session.intimateGrain) * session.intimateGrain)
     );
-    return base.add(Rational.parse(minute).div(1440));
+    return timelineStart.add(Rational.parse(minute).div(1440));
   }
   const source = Rational.parse(sourceDay);
   return base.add(source.sub(source.floor()));
@@ -2628,8 +2739,7 @@ byId("ics-file").addEventListener("change", async (event) => {
     try {
       const text = await file.text();
       const result = importCalendar(text, file.name.replace(/\.ics$/i, ""));
-      session.activeFrame = result.frames[0] || session.activeFrame;
-      session.primeFrame = session.activeFrame;
+      selectLeadingFrame(result.frames[0] || session.activeFrame);
       toast(
         `Imported ${result.events.length} items from ${file.name}`
         + (result.suggestions.length ? ` · ${result.suggestions.length} staple suggestion(s)` : "")
@@ -2662,6 +2772,11 @@ byId("export-ics").addEventListener("click", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && inspector.classList.contains("open")) {
+    event.preventDefault();
+    closeInspector();
+    return;
+  }
   const editing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
   if (editing) return;
   if (event.key === "Delete" && session.inspector?.type === "event") {
@@ -2717,9 +2832,12 @@ async function loadWorkspaceDocument() {
   } catch (error) {
     store.attach(chronolog, LOCAL_WORKSPACE_TARGET);
     toast(`Workspace autoload unavailable: ${error.message}`, true);
+  } finally {
+    documentLoading = false;
   }
 }
 
+render();
 await loadWorkspaceDocument();
 const validation = validateDocument(chronolog);
 if (!validation.valid) toast(validation.errors.join(" · "), true);

@@ -48,6 +48,43 @@ test("application shell exposes seven explicit lenses with contextual window con
   assert.match(app, /localStorage\.setItem/);
 });
 
+test("save status remains a legible, accessible status badge", async () => {
+  const [html, css, app] = await Promise.all([
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("src/app.css", "utf8"),
+    readFile("src/app.js", "utf8")
+  ]);
+  assert.match(html, /id="save-status"[^>]*role="status"/);
+  assert.match(html, /id="save-status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="save-status"[^>]*aria-label="Save status"/);
+  assert.match(html, /id="save-status"[^>]*title="Current save status"/);
+  assert.match(html, /id="save-status"[^>]*>Saved<\/span>/);
+  assert.doesNotMatch(css, /#save-status\s*\{[^}]*color:\s*transparent/);
+  assert.doesNotMatch(css, /#save-status\s*\{[^}]*width:\s*19px/);
+  const statusUpdate = sourceSlice(app, "onStatus(status)", "store.attach");
+  assert.match(statusUpdate, /node\.dataset\.state = status\.state/);
+  assert.match(statusUpdate, /node\.textContent = status\.message/);
+});
+
+test("lens controls use an explicit accessible overflow menu instead of clipped horizontal controls", async () => {
+  const [css, app] = await Promise.all([
+    readFile("src/app.css", "utf8"),
+    readFile("src/app.js", "utf8")
+  ]);
+  const updateControls = sourceSlice(app, "function updateLensControls", "function toast");
+  assert.match(updateControls, /lens-control-overflow/);
+  assert.match(updateControls, /primaryControlIndexes/);
+  assert.match(updateControls, /lensControls\.append\(\.\.\.primaryControls, options, todayControl\)/);
+  assert.match(cssBlock(css, "#lens-controls"), /overflow: visible/);
+  assert.doesNotMatch(cssBlock(css, "#lens-controls"), /overflow-x: auto/);
+  assert.match(cssBlock(css, ".lens-control-overflow > summary"), /cursor: pointer/);
+  assert.match(css, /\.lens-readout\s*\{\s*min-width: 0;[\s\S]*?text-overflow: ellipsis/);
+  const today = cssBlock(css, "#today");
+  assert.doesNotMatch(today, /position: sticky/);
+  assert.doesNotMatch(today, /margin-left: auto/);
+  assert.match(today, /place-items: center/);
+});
+
 test("URL parameters pass through the sanitizer before reaching the session", async () => {
   const app = await readFile("src/app.js", "utf8");
   assert.match(app, /sanitizeSessionParameters\(new URLSearchParams\(location\.search\), chronolog\)/);
@@ -74,11 +111,60 @@ test("history changes reconcile dangling inspector and frame state", async () =>
   assert.match(reconcile, /closeInspector\(\)/);
 });
 
+test("an open Frames panel and every projection share the toolbar leading frame", async () => {
+  const [app, projections] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/projections.js", "utf8")
+  ]);
+  const selection = sourceSlice(app, "function selectLeadingFrame", "function updateChrome");
+  assert.match(selection, /session\.setLeadingFrame\(frameId\)/);
+  assert.match(selection, /refreshFramesPanel\(\)/);
+  assert.match(selection, /scheduleRender\(\)/);
+  const toolbar = sourceSlice(app, 'byId("active-calendar").addEventListener', 'byId("shared-focus").addEventListener');
+  assert.match(toolbar, /selectLeadingFrame\(event\.target\.value\)/);
+  const viewCard = sourceSlice(app, "function frameViewCard", "function openObjectBrowser");
+  assert.match(viewCard, /leadingSelect\.id = "frame-leading-select"/);
+  assert.match(viewCard, /selectLeadingFrame\(leadingSelect\.value\)/);
+  assert.match(viewCard, /const display = active\?\.display \|\| \{\}/);
+  assert.match(viewCard, /const activeFrameId = session\.activeFrame/);
+  assert.match(viewCard, /documentValue\.frames\[activeFrameId\]/);
+  assert.match(viewCard, /target\.display = \{ \.\.\.\(target\.display \|\| \{\}\), overlays: \[\.\.\.overlays\] \}/);
+  const refresh = sourceSlice(app, "function refreshFramesPanel", "function openStapleSuggestions");
+  assert.match(refresh, /current\.replaceWith\(frameViewCard\(\)\)/);
+  assert.doesNotMatch(app, /primeFrame/);
+  assert.doesNotMatch(projections, /primeFrame/);
+});
+
 test("openInspector only accepts DOM nodes", async () => {
   const app = await readFile("src/app.js", "utf8");
   const inspectorSource = sourceSlice(app, "function openInspector", "function escapeHTML");
   assert.doesNotMatch(inspectorSource, /innerHTML/);
   assert.match(inspectorSource, /replaceChildren\(body\)/);
+});
+
+test("Frames button toggles its browser panel with accessible state and preserves panel closing controls", async () => {
+  const [html, app] = await Promise.all([
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("src/app.js", "utf8")
+  ]);
+  assert.match(html, /id="new-frame"[^>]*aria-controls="inspector"[^>]*aria-expanded="false"/);
+  const framesButton = sourceSlice(app, 'byId("new-frame").addEventListener', 'byId("new-pattern")');
+  assert.match(framesButton, /inspector\.dataset\.panel === "frames-browser"/);
+  assert.match(framesButton, /closeInspector\(\)/);
+  assert.match(framesButton, /openObjectBrowser\("frame"\)/);
+  const browser = sourceSlice(app, "function openObjectBrowser", "function openStapleSuggestions");
+  assert.match(browser, /"frames-browser"/);
+  assert.match(browser, /aria-expanded", "true"/);
+  assert.match(browser, /search\.focus\(\)/);
+  const refresh = sourceSlice(app, "function refreshFramesPanel", "function openStapleSuggestions");
+  assert.match(refresh, /dataset\.panel === "frames-browser"/);
+  assert.doesNotMatch(app, /dataset\.objectBrowser/);
+  const dismiss = sourceSlice(app, "function dismissInspector", "function resolveProvisionalDraft");
+  assert.match(dismiss, /aria-expanded", "false"/);
+  assert.match(dismiss, /new-frame"\)\.focus\(\)/);
+  const keydown = sourceSlice(app, 'window.addEventListener("keydown"', 'window.addEventListener("beforeunload"');
+  assert.match(keydown, /event\.key === "Escape"/);
+  assert.match(keydown, /closeInspector\(\)/);
 });
 
 test("pattern errors surface above chrome in every projection", async () => {
@@ -170,17 +256,20 @@ test("event creation and editing use scoped deltas and expose calendar-language 
   assert.doesNotMatch(app, /history\.execute\(/);
 });
 
-test("calendar lenses request overlaps, split duration spans, and radial offers useful fixed cycles", async () => {
-  const [app, projections] = await Promise.all([
+test("calendar lenses request overlaps, split duration spans, and radial keeps only unambiguous fixed cycles", async () => {
+  const [app, projections, radial] = await Promise.all([
     readFile("src/app.js", "utf8"),
-    readFile("src/projections.js", "utf8")
+    readFile("src/projections.js", "utf8"),
+    readFile("src/radial.js", "utf8")
   ]);
   assert.match(projections, /includeOverlaps: true/);
   assert.match(projections, /segmentStartMinute/);
   assert.match(projections, /segmentEndMinute/);
-  for (const label of ["Day", "Work week", "Week", "Calendar month (mean)", "Quarter (mean)", "Year (mean)"]) {
-    assert.match(app, new RegExp(`title: "${label.replace(/[()]/g, "\\$&")}"`));
+  for (const label of ["Day", "Work week", "Week"]) {
+    assert.match(radial, new RegExp(`title: "${label.replace(/[()]/g, "\\$&")}`));
   }
+  assert.match(app, /cyclePeriodHint\(frame\.period\)/);
+  assert.match(app, /\(variable\)/);
 });
 
 test("lens rerenders preserve internal scroll and minimap range", async () => {
@@ -197,14 +286,19 @@ test("lens rerenders preserve internal scroll and minimap range", async () => {
   assert.match(minimap, /previous\.start/);
 });
 
-test("Lines uses one calendar query partitioned onto Prime and group side lines", async () => {
+test("Lines uses the active leading calendar and explicitly selected companions", async () => {
   const projections = await readFile("src/projections.js", "utf8");
   const lines = sourceSlice(projections, "function renderSimpleLines", "function polar");
   assert.match(lines, /Prime/);
-  assert.match(lines, /composition/);
+  assert.match(lines, /lineFramePlan\(context\.document, context\.session\.activeFrame\)/);
   assert.match(lines, /staple/);
   assert.match(lines, /Math\.sin\(Math\.PI \* p\)/);
-  assert.equal((lines.match(/queryFacts\(/g) || []).length, 1);
+  assert.match(lines, /dataset\.linesState/);
+  assert.match(lines, /Loading timeline data/);
+  assert.match(lines, /No events in this window/);
+  assert.match(lines, /context\.session\.window\(\)/);
+  assert.match(lines, /bindFact\(dot, fact\)/);
+  assert.doesNotMatch(lines, /context\.document\s*=/);
 });
 
 test("workspace documents use a custom extension with autoload and attached autosave", async () => {
@@ -230,12 +324,13 @@ test("frame manager exposes contextual calendar inclusion, group visibility, str
     assert.match(manager, new RegExp(phrase));
   }
   const browser = sourceSlice(app, "function openObjectBrowser", "function openStapleSuggestions");
+  const viewCard = sourceSlice(app, "function frameViewCard", "function openObjectBrowser");
   assert.match(browser, /Current lens/);
-  assert.match(browser, /Shown with/);
-  assert.match(browser, /Include calendars and lines/);
-  assert.match(browser, /Automatic/);
-  assert.match(browser, /Strategic: promote/);
-  assert.doesNotMatch(browser, /Layer mode/);
+  assert.match(viewCard, /Shown with/);
+  assert.match(viewCard, /Include calendars and lines/);
+  assert.match(viewCard, /Automatic/);
+  assert.match(viewCard, /Strategic: promote/);
+  assert.doesNotMatch(viewCard, /Layer mode/);
 });
 
 test("empty drag creates an interval, shift-drag pans, and untouched drafts are discarded", async () => {
@@ -264,6 +359,9 @@ test("radial uses whole-cycle scrolling, populated calendar-group bands, collisi
   assert.match(projections, /radial-noon-tick/);
   assert.match(app, /ticks \(0 auto\)/);
   assert.match(app, /bold every \(0 auto\)/);
+  assert.match(projections, /dataset\.radialState/);
+  assert.match(projections, /radial-empty-ring/);
+  assert.match(projections, /Dense window · showing the first 350 events/);
 });
 
 test("interaction refinements expose continuous intimate scroll, tactical shift scroll, delete, and frame-owned importance", async () => {
@@ -272,7 +370,7 @@ test("interaction refinements expose continuous intimate scroll, tactical shift 
     readFile("src/projections.js", "utf8"),
     readFile("src/engine.js", "utf8")
   ]);
-  assert.match(projections, /dataset\.bufferHours = "24"/);
+  assert.match(projections, /dataset\.bufferHours = String\(Number\(bufferDays\) \* 24\)/);
   assert.match(app, /scroll\.scrollTop = createDrag\.startScrollTop - dy/);
   assert.match(projections, /intimate-midnight-marker/);
   assert.match(app, /session\.move\(event\.shiftKey \? steps : steps \* session\.tacticalColumns\)/);
@@ -282,6 +380,30 @@ test("interaction refinements expose continuous intimate scroll, tactical shift 
   assert.match(projections, /other\.start < item\.end && other\.end > item\.start/);
   assert.match(projections, /frame\.display\?\.radialMinDays/);
   assert.match(engine, /eventFrames\(eventId\)/);
+});
+
+test("Intimate zoom is anchored, accessible, persistent, and keeps multi-day hit geometry", async () => {
+  const [app, projections, session] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/projections.js", "utf8"),
+    readFile("src/session.js", "utf8")
+  ]);
+  assert.match(session, /intimateHourPixels: this\.intimateHourPixels/);
+  assert.match(session, /INTIMATE_HOUR_PIXELS_MIN = 8/);
+  assert.match(session, /INTIMATE_HOUR_PIXELS_MAX = 144/);
+  assert.match(projections, /Math\.ceil\(visibleHours \/ 48\)/);
+  assert.match(projections, /for \(let boundary = 1; boundary < railDays; boundary \+= 1\)/);
+  assert.match(projections, /dataset\.timelineStart = \(day - bufferDays\)\.toString\(\)/);
+  const zoom = sourceSlice(app, "function prepareIntimateZoom", "function adjustWindow");
+  assert.match(zoom, /localHour/);
+  assert.match(zoom, /scroll\.scrollTop \+ offset - headerPixels/);
+  assert.match(zoom, /session\.setIntimateHourPixels\(value\)/);
+  assert.match(app, /event\.clientY - scroll\.getBoundingClientRect\(\)\.top/);
+  assert.match(app, /aria-label", "Zoom Intimate out"/);
+  assert.match(app, /aria-label", "Zoom Intimate in"/);
+  assert.match(app, /Center Intimate on today and now/);
+  assert.match(app, /cell\.dataset\.timelineStart/);
+  assert.match(app, /cell\.dataset\.timelineHours/);
 });
 
 test("continuous-time chrome and recurrence exceptions retain their governing context", async () => {
