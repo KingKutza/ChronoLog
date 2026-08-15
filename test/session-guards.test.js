@@ -26,7 +26,7 @@ test("frame, projection, and radial parameters are honored only when legal", () 
   assert.deepEqual(sanitizeSessionParameters(new URLSearchParams("frame=typo"), documentValue), {});
   assert.deepEqual(
     sanitizeSessionParameters(new URLSearchParams("frame=calendar:main"), documentValue),
-    { activeFrame: "calendar:main", primeFrame: "calendar:main" }
+    { activeFrame: "calendar:main" }
   );
   assert.deepEqual(sanitizeSessionParameters(new URLSearchParams("projection=bogus"), documentValue), {});
   assert.deepEqual(
@@ -40,7 +40,7 @@ test("frame, projection, and radial parameters are honored only when legal", () 
   );
   assert.deepEqual(
     sanitizeSessionParameters(new URLSearchParams("frame=calendar:main&scale=0.25&projection=wall&radial=spiral"), documentValue),
-    { activeFrame: "calendar:main", primeFrame: "calendar:main", projection: "wall", scale: 0.25, radialMode: "spiral" }
+    { activeFrame: "calendar:main", projection: "wall", scale: 0.25, radialMode: "spiral" }
   );
 });
 

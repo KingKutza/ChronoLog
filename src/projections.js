@@ -9,6 +9,8 @@ import {
   formatCivil,
   levelValue
 } from "./exact.js";
+import { radialGuideSettings, radialRenderState } from "./radial.js";
+import { lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -279,7 +281,9 @@ function renderIntimate(target, context) {
   const firstDay = focus.floor() - BigInt(context.session.intimateBack);
   const dayCount = context.session.intimateBack + context.session.intimateForward + 1;
   const lastDay = firstDay + BigInt(dayCount - 1);
-  const bufferDays = 1n;
+  const hourPixels = context.session.intimateHourPixels;
+  const visibleHours = Math.max(1, (target.clientHeight - 70) / hourPixels);
+  const bufferDays = BigInt(Math.max(1, Math.ceil(visibleHours / 48)));
   const queryStart = firstDay - bufferDays;
   const queryEnd = lastDay + bufferDays + 1n;
   const result = queryFacts(
@@ -311,14 +315,14 @@ function renderIntimate(target, context) {
     if (allDay.length) dayHeader.title = `${allDay.length} all-day event${allDay.length === 1 ? "" : "s"}`;
     header.append(dayHeader);
   }
-  const selectedHours = context.session.intimateEndHour - context.session.intimateStartHour;
-  const hourPixels = Math.max(28, Math.min(180, (target.clientHeight - 76) / Math.max(1, selectedHours)));
-  const railHours = 72;
+  const railDays = Number(bufferDays * 2n + 1n);
+  const railHours = railDays * 24;
   const railHeight = railHours * hourPixels;
   const scroll = element("div", "intimate-scroll");
   scroll.dataset.scrollKey = "intimate";
-  scroll.dataset.bufferHours = "24";
+  scroll.dataset.bufferHours = String(Number(bufferDays) * 24);
   scroll.dataset.hourPixels = String(hourPixels);
+  scroll.dataset.headerPixels = "70";
   scroll.dataset.initialHour = String((context.session.intimateStartHour + context.session.intimateEndHour) / 2);
   const body = element("div", "intimate-body");
   const gutter = element("div", "intimate-gutter");
@@ -328,7 +332,7 @@ function renderIntimate(target, context) {
     label.style.top = `${hour * hourPixels}px`;
     gutter.append(label);
   }
-  for (const boundary of [24, 48]) {
+  for (let boundary = 1; boundary < railDays; boundary += 1) {
     const line = element("div", "intimate-midnight-line");
     line.style.top = `${boundary * hourPixels}px`;
     gutter.append(line);
@@ -339,12 +343,12 @@ function renderIntimate(target, context) {
     column.style.height = `${railHeight}px`;
     column.style.setProperty("--grain-px", `${hourPixels * context.session.intimateGrain / 60}px`);
     column.dataset.createDay = day.toString();
-    column.dataset.timelineStart = (day - 1n).toString();
+    column.dataset.timelineStart = (day - bufferDays).toString();
     column.dataset.timelineHours = String(railHours);
     const timed = [];
-    for (let offset = -1; offset <= 1; offset += 1) {
+    for (let offset = -Number(bufferDays); offset <= Number(bufferDays); offset += 1) {
       const segmentDay = day + BigInt(offset);
-      const segmentIndex = offset + 1;
+      const segmentIndex = offset + Number(bufferDays);
       const dayFacts = byDay.get(segmentDay.toString()) || [];
       const spanning = dayFacts.find((fact) => context.session.intimateZoneFill && durationMinutes(fact.event) >= 1440);
       if (spanning) {
@@ -409,8 +413,8 @@ function renderIntimate(target, context) {
       );
       column.append(button);
     }
-    for (const boundary of [1, 2]) {
-      const boundaryDay = day - 1n + BigInt(boundary);
+    for (let boundary = 1; boundary < railDays; boundary += 1) {
+      const boundaryDay = day - bufferDays + BigInt(boundary);
       const previousCivil = civilFromDays(boundaryDay - 1n);
       const nextCivil = civilFromDays(boundaryDay);
       const marker = element("div", "intimate-midnight-marker");
@@ -422,10 +426,10 @@ function renderIntimate(target, context) {
       );
       column.append(marker);
     }
-    if (today >= day - 1n && today <= day + 1n) {
+    if (today >= day - bufferDays && today <= day + bufferDays) {
       const line = element("div", "intimate-now");
       const nowMinute = now.getHours() * 60 + now.getMinutes();
-      const segmentIndex = Number(today - (day - 1n));
+      const segmentIndex = Number(today - (day - bufferDays));
       line.style.top = `${(segmentIndex * 1440 + nowMinute) / 60 * hourPixels}px`;
       column.append(line);
     }
@@ -638,7 +642,7 @@ function renderWall(target, context) {
 
 function renderLines(target, context) {
   const frames = calendarFrames(context.document);
-  const prime = context.document.frames[context.session.primeFrame] || frames[0];
+  const prime = context.document.frames[context.session.activeFrame] || frames[0];
   const ordered = [prime, ...frames.filter((frame) => frame.id !== prime?.id)].filter(Boolean);
   const window = context.session.window();
   const width = 1200;
@@ -840,18 +844,10 @@ function renderSimpleLines(target, context) {
   const width = 1200;
   const height = 620;
   const primeY = height / 2;
-  const xFor = (day) => 145 + Rational.parse(day).sub(window.start).div(window.end.sub(window.start)).toNumber() * 995;
-  const prime = context.document.frames[context.session.primeFrame] || context.document.frames[context.session.activeFrame];
-  const relatedIds = new Set();
-  for (const relation of Object.values(context.document.relations)) {
-    if (relation.type !== "composition") continue;
-    if (relation.parent === prime?.id) relatedIds.add(relation.child);
-    if (relation.child === prime?.id) relatedIds.add(relation.parent);
-  }
-  for (const frame of calendarFrames(context.document)) {
-    if (frame.id !== prime?.id && ["overlay", "underlay"].includes(frame.display?.mode)) relatedIds.add(frame.id);
-  }
-  const secondaryFrames = [...relatedIds].map((id) => context.document.frames[id]).filter(Boolean).slice(0, 8);
+  const xFor = (day) => 145 + lineProgress(day, window.start, window.end) * 995;
+  const plan = lineFramePlan(context.document, context.session.activeFrame);
+  const prime = plan.leading;
+  const secondaryFrames = plan.companions;
   const directQuery = (frame, limit) => context.engine.queryFacts({
     frame: frame.id,
     start: daysToCivilCoordinate(window.start),
@@ -859,8 +855,6 @@ function renderSimpleLines(target, context) {
     includeOverlaps: true,
     limit
   });
-  const primeResult = directQuery(prime, 260);
-  const secondary = secondaryFrames.map((frame) => ({ frame, result: directQuery(frame, 140) }));
   const svg = svgElement("svg", {
     class: "lines-svg", viewBox: `0 0 ${width} ${height}`, role: "img",
     "aria-label": "Prime frame with related frames entering and leaving at staple points"
@@ -868,6 +862,25 @@ function renderSimpleLines(target, context) {
   svg.dataset.dropStart = window.start.toJSON();
   svg.dataset.dropEnd = window.end.toJSON();
   svg.dataset.dropKind = "linear";
+  const appendState = (state, message) => {
+    svg.dataset.linesState = state;
+    const label = svgElement("text", {
+      x: width / 2, y: height / 2 + 5, "text-anchor": "middle", class: `lines-state lines-state-${state}`
+    });
+    label.textContent = message;
+    svg.append(label);
+    target.append(svg);
+  };
+  if (context.loading) {
+    appendState(linesRenderState({ loading: true }), "Loading timeline data…");
+    return;
+  }
+  if (!plan.supported) {
+    appendState(linesRenderState({ supported: false }), "Lines requires an active calendar frame");
+    return;
+  }
+  const primeResult = directQuery(prime, 260);
+  const secondary = secondaryFrames.map((frame) => ({ frame, result: directQuery(frame, 140) }));
   for (let index = 0; index < 8; index += 1) {
     const progress = index / 7;
     const x = 145 + progress * 995;
@@ -896,11 +909,9 @@ function renderSimpleLines(target, context) {
     svg.append(dot);
   }
   secondary.forEach(({ frame, result }, index) => {
-    if (!result.facts.length) return;
     const xs = result.facts.map((fact) => xFor(fact.day)).filter((x) => x >= 145 && x <= 1140);
-    if (!xs.length) return;
-    const firstX = Math.max(145, Math.min(...xs) - 24);
-    const lastX = Math.min(1140, Math.max(...xs) + 24);
+    const firstX = xs.length ? Math.max(145, Math.min(...xs) - 24) : 145;
+    const lastX = xs.length ? Math.min(1140, Math.max(...xs) + 24) : 1140;
     const apexY = primeY + (index % 2 ? 1 : -1) * (75 + Math.floor(index / 2) * 52);
     const middleX = (firstX + lastX) / 2;
     const path = `M ${firstX} ${primeY} C ${firstX + 35} ${primeY}, ${firstX + 35} ${apexY}, ${middleX} ${apexY} C ${lastX - 35} ${apexY}, ${lastX - 35} ${primeY}, ${lastX} ${primeY}`;
@@ -923,10 +934,32 @@ function renderSimpleLines(target, context) {
       svg.append(dot);
     }
   });
+  const results = [primeResult, ...secondary.map((item) => item.result)];
+  const errors = results.flatMap((result) => result.errors || []);
+  const factCount = results.reduce((total, result) => total + result.facts.length, 0);
+  const truncated = results.some((result) => result.truncated);
+  const state = linesRenderState({ factCount, errorCount: errors.length, truncated });
+  svg.dataset.linesState = state;
+  if (state !== "ordinary") {
+    const status = svgElement("text", {
+      x: width / 2, y: height - 15, "text-anchor": "middle", class: `lines-state lines-state-${state}`
+    });
+    status.textContent = state === "empty" ? "No events in this window"
+      : state === "dense" ? "Dense window · some events are not shown"
+      : "Some timeline data could not be rendered";
+    svg.append(status);
+  }
+  if (plan.unsupportedCompanions.length) {
+    const unsupported = svgElement("text", {
+      x: width - 60, y: 30, "text-anchor": "end", class: "lines-state lines-state-unsupported"
+    });
+    unsupported.textContent = `${plan.unsupportedCompanions.length} unsupported companion selection${plan.unsupportedCompanions.length === 1 ? "" : "s"}`;
+    svg.append(unsupported);
+  }
   target.append(svg);
   renderErrors(target, {
-    errors: [primeResult, ...secondary.map((item) => item.result)].flatMap((result) => result.errors || []),
-    truncated: primeResult.truncated || secondary.some((item) => item.result.truncated)
+    errors,
+    truncated
   });
 }
 
@@ -958,16 +991,6 @@ function radialEventLabel(layer, fact, x, y, labels, anchor = "start") {
   const label = svgElement("text", { x, y, "text-anchor": anchor, class: "radial-event-label" });
   label.textContent = title.length > 30 ? `${title.slice(0, 29)}…` : title;
   layer.append(label);
-}
-
-function radialGuideSettings(session) {
-  const cycleDays = session.radialCycle.toNumber();
-  const divisions = session.radialDivisions || (cycleDays >= 5 ? Math.max(1, Math.round(cycleDays)) : 24);
-  const majorEvery = session.radialMajorEvery
-    || (cycleDays >= 20 ? 7 : cycleDays >= 5 ? 1 : Math.max(1, Math.round(divisions / 4)));
-  const dayNight = session.radialMarks === "day-night"
-    || (session.radialMarks === "auto" && (cycleDays <= 2 || cycleDays >= 20));
-  return { cycleDays, divisions, majorEvery, dayNight };
 }
 
 function currentDays() {
@@ -1003,6 +1026,7 @@ function renderRadial(target, context) {
     ? session.currentFocus().add(cycle.mul(session.radialFuture + 0.5))
     : session.currentFocus().add(cycle.div(2));
   const result = queryFacts(context, session.activeFrame, start, end, 350);
+  const renderState = radialRenderState(result.facts.length, result.truncated);
   const radialLabels = [];
   const labelLayer = svgElement("g", { class: "radial-label-layer" });
   const svg = svgElement("svg", {
@@ -1015,6 +1039,7 @@ function renderRadial(target, context) {
   svg.dataset.dropEnd = end.toJSON();
   svg.dataset.dropKind = "radial";
   svg.dataset.radialMode = session.radialMode;
+  svg.dataset.radialState = renderState;
   svg.append(svgElement("circle", {
     cx, cy, r: 54, fill: "#f5efe2", stroke: "#bdb19e", "stroke-width": 2
   }));
@@ -1151,6 +1176,11 @@ function renderRadial(target, context) {
     const outer = 278;
     const spacing = Math.min(48, 210 / Math.max(1, bands.length));
     const ringRadius = (index) => outer - (bands.length - 1 - index) * spacing;
+    if (bands.length === 0) {
+      svg.append(svgElement("circle", {
+        cx, cy, r: outer, fill: "none", class: "radial-empty-ring"
+      }));
+    }
     for (let ring = 0; ring < bands.length; ring += 1) {
       const radius = ringRadius(ring);
       svg.append(svgElement("circle", {
@@ -1201,6 +1231,15 @@ function renderRadial(target, context) {
         }
       }
     }
+  }
+  if (renderState !== "ordinary") {
+    const status = svgElement("text", {
+      x: cx, y: height - 24, "text-anchor": "middle", class: "radial-state-label"
+    });
+    status.textContent = renderState === "empty"
+      ? "No events in this cycle"
+      : "Dense window · showing the first 350 events";
+    svg.append(status);
   }
   svg.append(labelLayer);
   target.append(svg);
