@@ -32,6 +32,8 @@ export function scaleForSpan(span) {
 const PROJECTIONS = ["calendar", "wall", "lines", "radial"];
 const LENSES = ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"];
 const RADIAL_MODES = ["spiral", "concentric"];
+const INTIMATE_HOUR_PIXELS_MIN = 8;
+const INTIMATE_HOUR_PIXELS_MAX = 144;
 
 export function sanitizeSessionParameters(parameters, chronologDocument) {
   const frames = chronologDocument?.frames || {};
@@ -105,6 +107,10 @@ export class ViewSession {
     this.intimateGrain = [15, 30, 60].includes(Number(input.intimateGrain))
       ? Number(input.intimateGrain)
       : 15;
+    this.intimateHourPixels = Math.max(
+      INTIMATE_HOUR_PIXELS_MIN,
+      Math.min(INTIMATE_HOUR_PIXELS_MAX, Number(input.intimateHourPixels) || 28)
+    );
     this.intimateStartHour = Math.max(0, Math.min(23, Math.floor(Number(input.intimateStartHour ?? 0))));
     this.intimateEndHour = Math.max(this.intimateStartHour + 1, Math.min(24, Math.floor(Number(input.intimateEndHour ?? 24))));
     this.tacticalRows = Math.max(1, Math.floor(Number(input.tacticalRows ?? 3)));
@@ -144,6 +150,13 @@ export class ViewSession {
 
   move(days) {
     this.setFocus(this.currentFocus().add(days));
+  }
+
+  setIntimateHourPixels(value) {
+    this.intimateHourPixels = Math.max(
+      INTIMATE_HOUR_PIXELS_MIN,
+      Math.min(INTIMATE_HOUR_PIXELS_MAX, Number(value) || this.intimateHourPixels)
+    );
   }
 
   setProjection(projection) {
@@ -257,6 +270,7 @@ export class ViewSession {
       intimateBack: this.intimateBack,
       intimateForward: this.intimateForward,
       intimateGrain: this.intimateGrain,
+      intimateHourPixels: this.intimateHourPixels,
       intimateStartHour: this.intimateStartHour,
       intimateEndHour: this.intimateEndHour,
       tacticalRows: this.tacticalRows,
@@ -280,4 +294,4 @@ export class ViewSession {
   }
 }
 
-export { DETENTS };
+export { DETENTS, INTIMATE_HOUR_PIXELS_MIN, INTIMATE_HOUR_PIXELS_MAX };

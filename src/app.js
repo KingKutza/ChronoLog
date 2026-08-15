@@ -33,6 +33,8 @@ import {
 } from "./projections.js";
 import {
   DETENTS,
+  INTIMATE_HOUR_PIXELS_MAX,
+  INTIMATE_HOUR_PIXELS_MIN,
   ViewSession,
   minimapDragFocus,
   minimapDragState,
@@ -100,6 +102,7 @@ let toastTimer = null;
 let lensControlsSignature = "";
 const viewScroll = new Map();
 let pendingIntimateRebase = null;
+let pendingIntimateZoom = null;
 let provisionalEvent = null;
 
 const store = new AutosaveStore({
@@ -169,7 +172,7 @@ function scheduleRender() {
 
 function render() {
   const previousScroll = projection.querySelector("[data-scroll-key]");
-  if (previousScroll && !(previousScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase)) {
+  if (previousScroll && !(previousScroll.dataset.scrollKey === "intimate" && (pendingIntimateRebase || pendingIntimateZoom))) {
     viewScroll.set(previousScroll.dataset.scrollKey, {
       top: previousScroll.scrollTop,
       left: previousScroll.scrollLeft
@@ -181,15 +184,24 @@ function render() {
   renderProjection(projection, context());
   const nextScroll = projection.querySelector("[data-scroll-key]");
   if (nextScroll) {
-    const saved = nextScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase
-      ? pendingIntimateRebase
-      : viewScroll.get(nextScroll.dataset.scrollKey);
+    let saved = viewScroll.get(nextScroll.dataset.scrollKey);
+    if (nextScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase) saved = pendingIntimateRebase;
+    if (nextScroll.dataset.scrollKey === "intimate" && pendingIntimateZoom) {
+      const hourPixels = Number(nextScroll.dataset.hourPixels || 28);
+      const bufferHours = Number(nextScroll.dataset.bufferHours || 24);
+      const headerPixels = Number(nextScroll.dataset.headerPixels || 70);
+      saved = {
+        top: headerPixels + (bufferHours + pendingIntimateZoom.localHour) * hourPixels - pendingIntimateZoom.offset,
+        left: pendingIntimateZoom.left
+      };
+    }
     if (saved) {
       nextScroll.scrollTop = saved.top;
       nextScroll.scrollLeft = saved.left;
-      if (nextScroll.dataset.scrollKey === "intimate" && pendingIntimateRebase) {
+      if (nextScroll.dataset.scrollKey === "intimate" && (pendingIntimateRebase || pendingIntimateZoom)) {
         viewScroll.set("intimate", { top: nextScroll.scrollTop, left: nextScroll.scrollLeft });
         pendingIntimateRebase = null;
+        pendingIntimateZoom = null;
       }
     } else if (nextScroll.dataset.scrollKey === "intimate") {
       const bufferHours = Number(nextScroll.dataset.bufferHours || 0);
@@ -252,6 +264,7 @@ function updateLensControls() {
     intimateBack: session.intimateBack,
     intimateForward: session.intimateForward,
     intimateGrain: session.intimateGrain,
+    intimateHourPixels: session.intimateHourPixels,
     intimateStartHour: session.intimateStartHour,
     intimateEndHour: session.intimateEndHour,
     tacticalRows: session.tacticalRows,
@@ -356,10 +369,19 @@ function updateLensControls() {
   todayControl.id = "today";
   todayControl.classList.add("today-target");
   if (lens === "intimate") {
+    const visibleHours = Math.max(1, (projection.clientHeight - 70) / session.intimateHourPixels);
+    const zoomOut = button("−", () => adjustWindow(1), "Zoom Intimate out (keyboard: −)");
+    zoomOut.setAttribute("aria-label", "Zoom Intimate out");
+    const zoomIn = button("+", () => adjustWindow(-1), "Zoom Intimate in (keyboard: +)");
+    zoomIn.setAttribute("aria-label", "Zoom Intimate in");
+    todayControl.title = "Center Intimate on today and now";
+    todayControl.setAttribute("aria-label", "Center Intimate on today and now");
     controls.push(
       button("« week", () => session.move(-7)),
       button("‹ day", () => session.move(-1)),
-      readout(`${session.intimateBack + session.intimateForward + 1} days · ${session.intimateGrain} min`),
+      zoomOut,
+      readout(`~${visibleHours < 10 ? visibleHours.toFixed(1) : Math.round(visibleHours)} hr screen`),
+      zoomIn,
       button("day ›", () => session.move(1)),
       button("week »", () => session.move(7)),
       number("back", session.intimateBack, 0, 14, (value) => { session.intimateBack = value; }),
@@ -1998,10 +2020,24 @@ function animateRadialWheel(delta) {
   radialWheelAnimation.frame = requestAnimationFrame(advance);
 }
 
+function prepareIntimateZoom(value, pointerOffset = null) {
+  const scroll = projection.querySelector(".intimate-scroll");
+  const offset = pointerOffset ?? scroll?.clientHeight / 2 ?? projection.clientHeight / 2;
+  const hourPixels = Number(scroll?.dataset.hourPixels || session.intimateHourPixels);
+  const bufferHours = Number(scroll?.dataset.bufferHours || 24);
+  const headerPixels = Number(scroll?.dataset.headerPixels || 70);
+  const localHour = scroll
+    ? (scroll.scrollTop + offset - headerPixels) / hourPixels - bufferHours
+    : (session.intimateStartHour + session.intimateEndHour) / 2;
+  pendingIntimateRebase = null;
+  pendingIntimateZoom = { localHour, offset, left: scroll?.scrollLeft || 0 };
+  session.setIntimateHourPixels(value);
+}
+
 function adjustWindow(steps) {
   const lens = session.currentLens();
   if (lens === "intimate") {
-    session.intimateForward = Math.max(0, Math.min(14, session.intimateForward + steps));
+    prepareIntimateZoom(session.intimateHourPixels * 1.2 ** (-steps));
   } else if (lens === "tactical") {
     session.tacticalRows = Math.max(1, Math.min(8, session.tacticalRows + steps));
   } else if (lens === "strategic") {
@@ -2019,6 +2055,15 @@ function panFromWheel(event) {
   if (session.currentLens() === "intimate" && !event.ctrlKey && !event.metaKey) return;
   event.preventDefault();
   if (event.ctrlKey || event.metaKey) {
+    if (session.currentLens() === "intimate") {
+      const scroll = projection.querySelector(".intimate-scroll");
+      const offset = scroll
+        ? Math.max(0, Math.min(scroll.clientHeight, event.clientY - scroll.getBoundingClientRect().top))
+        : null;
+      prepareIntimateZoom(session.intimateHourPixels * Math.exp(-event.deltaY * 0.002), offset);
+      scheduleRender();
+      return;
+    }
     zoomWheel += event.deltaY;
     const steps = Math.trunc(zoomWheel / 90);
     if (!steps) return;
@@ -2071,6 +2116,14 @@ function goToToday() {
   session.setFocus(new Rational(daysFromCivil(
     BigInt(now.getFullYear()), BigInt(now.getMonth() + 1), BigInt(now.getDate())
   )));
+  if (session.currentLens() === "intimate") {
+    const scroll = projection.querySelector(".intimate-scroll");
+    pendingIntimateZoom = {
+      localHour: now.getHours() + now.getMinutes() / 60,
+      offset: scroll?.clientHeight / 2 || projection.clientHeight / 2,
+      left: scroll?.scrollLeft || 0
+    };
+  }
 }
 
 byId("undo").addEventListener("click", () => history.undo());
@@ -2087,7 +2140,7 @@ byId("theme-settings").addEventListener("click", () => {
 projection.addEventListener("wheel", panFromWheel, { passive: false });
 projection.addEventListener("scroll", (event) => {
   const scroll = event.target;
-  if (!(scroll instanceof HTMLElement) || !scroll.classList.contains("intimate-scroll") || pendingIntimateRebase) return;
+  if (!(scroll instanceof HTMLElement) || !scroll.classList.contains("intimate-scroll") || pendingIntimateRebase || pendingIntimateZoom) return;
   const hourPixels = Number(scroll.dataset.hourPixels || 56);
   const edge = hourPixels * 6;
   if (scroll.scrollTop < edge) {
@@ -2221,13 +2274,13 @@ function destinationForDrop(cell, clientX, clientY, sourceDay) {
   if (cell.classList.contains("intimate-day-column")) {
     const bounds = cell.getBoundingClientRect();
     const fraction = Math.max(0, Math.min(0.999999, (clientY - bounds.top) / bounds.height));
-    const visibleStart = session.intimateStartHour * 60;
-    const visibleMinutes = (session.intimateEndHour - session.intimateStartHour) * 60;
+    const timelineStart = Rational.parse(cell.dataset.timelineStart || base);
+    const timelineMinutes = Number(cell.dataset.timelineHours || 24) * 60;
     const minute = Math.min(
-      session.intimateEndHour * 60 - session.intimateGrain,
-      Math.max(visibleStart, visibleStart + Math.round(fraction * visibleMinutes / session.intimateGrain) * session.intimateGrain)
+      timelineMinutes - session.intimateGrain,
+      Math.max(0, Math.round(fraction * timelineMinutes / session.intimateGrain) * session.intimateGrain)
     );
-    return base.add(Rational.parse(minute).div(1440));
+    return timelineStart.add(Rational.parse(minute).div(1440));
   }
   const source = Rational.parse(sourceDay);
   return base.add(source.sub(source.floor()));

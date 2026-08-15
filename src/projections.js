@@ -279,7 +279,9 @@ function renderIntimate(target, context) {
   const firstDay = focus.floor() - BigInt(context.session.intimateBack);
   const dayCount = context.session.intimateBack + context.session.intimateForward + 1;
   const lastDay = firstDay + BigInt(dayCount - 1);
-  const bufferDays = 1n;
+  const hourPixels = context.session.intimateHourPixels;
+  const visibleHours = Math.max(1, (target.clientHeight - 70) / hourPixels);
+  const bufferDays = BigInt(Math.max(1, Math.ceil(visibleHours / 48)));
   const queryStart = firstDay - bufferDays;
   const queryEnd = lastDay + bufferDays + 1n;
   const result = queryFacts(
@@ -311,14 +313,14 @@ function renderIntimate(target, context) {
     if (allDay.length) dayHeader.title = `${allDay.length} all-day event${allDay.length === 1 ? "" : "s"}`;
     header.append(dayHeader);
   }
-  const selectedHours = context.session.intimateEndHour - context.session.intimateStartHour;
-  const hourPixels = Math.max(28, Math.min(180, (target.clientHeight - 76) / Math.max(1, selectedHours)));
-  const railHours = 72;
+  const railDays = Number(bufferDays * 2n + 1n);
+  const railHours = railDays * 24;
   const railHeight = railHours * hourPixels;
   const scroll = element("div", "intimate-scroll");
   scroll.dataset.scrollKey = "intimate";
-  scroll.dataset.bufferHours = "24";
+  scroll.dataset.bufferHours = String(Number(bufferDays) * 24);
   scroll.dataset.hourPixels = String(hourPixels);
+  scroll.dataset.headerPixels = "70";
   scroll.dataset.initialHour = String((context.session.intimateStartHour + context.session.intimateEndHour) / 2);
   const body = element("div", "intimate-body");
   const gutter = element("div", "intimate-gutter");
@@ -328,7 +330,7 @@ function renderIntimate(target, context) {
     label.style.top = `${hour * hourPixels}px`;
     gutter.append(label);
   }
-  for (const boundary of [24, 48]) {
+  for (let boundary = 1; boundary < railDays; boundary += 1) {
     const line = element("div", "intimate-midnight-line");
     line.style.top = `${boundary * hourPixels}px`;
     gutter.append(line);
@@ -339,12 +341,12 @@ function renderIntimate(target, context) {
     column.style.height = `${railHeight}px`;
     column.style.setProperty("--grain-px", `${hourPixels * context.session.intimateGrain / 60}px`);
     column.dataset.createDay = day.toString();
-    column.dataset.timelineStart = (day - 1n).toString();
+    column.dataset.timelineStart = (day - bufferDays).toString();
     column.dataset.timelineHours = String(railHours);
     const timed = [];
-    for (let offset = -1; offset <= 1; offset += 1) {
+    for (let offset = -Number(bufferDays); offset <= Number(bufferDays); offset += 1) {
       const segmentDay = day + BigInt(offset);
-      const segmentIndex = offset + 1;
+      const segmentIndex = offset + Number(bufferDays);
       const dayFacts = byDay.get(segmentDay.toString()) || [];
       const spanning = dayFacts.find((fact) => context.session.intimateZoneFill && durationMinutes(fact.event) >= 1440);
       if (spanning) {
@@ -409,8 +411,8 @@ function renderIntimate(target, context) {
       );
       column.append(button);
     }
-    for (const boundary of [1, 2]) {
-      const boundaryDay = day - 1n + BigInt(boundary);
+    for (let boundary = 1; boundary < railDays; boundary += 1) {
+      const boundaryDay = day - bufferDays + BigInt(boundary);
       const previousCivil = civilFromDays(boundaryDay - 1n);
       const nextCivil = civilFromDays(boundaryDay);
       const marker = element("div", "intimate-midnight-marker");
@@ -422,10 +424,10 @@ function renderIntimate(target, context) {
       );
       column.append(marker);
     }
-    if (today >= day - 1n && today <= day + 1n) {
+    if (today >= day - bufferDays && today <= day + bufferDays) {
       const line = element("div", "intimate-now");
       const nowMinute = now.getHours() * 60 + now.getMinutes();
-      const segmentIndex = Number(today - (day - 1n));
+      const segmentIndex = Number(today - (day - bufferDays));
       line.style.top = `${(segmentIndex * 1440 + nowMinute) / 60 * hourPixels}px`;
       column.append(line);
     }

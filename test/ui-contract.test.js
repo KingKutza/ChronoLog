@@ -272,7 +272,7 @@ test("interaction refinements expose continuous intimate scroll, tactical shift 
     readFile("src/projections.js", "utf8"),
     readFile("src/engine.js", "utf8")
   ]);
-  assert.match(projections, /dataset\.bufferHours = "24"/);
+  assert.match(projections, /dataset\.bufferHours = String\(Number\(bufferDays\) \* 24\)/);
   assert.match(app, /scroll\.scrollTop = createDrag\.startScrollTop - dy/);
   assert.match(projections, /intimate-midnight-marker/);
   assert.match(app, /session\.move\(event\.shiftKey \? steps : steps \* session\.tacticalColumns\)/);
@@ -282,6 +282,30 @@ test("interaction refinements expose continuous intimate scroll, tactical shift 
   assert.match(projections, /other\.start < item\.end && other\.end > item\.start/);
   assert.match(projections, /frame\.display\?\.radialMinDays/);
   assert.match(engine, /eventFrames\(eventId\)/);
+});
+
+test("Intimate zoom is anchored, accessible, persistent, and keeps multi-day hit geometry", async () => {
+  const [app, projections, session] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/projections.js", "utf8"),
+    readFile("src/session.js", "utf8")
+  ]);
+  assert.match(session, /intimateHourPixels: this\.intimateHourPixels/);
+  assert.match(session, /INTIMATE_HOUR_PIXELS_MIN = 8/);
+  assert.match(session, /INTIMATE_HOUR_PIXELS_MAX = 144/);
+  assert.match(projections, /Math\.ceil\(visibleHours \/ 48\)/);
+  assert.match(projections, /for \(let boundary = 1; boundary < railDays; boundary \+= 1\)/);
+  assert.match(projections, /dataset\.timelineStart = \(day - bufferDays\)\.toString\(\)/);
+  const zoom = sourceSlice(app, "function prepareIntimateZoom", "function adjustWindow");
+  assert.match(zoom, /localHour/);
+  assert.match(zoom, /scroll\.scrollTop \+ offset - headerPixels/);
+  assert.match(zoom, /session\.setIntimateHourPixels\(value\)/);
+  assert.match(app, /event\.clientY - scroll\.getBoundingClientRect\(\)\.top/);
+  assert.match(app, /aria-label", "Zoom Intimate out"/);
+  assert.match(app, /aria-label", "Zoom Intimate in"/);
+  assert.match(app, /Center Intimate on today and now/);
+  assert.match(app, /cell\.dataset\.timelineStart/);
+  assert.match(app, /cell\.dataset\.timelineHours/);
 });
 
 test("continuous-time chrome and recurrence exceptions retain their governing context", async () => {
