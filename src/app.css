@@ -971,6 +971,8 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
 .radial-noon-tick { stroke: #d6a800; stroke-width: 2.5; pointer-events: none; }
 .radial-now-line { stroke: var(--now); stroke-width: 2.5; pointer-events: none; filter: drop-shadow(0 0 2px var(--paper)); }
 .radial-time-label { fill: var(--muted); font: 750 9px/1 var(--data); pointer-events: none; }
+.radial-empty-ring { stroke: var(--hair); stroke-width: 20; opacity: .45; }
+.radial-state-label { fill: var(--muted); font: 700 11px/1 var(--data); }
 @keyframes radial-slide { from { opacity: .25; stroke-dashoffset: .08; } to { opacity: 1; stroke-dashoffset: 0; } }
 body.radial-wheel-motion .radial-event-arc { animation: none; }
 
