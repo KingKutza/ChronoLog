@@ -222,15 +222,12 @@ button {
   border-radius: 12px;
   background: color-mix(in srgb, var(--paper) 94%, transparent);
   box-shadow: 0 5px 18px rgba(45, 37, 27, .1);
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: visible;
 }
-
-#lens-controls::-webkit-scrollbar { display: none; }
 
 .lens-control,
 .lens-readout {
-  min-height: 30px;
+  min-height: 32px;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -298,6 +295,57 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 .lens-control select { width: auto; max-width: 180px; }
 .lens-control input[type="checkbox"] { width: auto; min-height: auto; }
 .lens-readout { color: var(--now); background: var(--paper); }
+.lens-readout {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lens-control-overflow {
+  position: relative;
+  flex: none;
+}
+
+.lens-control-overflow > summary {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 7px;
+  border: 1px solid var(--hair);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: 700 9px/1 var(--data);
+  letter-spacing: .035em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.lens-control-overflow > summary::-webkit-details-marker { display: none; }
+.lens-control-overflow > summary::after { content: "▾"; margin-left: 5px; }
+.lens-control-overflow[open] > summary,
+.lens-control-overflow > summary:hover { border-color: var(--ink); background: var(--paper); }
+
+.lens-control-overflow-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(300px, calc(100vw - 24px));
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--strong);
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.lens-control-overflow-panel .lens-control,
+.lens-control-overflow-panel .lens-readout { min-width: 0; }
 
 #minimap {
   position: absolute;
@@ -389,18 +437,18 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 }
 
 #today {
-  position: sticky;
-  right: 0;
-  min-width: 42px;
+  min-width: 32px;
   min-height: 32px;
-  margin-left: auto;
-  padding: 0 5px;
-  border: 0;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--hair);
+  border-radius: 7px;
   background: color-mix(in srgb, var(--paper) 94%, transparent);
   color: var(--ink);
-  font: 950 26px/1 var(--data);
+  font: 900 18px/1 var(--data);
   letter-spacing: 0;
-  box-shadow: -8px 0 10px color-mix(in srgb, var(--paper) 92%, transparent);
 }
 #today:hover { background: var(--ink); color: var(--paper); }
 
