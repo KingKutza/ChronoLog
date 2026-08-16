@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -91,6 +91,34 @@ test("LAN sync requires its bearer token, preserves both clients on conflict, an
     });
     assert.equal(crossOrigin.status, 403);
     assert.equal(crossOrigin.headers.get("access-control-allow-origin"), null);
+  } finally {
+    if (running?.child.exitCode === null) {
+      const stopped = once(running.child, "exit");
+      running.child.kill();
+      await stopped;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("sync configuration is reachable only through the API and never through static files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chronolog-sync-config-"));
+  let running;
+  try {
+    await writeFile(join(root, "pocket-instrument.html"), "<!doctype html><title>test</title>");
+    running = await startServer(root, { CHRONOLOG_APP_ROOT: root });
+    const created = await fetch(`${running.url}/api/sync/feeds`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: "Secret feed", url: "https://calendar.example/feed.ics?token=private" })
+    });
+    assert.equal(created.status, 201);
+    assert.doesNotMatch(await created.text(), /private/);
+    const listed = await fetch(`${running.url}/api/sync/connections`);
+    assert.equal(listed.status, 200);
+    assert.doesNotMatch(await listed.text(), /private/);
+    const staticCredential = await fetch(`${running.url}/.chronolog-calendar-connections.json`);
+    assert.equal(staticCredential.status, 403);
   } finally {
     if (running?.child.exitCode === null) {
       const stopped = once(running.child, "exit");

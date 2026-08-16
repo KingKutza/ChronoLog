@@ -4,8 +4,10 @@ import { createServer } from "node:http";
 import { copyFile, open, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { networkInterfaces } from "node:os";
-import { dirname, extname, join, normalize, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createCalendarFeedService } from "./calendar-feed-service.js";
+import { createMicrosoftSyncService } from "./microsoft-sync-service.js";
 
 const toolRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const root = resolve(process.env.CHRONOLOG_APP_ROOT || toolRoot);
@@ -32,6 +34,8 @@ const documentFile = join(dataRoot, "chronolog.chronolog");
 const legacyDocumentFile = join(dataRoot, "chronolog.json");
 const recoveryDocumentFile = join(dataRoot, ".chronolog-recovery.chronolog");
 const MAX_DOCUMENT_BYTES = 512 * 1024 * 1024;
+const handleCalendarFeed = createCalendarFeedService({ dataRoot });
+const handleMicrosoftSync = createMicrosoftSyncService({ dataRoot });
 
 function tokenMatches(value) {
   const supplied = String(value || "").replace(/^Bearer\s+/i, "");
@@ -115,6 +119,8 @@ const server = createServer(async (request, response) => {
       response.writeHead(403, { "cache-control": "no-store" }).end("LAN workspace access requires its launch token from the same Chronolog origin");
       return;
     }
+    if (url.pathname.startsWith("/api/sync/microsoft") && await handleMicrosoftSync(request, response, url)) return;
+    if (url.pathname.startsWith("/api/sync/") && await handleCalendarFeed(request, response, url)) return;
     if (url.pathname === "/api/document" && ["GET", "HEAD"].includes(request.method)) {
       const file = await workspaceDocument();
       if (!file) {
@@ -180,7 +186,7 @@ const server = createServer(async (request, response) => {
     // Development mode can deliberately keep data beside the checkout. Never
     // let its ordinary static-file route bypass LAN API authentication.
     if (target === documentFile || target === legacyDocumentFile || target === recoveryDocumentFile
-      || (dirname(target) === dataRoot && target.startsWith(join(dataRoot, ".chronolog-save-")))) {
+      || (dirname(target) === dataRoot && basename(target).startsWith(".chronolog-"))) {
       response.writeHead(403).end("Workspace files are available only through the authenticated API");
       return;
     }

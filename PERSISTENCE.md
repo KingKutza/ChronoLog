@@ -118,10 +118,17 @@ document.
 
 Legacy `chronolog.json` is read once by the launcher and migrated on the next
 successful save to `chronolog.chronolog`. Existing browser file handles continue
-to save only after the user grants them. No network endpoint, account, cloud
-provider, credential, telemetry, or background upload is introduced by this
-design. A future sync provider must implement the revision contract above and
-make its account/security boundary explicit in its own UI.
+to save only after the user grants them. The core local store requires no
+network endpoint, account, cloud provider, credential, telemetry, or background
+upload. Every optional sync provider must implement the revision contract above
+and make its account/security boundary explicit in its own UI.
+
+The implemented calendar adapters preserve that boundary: HTTPS ICS feed URLs,
+Microsoft's public application ID, and Microsoft OAuth tokens live in
+owner-only launcher files, never in the portable document. The document stores
+read-only imported snapshots, opaque connection IDs, provider provenance, and
+the revision acknowledged by the last complete pull. See
+`docs/calendar-sync.md` for the concrete adapters and permissions.
 
 ## Opt-in LAN transport
 

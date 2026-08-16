@@ -676,6 +676,29 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 .calendar-period-preview { color: var(--muted); font: 11px/1.4 var(--data); }
 .event-form:not(.has-recurrence) .recurrence-options { display: none; }
 
+.calendar-feed-form {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.calendar-sync-status { min-height: 18px; color: var(--muted); font: 600 11px/1.45 var(--data); }
+.microsoft-sync-card { margin: 14px 0; padding: 12px; border: 1px solid var(--strong); border-radius: 9px; background: white; }
+.microsoft-sync-card h3 { margin: 0 0 6px; font-size: 13px; }
+.microsoft-sync-controls { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.microsoft-sync-controls .field-note { flex-basis: 100%; }
+.microsoft-client-form { width: 100%; }
+.microsoft-device-code { display: block; flex-basis: 100%; padding: 9px; border: 1px dashed var(--strong); border-radius: 7px; background: var(--panel); font: 800 18px/1.2 var(--data); letter-spacing: .12em; text-align: center; }
+.calendar-sync-list { display: grid; gap: 8px; }
+.calendar-sync-row { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--hair); border-radius: 8px; background: white; }
+.calendar-sync-row > div:first-child { min-width: 0; display: grid; gap: 3px; }
+.calendar-sync-row strong,
+.calendar-sync-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-sync-row small { color: var(--faint); font: 10px/1.35 var(--data); }
+.calendar-sync-actions { display: flex; gap: 6px; }
+.calendar-sync-empty { margin: 8px 0; }
+
 .inspector-actions {
   position: sticky;
   bottom: -14px;
