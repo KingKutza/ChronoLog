@@ -1060,9 +1060,17 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 .frame-type-banner span { align-self: center; border-radius: 999px; padding: 3px 6px; background: var(--surface); color: var(--muted); font: 700 9px/1 var(--data); text-transform: uppercase; }
 .frame-type-banner { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .frame-parent-list { max-height: 150px; overflow: auto; padding: 2px; }
-.frame-view-card { margin-bottom: 13px; padding: 11px; border: 1px solid var(--strong); border-radius: 10px; background: color-mix(in srgb, var(--surface) 55%, white); }
+.frame-view-card { min-width: 0; overflow: hidden; margin-bottom: 13px; padding: 11px; border: 1px solid var(--strong); border-radius: 10px; background: color-mix(in srgb, var(--surface) 55%, white); }
 .frame-view-card h3 { margin: 0 0 6px; font: 800 13px/1.2 var(--data); }
 .frame-view-grid { display: flex; flex-wrap: wrap; gap: 6px; margin: 7px 0 12px; }
+.frame-view-toolbar { margin: 9px 0; }
+.frame-view-toolbar input { width: 100%; min-width: 0; min-height: 34px; box-sizing: border-box; border: 1px solid var(--strong); border-radius: 7px; padding: 7px 9px; background: white; }
+.frame-view-section { min-width: 0; margin: 8px 0; border: 1px solid var(--hair); border-radius: 8px; background: white; }
+.frame-view-section > summary { padding: 8px; cursor: pointer; color: var(--muted); font: 700 10px/1.2 var(--data); letter-spacing: .06em; text-transform: uppercase; }
+.frame-view-section[open] > summary { border-bottom: 1px solid var(--hair); background: var(--surface); }
+.frame-view-section-content { min-width: 0; padding: 8px; }
+.frame-view-grid .check-chip { min-width: 0; max-width: 100%; }
+.frame-choice-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .frame-group-list { display: grid; gap: 5px; margin-top: 7px; }
 .frame-group-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; align-items: center; padding: 7px; border: 1px solid var(--hair); border-radius: 8px; background: white; }
 .frame-group-row > strong { overflow: hidden; padding-left: 8px; border-left: 5px solid var(--group-color); text-overflow: ellipsis; white-space: nowrap; font: 700 10px/1.2 var(--data); }
@@ -1075,6 +1083,7 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 .theme-grid input[type="color"] { width: 100%; min-height: 38px; padding: 3px; }
 .frame-lens-checks { gap: 5px; }
 .frame-lens-checks .check-chip { text-transform: capitalize; }
+#inspector-body { overflow-x: hidden; }
 
 @media (max-width: 1000px) {
   #viewport { padding-top: 250px; }
