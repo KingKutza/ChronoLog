@@ -13,6 +13,7 @@ import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./rad
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
+import { sampleIndexedRanges } from "./minimap.js";
 import { SIGIL_VOCABULARY, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -1543,7 +1544,7 @@ export function renderMinimap(target, context) {
   // recurrence expansion. Explicit placements are already indexed and give a
   // useful density trace at essentially constant cost; recurring detail remains
   // in the primary lens where its result is bounded.
-  const facts = [];
+  const indexedRanges = [];
   for (const frame of layeredCalendarFrames(context, context.session.activeFrame)) {
     const indexed = context.engine.indexedExplicitFacts(frame.id);
     let low = 0;
@@ -1553,11 +1554,21 @@ export function renderMinimap(target, context) {
       if (indexed[middle].day.compare(outerStart) < 0) low = middle + 1;
       else high = middle;
     }
-    for (let index = low; index < indexed.length && facts.length < MINIMAP_FACT_LIMIT; index += 1) {
-      if (indexed[index].day.compare(outerEnd) > 0) break;
-      facts.push({ ...indexed[index].fact, displayFrame: frame.id });
+    let after = low;
+    high = indexed.length;
+    while (after < high) {
+      const middle = (after + high) >>> 1;
+      if (indexed[middle].day.compare(outerEnd) <= 0) after = middle + 1;
+      else high = middle;
     }
+    indexedRanges.push({ entries: indexed, start: low, end: after });
   }
+  const indexedFacts = sampleIndexedRanges(indexedRanges, MINIMAP_FACT_LIMIT);
+  const facts = indexedFacts.map((entry) => ({
+    ...entry.fact,
+    displayFrame: entry.fact.relation?.frame
+  }));
+  const indexedFactCount = indexedRanges.reduce((sum, range) => sum + range.end - range.start, 0);
   const svg = svgElement("svg", {
     viewBox: "0 0 1000 120",
     preserveAspectRatio: "none",
@@ -1636,10 +1647,10 @@ export function renderMinimap(target, context) {
       class: "minimap-exact-mark", "aria-hidden": "true"
     }));
   }
-  if (facts.length >= MINIMAP_FACT_LIMIT || exactMarks.length > MINIMAP_EXACT_MARK_LIMIT) {
+  if (indexedFactCount > MINIMAP_FACT_LIMIT || exactMarks.length > MINIMAP_EXACT_MARK_LIMIT) {
     const summary = svgElement("text", { x: 980, y: 117, "text-anchor": "end", class: "minimap-summary" });
-    summary.textContent = facts.length >= MINIMAP_FACT_LIMIT
-      ? `Topology sampled from first ${MINIMAP_FACT_LIMIT} indexed events`
+    summary.textContent = indexedFactCount > MINIMAP_FACT_LIMIT
+      ? `Topology evenly sampled across ${indexedFactCount} indexed events`
       : `Showing every ${markStride}th exact event mark`;
     svg.append(summary);
   }

@@ -287,6 +287,7 @@ test("navigation chrome never performs a second recurrence query", async () => {
   const minimap = sourceSlice(projections, "export function renderMinimap", null);
   assert.doesNotMatch(minimap, /queryFacts\(/);
   assert.match(minimap, /indexedExplicitFacts/);
+  assert.match(minimap, /sampleIndexedRanges/);
 });
 
 test("explicit rendered events carry drag placement data and reschedule through history", async () => {
@@ -565,7 +566,7 @@ test("continuous-time chrome and recurrence exceptions retain their governing co
   assert.match(projections, /MINIMAP_EXACT_MARK_LIMIT = 280/);
   assert.match(projections, /minimap-density-topology/);
   assert.match(projections, /minimap-exact-mark/);
-  assert.match(projections, /Topology sampled from first/);
+  assert.match(projections, /Topology evenly sampled across/);
   assert.match(projections, /const kernel = \[0\.18, 0\.55, 1, 0\.55, 0\.18\]/);
   assert.match(css, /\.minimap-density-topology/);
   assert.match(css, /\.minimap-exact-mark/);
