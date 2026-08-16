@@ -8,16 +8,17 @@ the active theme's ink color.
 
 ## Meaning and construction
 
-The mark is two interlocking, directed frame paths.  They imply timelines that
-share a coordinate neighborhood without claiming that either is a universal
-clock.  The short horizontal bar is a **staple**: an explicit attachment
-between those frames.  The warm central join makes that attachment readable at
-toolbar and favicon scale.  It is intentionally not a clock face, calendar
-page, or generic checkmark.
+The outer path is an open temporal frame with explicit endpoints rather than a
+closed, universal clock. The shorter blue path is a ledger-like `L` nested in
+that frame. The horizontal bar is a **staple**: an authored attachment between
+the coordinate frame and its recorded object. The warm central join keeps that
+relationship readable at toolbar and favicon scale. It is intentionally not a
+clock face, calendar page, or generic checkmark.
 
-The wordmark uses the application UI font stack.  `Chrono` is the stable field;
-`Log` takes the current primary color.  This keeps it readable in paper and
-night themes, in grayscale, and without a network font dependency.
+The mixed-case wordmark uses the application UI font stack with compact optical
+spacing. `Chrono` is the stable field; `Log` takes the current primary color and
+slightly heavier weight. This keeps it readable in paper and night themes, in
+grayscale, and without a network font dependency.
 
 ## Use
 

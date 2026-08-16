@@ -622,11 +622,13 @@ test("ChronoLog identity is an original, accessible topology mark rather than a 
   assert.match(html, /chronolog-mark__frame--secondary/);
   assert.match(html, /chronolog-mark__staple/);
   assert.match(html, /chronolog-mark__join/);
-  assert.match(html, /<title id="chronolog-mark-title">Interlocking timeline frames joined by a staple<\/title>/);
+  assert.match(html, /<title id="chronolog-mark-title">Open temporal frame and ledger path joined by a staple<\/title>/);
   assert.match(cssBlock(css, ".chronolog-mark"), /color: var\(--ink\)/);
-  assert.match(cssBlock(css, ".chronolog-mark__join"), /fill: var\(--accent\)/);
-  assert.match(svg, /Two interlocking timeline frames joined by a central staple/);
+  assert.match(cssBlock(css, ".chronolog-mark__join"), /fill: var\(--primary\)/);
+  assert.match(cssBlock(css, ".chronolog-mark__frame--secondary"), /stroke: var\(--accent\)/);
+  assert.match(cssBlock(css, ".chronolog-wordmark > span"), /font-weight: 850/);
+  assert.match(svg, /An open temporal frame and ledger path joined by a central staple/);
   assert.match(svg, /<title id="title">ChronoLog mark<\/title>/);
   assert.match(identity, /original, repository-native SVG/);
-  assert.match(identity, /not a clock face, calendar\s+page, or generic checkmark/);
+  assert.match(identity, /not a\s+clock face, calendar\s+page, or generic checkmark/);
 });
