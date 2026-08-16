@@ -86,6 +86,7 @@ export function validateDocument(document) {
     if (frame.law?.pattern && !document.patterns?.[frame.law.pattern]) {
       errors.push(`Frame ${id} references a missing law pattern`);
     }
+    if (frame.period?.kind === "event-defined") validateEventDefinedPeriod(document, frame, errors);
     if (frame.query?.excludeGroups?.length || frame.query?.notGroups?.length) {
       errors.push(`Group ${id} uses recursive negation, which is not defined`);
     }
@@ -169,6 +170,25 @@ export function validateDocument(document) {
     }
   }
   return { valid: errors.length === 0, errors };
+}
+
+function validateEventDefinedPeriod(document, frame, errors) {
+  const period = frame.period;
+  if (!period.frame || !document.frames?.[period.frame]) errors.push(`Frame ${frame.id} event-defined period references a missing boundary frame`);
+  const boundaries = Array.isArray(period.boundaries) ? period.boundaries : [];
+  if (boundaries.length < 2) errors.push(`Frame ${frame.id} event-defined period requires at least two boundaries`);
+  const ids = new Set();
+  let prior = null;
+  for (const [index, boundary] of boundaries.entries()) {
+    if (!boundary?.id || ids.has(boundary.id)) errors.push(`Frame ${frame.id} event-defined boundary ${index + 1} needs a unique id`);
+    ids.add(boundary?.id);
+    if (boundary?.event && !document.events?.[boundary.event]) errors.push(`Frame ${frame.id} event-defined boundary ${boundary.id} references a missing event`);
+    try {
+      const at = Rational.parse(boundary?.at);
+      if (prior && at.compare(prior) <= 0) errors.push(`Frame ${frame.id} event-defined boundaries must be strictly ordered`);
+      prior = at;
+    } catch { errors.push(`Frame ${frame.id} event-defined boundary ${boundary?.id || index + 1} needs an exact coordinate`); }
+  }
 }
 
 function isCoordinate(value) {

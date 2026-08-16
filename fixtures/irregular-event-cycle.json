@@ -1,0 +1,14 @@
+{
+  "description": "Observed lunar-like boundary series. Values are exact observations, not a mean synodic-month duration.",
+  "period": {
+    "kind": "event-defined",
+    "frame": "measure:earth-days",
+    "boundaries": [
+      { "id": "new-001", "event": "event:new-001", "at": "0" },
+      { "id": "new-002", "event": "event:new-002", "at": "29.31" },
+      { "id": "new-003", "event": "event:new-003", "at": "58.92" },
+      { "id": "new-004", "event": "event:new-004", "at": "88.03" },
+      { "id": "new-005", "event": "event:new-005", "at": "117.87" }
+    ]
+  }
+}
