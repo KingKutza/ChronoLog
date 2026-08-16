@@ -1610,6 +1610,38 @@ function duplicateFrame(frameId) {
   openFrameInspector(nextId);
 }
 
+function observedBoundaryId(label, index = 0) {
+  const normalized = String(label || "").trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || `boundary-${Number(index) + 1}`;
+}
+
+function observedBoundaryRow(boundary = {}, index = 0) {
+  const label = String(boundary.label || boundary.id || "");
+  return `<div class="observed-boundary-row" data-observed-boundary>
+    <input aria-label="Boundary ${index + 1} coordinate" name="observedBoundaryAt" value="${escapeHTML(boundary.at || "")}" placeholder="Exact coordinate, e.g. 29.530588853">
+    <input aria-label="Boundary ${index + 1} label" name="observedBoundaryLabel" value="${escapeHTML(label)}" placeholder="New moon">
+    <input aria-label="Boundary ${index + 1} event ID" name="observedBoundaryEvent" value="${escapeHTML(boundary.event || "")}" placeholder="Optional event ID">
+    <span class="observed-boundary-buttons"><button type="button" aria-label="Move boundary ${index + 1} earlier" title="Move earlier" data-move-observed-up>↑</button><button type="button" aria-label="Move boundary ${index + 1} later" title="Move later" data-move-observed-down>↓</button><button type="button" aria-label="Remove boundary ${index + 1}" title="Remove" data-remove-observed-boundary>×</button></span>
+  </div>`;
+}
+
+function validateEventDefinedBoundaryDraft(boundaries) {
+  if (boundaries.length < 2) throw new Error("An observed series needs at least two boundaries.");
+  const ids = new Set();
+  let prior = null;
+  for (const boundary of boundaries) {
+    if (!boundary.id) throw new Error("Every observed boundary needs a label or ID.");
+    if (ids.has(boundary.id)) throw new Error(`Boundary labels/IDs must be unique (${boundary.id}).`);
+    ids.add(boundary.id);
+    let current;
+    try { current = Rational.parse(boundary.at); }
+    catch { throw new Error(`Boundary ${boundary.id} needs an exact finite coordinate.`); }
+    if (prior && current.compare(prior) <= 0) throw new Error("Observed boundaries must be in strictly increasing order.");
+    prior = current;
+  }
+}
+
 function frameForm(frame = null, presetKind = "group", embedded = false) {
   const isNew = !frame;
   const value = frame || {
@@ -1621,6 +1653,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
   const frameLenses = ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"];
   const visibleFrameLenses = new Set(value.display?.lenses || frameLenses);
   const fixedCalendar = editableFixedCalendarStructure(value);
+  const observedCalendar = value.period?.kind === "event-defined" ? value.period : null;
   const calendarUnits = fixedCalendar?.units || [
     { name: "year" }, { name: "month", perParent: "12" }, { name: "week", perParent: "4" }, { name: "day", perParent: "7" }
   ];
@@ -1628,6 +1661,10 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
       <input aria-label="Unit ${index + 1} name" name="calendarUnitName" value="${escapeHTML(unit.name)}">
       ${index === 0 ? "<span class=\"calendar-root-note\">top-level cycle</span>" : `<input aria-label="${escapeHTML(unit.name)} per parent" name="calendarUnitRadix" inputmode="numeric" value="${escapeHTML(unit.perParent)}"><input aria-label="${escapeHTML(unit.name)} names" name="calendarUnitLabels" value="${escapeHTML(unit.labels || "")}" placeholder="Optional names, comma-separated">`}
     </div>`).join("");
+  const observedRows = (observedCalendar?.boundaries || [
+    { id: "boundary-1", at: "0", label: "Start" },
+    { id: "boundary-2", at: "1", label: "Next boundary" }
+  ]).map((boundary, index) => observedBoundaryRow(boundary, index)).join("");
   const wrapper = document.createElement("form");
   wrapper.className = "frame-form";
   const options = (items, selected) => items.map(([id, label]) =>
@@ -1670,6 +1707,21 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
         <label class="field"><span>Smallest unit length in Earth days</span><input name="smallestUnitDays" value="${escapeHTML(fixedCalendar?.smallestUnitDays || "1")}" placeholder="1"></label>
         <label class="field"><span>Epoch in Earth days</span><input name="fixedCalendarEpoch" value="${escapeHTML(fixedCalendar?.epochDays || "0")}" placeholder="0"></label>
         <output class="calendar-period-preview">${fixedCalendar ? `One ${escapeHTML(fixedCalendar.units[0].name)} = ${escapeHTML(fixedCalendar.totalDays)} Earth days.` : "Turn this on to replace the coordinate JSON with a regular hierarchy."}</output>
+      </div>
+    </details>
+    <details class="calendar-structure observed-calendar-structure" ${observedCalendar ? "open" : ""}>
+      <summary>Observed boundary series</summary>
+      <label class="check-chip calendar-structure-toggle"><input type="checkbox" name="useObservedCalendar" ${observedCalendar ? "checked" : ""}>Use explicitly observed boundaries</label>
+      <small>For irregular cycles such as lunar observations or story-time jumps. Each adjacent pair is one authored interval. ChronoLog never averages, fills gaps, or extrapolates this series.</small>
+      <div class="observed-calendar-fields" data-observed-calendar-fields>
+        <label class="field"><span>Boundary measurement frame</span><select name="observedBoundaryFrame">
+          ${Object.values(chronolog.frames).filter((item) => item.id !== recordId).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === observedCalendar?.frame ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}
+        </select></label>
+        <div class="observed-boundary-heading"><span>Coordinate</span><span>Label / ID</span><span>Observed event ID (optional)</span><span></span></div>
+        <div class="observed-boundaries" data-observed-boundaries>${observedRows}</div>
+        <div class="inspector-actions observed-boundary-actions"><button class="instrument-button" type="button" data-add-observed-boundary>Add boundary</button><button class="instrument-button" type="button" data-import-observed-boundaries>Import timestamps</button></div>
+        <label class="field observed-import"><span>Import text</span><textarea name="observedImport" placeholder="One boundary per line: coordinate, label (optional), event ID (optional)"></textarea></label>
+        <output class="calendar-period-preview" data-observed-calendar-preview></output>
       </div>
     </details>
     <p class="field-note coordinate-definition-note">A coordinate definition names positions inside this frame. It does not establish a conversion to another frame; author those relationships as mappings.</p>
@@ -1715,6 +1767,71 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
   fixedCalendarToggle.addEventListener("change", refreshFixedCalendarPreview);
   fixedCalendarFields.addEventListener("input", refreshFixedCalendarPreview);
   refreshFixedCalendarPreview();
+  const observedCalendarToggle = wrapper.elements.useObservedCalendar;
+  const observedCalendarFields = wrapper.querySelector("[data-observed-calendar-fields]");
+  const observedBoundaries = wrapper.querySelector("[data-observed-boundaries]");
+  const observedPreview = wrapper.querySelector("[data-observed-calendar-preview]");
+  function observedBoundaryDraft() {
+    return [...observedBoundaries.querySelectorAll("[data-observed-boundary]")].map((row, index) => ({
+      label: String(row.querySelector('[name="observedBoundaryLabel"]')?.value || "").trim(),
+      id: observedBoundaryId(String(row.querySelector('[name="observedBoundaryLabel"]')?.value || ""), index),
+      at: String(row.querySelector('[name="observedBoundaryAt"]')?.value || "").trim(),
+      event: String(row.querySelector('[name="observedBoundaryEvent"]')?.value || "").trim() || undefined
+    }));
+  }
+  function refreshObservedCalendarPreview() {
+    const enabled = observedCalendarToggle.checked;
+    for (const input of observedCalendarFields.querySelectorAll("input, select, textarea, button")) input.disabled = !enabled;
+    if (!enabled) { observedPreview.textContent = "Leave this off to preserve existing period data or use a regular hierarchy."; return; }
+    try {
+      const boundaries = observedBoundaryDraft();
+      if (boundaries.length < 2) throw new Error("Add at least two boundaries.");
+      const seen = new Set();
+      let prior = null;
+      for (const boundary of boundaries) {
+        if (!boundary.at) throw new Error("Every boundary needs an exact coordinate.");
+        if (seen.has(boundary.id)) throw new Error(`Boundary labels/IDs must be unique (${boundary.id}).`);
+        seen.add(boundary.id);
+        const current = Rational.parse(boundary.at);
+        if (prior && current.compare(prior) <= 0) throw new Error("Boundaries must be in strictly increasing order. Reorder or correct them.");
+        prior = current;
+      }
+      observedPreview.textContent = `${boundaries.length} authored boundaries define ${boundaries.length - 1} finite intervals. No interval exists outside this range.`;
+    } catch (error) { observedPreview.textContent = error.message; }
+  }
+  function appendObservedBoundary(boundary = {}) {
+    observedBoundaries.insertAdjacentHTML("beforeend", observedBoundaryRow(boundary, observedBoundaries.children.length));
+    refreshObservedCalendarPreview();
+  }
+  observedCalendarToggle.addEventListener("change", () => {
+    if (observedCalendarToggle.checked) fixedCalendarToggle.checked = false;
+    refreshFixedCalendarPreview(); refreshObservedCalendarPreview();
+  });
+  fixedCalendarToggle.addEventListener("change", () => {
+    if (fixedCalendarToggle.checked) observedCalendarToggle.checked = false;
+    refreshObservedCalendarPreview();
+  });
+  observedBoundaries.addEventListener("input", refreshObservedCalendarPreview);
+  observedBoundaries.addEventListener("click", (click) => {
+    const row = click.target.closest("[data-observed-boundary]");
+    if (!row) return;
+    if (click.target.matches("[data-remove-observed-boundary]")) row.remove();
+    if (click.target.matches("[data-move-observed-up]") && row.previousElementSibling) observedBoundaries.insertBefore(row, row.previousElementSibling);
+    if (click.target.matches("[data-move-observed-down]") && row.nextElementSibling) observedBoundaries.insertBefore(row.nextElementSibling, row);
+    refreshObservedCalendarPreview();
+  });
+  wrapper.querySelector("[data-add-observed-boundary]").addEventListener("click", () => appendObservedBoundary());
+  wrapper.querySelector("[data-import-observed-boundaries]").addEventListener("click", () => {
+    const lines = String(wrapper.elements.observedImport.value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) { toast("Enter one timestamp per line to import.", true); return; }
+    observedBoundaries.innerHTML = "";
+    for (const [index, line] of lines.entries()) {
+      const [at = "", label = "", event = ""] = line.split(",").map((part) => part.trim());
+      appendObservedBoundary({ at, label, id: observedBoundaryId(label, index), event });
+    }
+    refreshObservedCalendarPreview();
+  });
+  refreshObservedCalendarPreview();
   wrapper.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(wrapper);
@@ -1734,7 +1851,19 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
           else delete display.radialMaxDays;
         }
         const existing = documentValue.frames[recordId] || {};
-        const schema = data.has("useFixedCalendar")
+        const schema = data.has("useObservedCalendar")
+          ? (() => {
+              const boundaries = observedBoundaryDraft().map((boundary) => ({
+                id: boundary.id, at: boundary.at, ...(boundary.label ? { label: boundary.label } : {}),
+                ...(boundary.event ? { event: boundary.event } : {})
+              }));
+              // Validate before storing so a malformed series never replaces a valid one.
+              validateEventDefinedBoundaryDraft(boundaries);
+              const boundaryFrame = String(data.get("observedBoundaryFrame") || "");
+              if (!boundaryFrame) throw new Error("Choose the frame that measures observed boundaries.");
+              return { coordinate: existing.coordinate, period: { kind: "event-defined", frame: boundaryFrame, boundaries } };
+            })()
+          : data.has("useFixedCalendar")
           ? (() => {
               const built = buildFixedCalendarStructure({ ...fixedCalendarDraft(data), periodFrame: existing.period?.frame || "measure:human-time" });
               return { coordinate: built.coordinate, period: built.period };
