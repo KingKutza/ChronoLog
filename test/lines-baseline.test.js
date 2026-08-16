@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { lineFramePlan, lineProgress, linesRenderState } from "../src/lines.js";
+import { aggregateLinePoints, lineFramePlan, lineProgress, lineTopologyPlan, lineUnitLabel, linesRenderState } from "../src/lines.js";
 
 const fixture = JSON.parse(await readFile("fixtures/lines-baseline.json", "utf8"));
 
@@ -42,4 +42,33 @@ test("terrestrial, companion, and shared mapped events receive deterministic win
   assert.equal(shared.length, 2);
   assert.equal(shared[0].progress, shared[1].progress);
   assert.equal(lineProgress("10", "10", "10"), null);
+});
+
+test("Lines fans coincident points in a stable ID order rather than hiding a cluster", () => {
+  const points = aggregateLinePoints([
+    { id: "z", eventId: "event:z", x: 0.5 },
+    { id: "a", eventId: "event:a", x: 0.5 },
+    { id: "near", eventId: "event:near", x: 0.504 }
+  ]);
+  assert.deepEqual(points.map((point) => point.id), ["a", "near", "z"]);
+  assert.deepEqual(points.map((point) => point.offset), [-8, 0, 8]);
+  assert.ok(points.every((point) => point.clusterSize === 3));
+});
+
+test("Lines calls an authored fixed calendar by its own units, never Gregorian by implication", () => {
+  const frame = { coordinate: { fixed: { schema: "chronolog/fixed-calendar/1", units: [{ name: "turn" }, { name: "watch" }, { name: "beat" }] } } };
+  assert.equal(lineUnitLabel(frame, "22000"), "turn / watch / beat");
+  assert.equal(lineUnitLabel({ traits: ["line", "timeline"] }), "topological order (unmapped units)");
+});
+
+test("Lines derives colliding time-travel lanes only from explicit authored topology", async () => {
+  const topology = JSON.parse(await readFile("fixtures/time-travel-taxonomy.chronolog.json", "utf8"));
+  const plan = lineTopologyPlan(topology, "line:earth");
+  assert.equal(plan.frames[0].id, "line:earth");
+  assert.ok(plan.frames.some((frame) => frame.id === "line:fork"));
+  assert.ok(plan.frames.some((frame) => frame.id === "line:traveler"));
+  assert.ok(plan.links.some((relation) => relation.id === "segment:earth-traveler-shared"));
+  assert.ok(plan.links.some((relation) => relation.id === "displacement:backward-earth"));
+  assert.equal(plan.attachments.some((relation) => relation.event === "event:arrival" && relation.frame === "line:traveler"), true);
+  assert.equal(lineFramePlan(topology, "line:earth").supported, true);
 });

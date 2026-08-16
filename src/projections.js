@@ -10,7 +10,7 @@ import {
   levelValue
 } from "./exact.js";
 import { radialGuideSettings, radialRenderState } from "./radial.js";
-import { lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
+import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
 
@@ -982,6 +982,10 @@ function renderSimpleLines(target, context) {
   const primeY = height / 2;
   const xFor = (day) => 145 + lineProgress(day, window.start, window.end) * 995;
   const plan = lineFramePlan(context.document, context.session.activeFrame);
+  if (plan.topology) {
+    renderTopologyLines(target, context, plan.topology);
+    return;
+  }
   const prime = plan.leading;
   const secondaryFrames = plan.companions;
   const directQuery = (frame, limit) => context.engine.queryFacts({
@@ -1023,7 +1027,11 @@ function renderSimpleLines(target, context) {
     const day = window.start.add(window.end.sub(window.start).mul(String(progress)));
     svg.append(svgElement("line", { x1: x, y1: 52, x2: x, y2: 565, class: "line-tick" }));
     const label = svgElement("text", { x, y: 594, "text-anchor": index ? "middle" : "start", class: "minimap-label" });
-    label.textContent = formatCivil(daysToCivilCoordinate(day)).replace(/ 00:00:00$/, "");
+    // A fixed calendar is an explicit mapping and gets its own units.  For
+    // every other calendar retain the historical civil label rather than
+    // claiming that an arbitrary frame has Gregorian fields.
+    label.textContent = fixedDayLabel(prime, day, true)
+      || formatCivil(daysToCivilCoordinate(day)).replace(/ 00:00:00$/, "");
     svg.append(label);
   }
   svg.append(svgElement("path", {
@@ -1034,14 +1042,20 @@ function renderSimpleLines(target, context) {
   primeLabel.textContent = `Prime · ${prime?.title || "Calendar"}`;
   svg.append(primeLabel);
   const primeEvents = new Set(primeResult.facts.map((fact) => fact.event.id));
-  for (const fact of primeResult.facts) {
-    const x = xFor(fact.day);
+  const primePoints = aggregateLinePoints(primeResult.facts.map((fact) => ({
+    id: fact.virtualId || fact.event.id, eventId: fact.event.id, fact, x: lineProgress(fact.day, window.start, window.end)
+  })).filter((point) => point.x >= 0 && point.x <= 1));
+  for (const point of primePoints) {
+    const { fact } = point;
+    const x = 145 + point.x * 995;
     if (x < 145 || x > 1140) continue;
-    const dot = svgElement("circle", { cx: x, cy: primeY, r: 5, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
+    const y = primeY + point.offset;
+    const dot = svgElement("circle", { cx: x, cy: y, r: point.clusterSize > 1 ? 5 : 4.5, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
     bindFact(dot, fact);
     const title = svgElement("title");
-    title.textContent = fact.event.payload?.title || "(untitled)";
+    title.textContent = `${fact.event.payload?.title || "(untitled)"}${point.clusterSize > 1 ? ` · ${point.clusterSize} nearby events` : ""}`;
     dot.append(title);
+    if (point.offset) svg.append(svgElement("line", { x1: x, y1: primeY, x2: x, y2: y, stroke: factColor(context, fact), "stroke-width": 1.2 }));
     svg.append(dot);
   }
   secondary.forEach(({ frame, result }, index) => {
@@ -1055,17 +1069,21 @@ function renderSimpleLines(target, context) {
     const label = svgElement("text", { x: middleX, y: apexY - 9, "text-anchor": "middle", class: "line-label", fill: frame.color || "#497bc1" });
     label.textContent = frame.title;
     svg.append(label);
-    for (const fact of result.facts) {
-      const x = xFor(fact.day);
+    const points = aggregateLinePoints(result.facts.map((fact) => ({
+      id: fact.virtualId || fact.event.id, eventId: fact.event.id, fact, x: lineProgress(fact.day, window.start, window.end)
+    })).filter((point) => point.x >= 0 && point.x <= 1));
+    for (const point of points) {
+      const { fact } = point;
+      const x = 145 + point.x * 995;
       if (x < firstX || x > lastX) continue;
       const p = lastX === firstX ? 0.5 : (x - firstX) / (lastX - firstX);
-      const y = primeY + (apexY - primeY) * Math.sin(Math.PI * p);
+      const y = primeY + (apexY - primeY) * Math.sin(Math.PI * p) + point.offset;
       const shared = primeEvents.has(fact.event.id);
       if (shared) svg.append(svgElement("line", { x1: x, y1: primeY, x2: x, y2: y, stroke: "#51483d", "stroke-width": 1.5, "stroke-dasharray": "3 3" }));
       const dot = svgElement("circle", { cx: x, cy: y, r: shared ? 7 : 4.5, fill: frame.color || "#497bc1", stroke: shared ? "#2a2620" : "none", "stroke-width": 2, class: "line-event", tabindex: 0 });
       bindFact(dot, fact);
       const title = svgElement("title");
-      title.textContent = `${fact.event.payload?.title || "(untitled)"}${shared ? " · staple" : ""}`;
+      title.textContent = `${fact.event.payload?.title || "(untitled)"}${shared ? " · staple" : ""}${point.clusterSize > 1 ? ` · ${point.clusterSize} nearby events` : ""}`;
       dot.append(title);
       svg.append(dot);
     }
@@ -1097,6 +1115,52 @@ function renderSimpleLines(target, context) {
     errors,
     truncated
   });
+}
+
+function renderTopologyLines(target, context, topology) {
+  const width = 1200; const height = 620; const left = 180; const right = 1120;
+  const svg = svgElement("svg", { class: "lines-svg", viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Authored frame topology" });
+  const frames = topology.frames;
+  const rowY = (index) => frames.length <= 1 ? height / 2 : 85 + index * ((height - 170) / (frames.length - 1));
+  const lane = new Map(frames.map((frame, index) => [frame.id, rowY(index)]));
+  const events = new Map();
+  for (const attachment of topology.attachments) {
+    const list = events.get(attachment.event) || []; list.push(attachment); events.set(attachment.event, list);
+  }
+  const orderedEvents = [...events.entries()].sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+  const xForEvent = new Map(orderedEvents.map(([id], index) => [id, left + (index + 1) * (right - left) / (orderedEvents.length + 1)]));
+  frames.forEach((frame, index) => {
+    const y = rowY(index); const color = frame.color || (index === 0 ? "#d4552d" : "#497bc1");
+    svg.append(svgElement("path", { d: `M ${left} ${y} L ${right} ${y}`, fill: "none", stroke: color, "stroke-width": index === 0 ? 5 : 3, "stroke-linecap": "round" }));
+    const label = svgElement("text", { x: 24, y: y + 5, fill: color, class: "line-label" });
+    label.textContent = `${index === 0 ? "Prime · " : ""}${frame.title} · unmapped units`; svg.append(label);
+  });
+  for (const relation of topology.links) {
+    if (relation.type === "shared-segment") {
+      const first = relation.lines?.find((id) => lane.has(id)); const second = relation.lines?.find((id) => id !== first && lane.has(id));
+      const start = context.document.relations?.[relation.anchors?.[first]?.start]?.event;
+      const end = context.document.relations?.[relation.anchors?.[first]?.end]?.event;
+      if (first && second && start && end && xForEvent.has(start) && xForEvent.has(end)) {
+        svg.append(svgElement("path", { d: `M ${xForEvent.get(start)} ${lane.get(first)} C ${(xForEvent.get(start) + xForEvent.get(end)) / 2} ${lane.get(first)}, ${(xForEvent.get(start) + xForEvent.get(end)) / 2} ${lane.get(second)}, ${xForEvent.get(end)} ${lane.get(second)}`, fill: "none", stroke: "#51483d", "stroke-width": 2, "stroke-dasharray": "5 4" }));
+      }
+    } else {
+      const origin = context.document.relations?.[relation.origin?.world]?.event || context.document.relations?.[relation.origin?.traveler]?.event;
+      const destination = context.document.relations?.[relation.destination?.world]?.event || context.document.relations?.[relation.destination?.traveler]?.event;
+      if (origin && destination && xForEvent.has(origin) && xForEvent.has(destination)) svg.append(svgElement("path", { d: `M ${xForEvent.get(origin)} ${lane.get(relation.world) || height / 2} Q ${(xForEvent.get(origin) + xForEvent.get(destination)) / 2} 44 ${xForEvent.get(destination)} ${lane.get(relation.world) || height / 2}`, fill: "none", stroke: "#a46b12", "stroke-width": 2, "marker-end": "url(#lines-arrow)" }));
+    }
+  }
+  const defs = svgElement("defs"); const marker = svgElement("marker", { id: "lines-arrow", markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: "auto" }); marker.append(svgElement("path", { d: "M 0 0 L 8 4 L 0 8 z", fill: "#a46b12" })); defs.append(marker); svg.prepend(defs);
+  for (const [eventId, attachments] of orderedEvents) {
+    const positions = aggregateLinePoints(attachments.map((attachment) => ({ id: attachment.id, eventId, attachment, x: 0.5 })), { pixelSpan: 1, clusterPixels: 0 });
+    for (const point of positions) {
+      const fact = { event: context.document.events[eventId], relation: point.attachment, coordinate: point.attachment.coordinate };
+      const dot = svgElement("circle", { cx: xForEvent.get(eventId), cy: lane.get(point.attachment.frame) + point.offset, r: 6, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
+      bindFact(dot, fact); const title = svgElement("title"); title.textContent = `${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
+    }
+  }
+  const status = svgElement("text", { x: width / 2, y: height - 18, "text-anchor": "middle", class: "lines-state" });
+  status.textContent = orderedEvents.length ? "Topology shown from authored incidences; no cross-frame coordinate mapping inferred." : "No authored topology incidences."; svg.append(status);
+  svg.dataset.linesState = orderedEvents.length ? "ordinary" : "empty"; target.append(svg);
 }
 
 function polar(cx, cy, radius, angle) {
