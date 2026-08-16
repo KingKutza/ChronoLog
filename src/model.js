@@ -399,6 +399,22 @@ export function durationMagnitude(value = "0", unit = "second", frame = "measure
   };
 }
 
+export function durationMagnitudeDays(magnitude) {
+  const factors = {
+    week: "7",
+    day: "1",
+    hour: "1/24",
+    minute: "1/1440",
+    second: "1/86400"
+  };
+  let total = Rational.parse(0);
+  for (const part of magnitude?.value?.levels || []) {
+    const factor = factors[part.level];
+    if (factor !== undefined) total = total.add(Rational.parse(part.value).mul(factor));
+  }
+  return total;
+}
+
 export function isZeroDuration(event) {
   const duration = event?.magnitudes?.duration?.value?.levels || [];
   return duration.every((entry) => Rational.parse(entry.value).isZero());

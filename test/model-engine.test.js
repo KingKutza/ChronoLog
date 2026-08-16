@@ -9,6 +9,7 @@ import {
   addPattern,
   addRelation,
   durationMagnitude,
+  durationMagnitudeDays,
   suppressVirtual,
   validateDocument
 } from "../src/model.js";
@@ -20,6 +21,20 @@ function date(year, month = "1", day = "1") {
     { level: "day", value: String(day) }
   ]);
 }
+
+test("duration magnitudes convert human units to exact days", () => {
+  assert.equal(durationMagnitudeDays(durationMagnitude("2", "week")).toJSON(), "14");
+  assert.equal(durationMagnitudeDays(durationMagnitude("90", "minute")).toJSON(), "1/16");
+  assert.equal(durationMagnitudeDays({
+    frame: "measure:human-time",
+    value: coordinate([
+      { level: "day", value: "1" },
+      { level: "hour", value: "12" },
+      { level: "minute", value: "30" }
+    ])
+  }).toJSON(), "73/48");
+  assert.equal(durationMagnitudeDays(null).toJSON(), "0");
+});
 
 test("celestial state and cycle facts exist at remote dates", () => {
   const engine = new ChronologEngine(createCelestialDocument());
