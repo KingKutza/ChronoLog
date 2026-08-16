@@ -132,13 +132,12 @@ button {
   align-items: center;
   gap: 7px;
   margin-right: 5px;
-  font: 800 12px/1 var(--data);
-  letter-spacing: .16em;
-  text-transform: uppercase;
+  font: 780 14px/1 var(--ui);
+  letter-spacing: -.035em;
 }
 
 .chronolog-wordmark { white-space: nowrap; }
-.chronolog-wordmark > span { color: var(--primary); }
+.chronolog-wordmark > span { margin-left: .04em; color: var(--primary); font-weight: 850; }
 .responsive-label-short { display: none; }
 
 .instrument-button,
@@ -293,10 +292,11 @@ button {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.chronolog-mark__frame { stroke-width: 2.4; }
-.chronolog-mark__frame--secondary { opacity: .58; }
-.chronolog-mark__staple { stroke-width: 1.45; opacity: .82; }
-.chronolog-mark__join { fill: var(--accent); stroke: var(--paper); stroke-width: 1.2; }
+.chronolog-mark__frame--primary { stroke-width: 2.8; }
+.chronolog-mark__frame--secondary { stroke: var(--accent); stroke-width: 2.35; }
+.chronolog-mark__staple { stroke-width: 1.8; opacity: .88; }
+.chronolog-mark__join { fill: var(--primary); stroke: var(--paper); stroke-width: 1; }
+.chronolog-mark__endpoint { fill: currentColor; stroke: none; }
 
 #create-menu { flex: none; position: relative; }
 #create-menu > summary {
