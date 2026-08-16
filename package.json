@@ -1,10 +1,28 @@
 {
   "name": "chronolog-pocket-instrument",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "A local-first timeline instrument",
+  "bin": {
+    "chronolog": "bin/chronolog.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "tools/",
+    "pocket-instrument.html",
+    "README.md",
+    "docs/"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "node tools/serve.js",
+    "start": "node bin/chronolog.js",
+    "dev": "node tools/serve.js",
     "test": "node tools/test.js",
-    "check": "node tools/check.js"
+    "check": "node tools/check.js",
+    "package:check": "npm pack --dry-run --ignore-scripts"
   }
 }
