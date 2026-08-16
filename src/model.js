@@ -82,6 +82,9 @@ export function validateDocument(document) {
     if (frame.law?.pattern && !document.patterns?.[frame.law.pattern]) {
       errors.push(`Frame ${id} references a missing law pattern`);
     }
+    if (frame.query?.excludeGroups?.length || frame.query?.notGroups?.length) {
+      errors.push(`Group ${id} uses recursive negation, which is not defined`);
+    }
   }
   for (const [id, pattern] of Object.entries(document.patterns || {})) {
     if (!pattern || typeof pattern !== "object") {
@@ -120,6 +123,17 @@ export function validateDocument(document) {
     } else if (relation.type === "composition") {
       if (!document.frames?.[relation.parent] || !document.frames?.[relation.child]) {
         errors.push(`Composition ${id} references a missing frame`);
+      }
+    } else if (relation.type === "membership") {
+      const group = document.frames?.[relation.group];
+      if (!group?.traits?.includes("group")) {
+        errors.push(`Membership ${id} references a missing group`);
+      }
+      if (!document.events?.[relation.member] && !document.frames?.[relation.member]) {
+        errors.push(`Membership ${id} references a missing member`);
+      }
+      if (relation.include === false || relation.mode === "exclude") {
+        errors.push(`Membership ${id} uses negative group membership, which is not defined`);
       }
     } else {
       errors.push(`Relation ${id} has an unknown type`);

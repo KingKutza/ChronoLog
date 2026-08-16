@@ -265,6 +265,8 @@ export class ChronologEngine {
     this.patternsByFrame = new Map();
     this.relationsByFrame = new Map();
     this.groupFrameByEvent = new Map();
+    this.groupMembershipsByMember = new Map();
+    this.groupMembersByGroup = new Map();
     this.framesByEvent = new Map();
     this.calendarFrameByEvent = new Map();
     this.explicitFactsByFrame = new Map();
@@ -289,6 +291,7 @@ export class ChronologEngine {
     }
 
     for (const relation of Object.values(document.relations)) {
+      if (relation.type === "membership") continue;
       if (relation.type !== "attachment") continue;
       const relations = this.relationsByFrame.get(relation.frame) || [];
       relations.push(relation);
@@ -296,14 +299,105 @@ export class ChronologEngine {
       const eventFrames = this.framesByEvent.get(relation.event) || new Set();
       eventFrames.add(relation.frame);
       this.framesByEvent.set(relation.event, eventFrames);
-      if (document.frames[relation.frame]?.traits.includes("group")
-        && !document.frames[relation.frame]?.traits.includes("importance")) {
-        this.groupFrameByEvent.set(relation.event, relation.frame);
-      }
       if (document.frames[relation.frame]?.traits.includes("calendar")
         && !this.calendarFrameByEvent.has(relation.event)) {
         this.calendarFrameByEvent.set(relation.event, relation.frame);
       }
+    }
+    this.rebuildGroupMemberships();
+  }
+
+  isOrdinaryGroup(frameId) {
+    const frame = this.document.frames[frameId];
+    return Boolean(frame?.traits?.includes("group") && !frame.traits.includes("importance"));
+  }
+
+  queryGroupMembers(group) {
+    const query = group.query;
+    if (!query || typeof query !== "object") return [];
+    if (query.excludeGroups?.length || query.notGroups?.length) return [];
+    const all = { ...this.document.events, ...this.document.frames };
+    const ids = Array.isArray(query.ids) ? new Set(query.ids) : null;
+    const traitsAll = Array.isArray(query.traitsAll) ? query.traitsAll : [];
+    const traitsAny = Array.isArray(query.traitsAny) ? query.traitsAny : [];
+    const groups = Array.isArray(query.groups) ? query.groups : [];
+    const matches = [];
+    for (const [id, member] of Object.entries(all)) {
+      const traits = member.traits || [];
+      if (ids && !ids.has(id)) continue;
+      if (traitsAll.some((trait) => !traits.includes(trait))) continue;
+      if (traitsAny.length && !traitsAny.some((trait) => traits.includes(trait))) continue;
+      matches.push({ member: id, provenance: { kind: "query", group: group.id, query: "selector" } });
+    }
+    for (const nested of groups) {
+      if (this.isOrdinaryGroup(nested)) {
+        matches.push({ member: nested, provenance: { kind: "query", group: group.id, query: "group" } });
+      }
+    }
+    return matches;
+  }
+
+  rebuildGroupMemberships() {
+    const groups = Object.values(this.document.frames).filter((frame) => this.isOrdinaryGroup(frame.id));
+    const members = new Map(groups.map((group) => [group.id, new Map()]));
+    const add = (groupId, memberId, provenance, mergeProvenance = true) => {
+      const inGroup = members.get(groupId);
+      if (!inGroup) return false;
+      const existing = inGroup.get(memberId) || [];
+      // Membership itself is a set.  We retain independently authored/query
+      // reasons for a direct member, but do not manufacture infinitely many
+      // cyclic path explanations for an already-known inherited member.
+      if (existing.length && !mergeProvenance) return false;
+      const key = JSON.stringify(provenance);
+      if (existing.some((item) => JSON.stringify(item) === key)) return false;
+      inGroup.set(memberId, [...existing, provenance]);
+      return true;
+    };
+    // Legacy group attachments are authored edges. New membership relations
+    // additionally admit frames, including groups, without inventing a new root type.
+    for (const relation of Object.values(this.document.relations)) {
+      if (relation.type === "attachment" && this.isOrdinaryGroup(relation.frame)) {
+        add(relation.frame, relation.event, { kind: "authored", relation: relation.id });
+      }
+      if (relation.type === "membership" && this.isOrdinaryGroup(relation.group) && relation.include !== false && relation.mode !== "exclude") {
+        add(relation.group, relation.member, { kind: "authored", relation: relation.id });
+      }
+    }
+    for (const group of groups) {
+      for (const match of this.queryGroupMembers(group)) add(group.id, match.member, match.provenance);
+    }
+    // Positive nesting is monotonic, so repeatedly adding inherited members reaches
+    // the finite graph's least fixed point. A self-edge therefore becomes a no-op.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const group of groups) {
+        for (const [memberId, provenance] of [...members.get(group.id)]) {
+          if (!this.isOrdinaryGroup(memberId)) continue;
+          for (const [nestedMember, nestedProvenance] of members.get(memberId) || []) {
+            for (const source of nestedProvenance) {
+              if (add(group.id, nestedMember, {
+                kind: "nested", group: group.id, via: memberId, source
+              }, false)) changed = true;
+            }
+          }
+        }
+      }
+    }
+    this.groupMembersByGroup = members;
+    this.groupMembershipsByMember = new Map();
+    for (const [groupId, inGroup] of members) {
+      for (const [memberId, provenance] of inGroup) {
+        const memberships = this.groupMembershipsByMember.get(memberId) || new Map();
+        memberships.set(groupId, provenance);
+        this.groupMembershipsByMember.set(memberId, memberships);
+      }
+    }
+    this.groupFrameByEvent = new Map();
+    for (const [eventId, memberships] of this.groupMembershipsByMember) {
+      if (!this.document.events[eventId]) continue;
+      const first = [...memberships.keys()].sort()[0];
+      if (first) this.groupFrameByEvent.set(eventId, first);
     }
   }
 
@@ -326,6 +420,16 @@ export class ChronologEngine {
 
   eventGroupFrame(eventId) {
     return this.groupFrameByEvent.get(eventId) || null;
+  }
+
+  eventGroupMemberships(eventId) {
+    return [...(this.groupMembershipsByMember.get(eventId) || new Map())]
+      .map(([group, provenance]) => ({ group, provenance }));
+  }
+
+  groupMembers(groupId) {
+    return [...(this.groupMembersByGroup.get(groupId) || new Map())]
+      .map(([member, provenance]) => ({ member, provenance }));
   }
 
   eventCalendarFrame(eventId) {
@@ -351,6 +455,7 @@ export class ChronologEngine {
     }
     this.explicitFactsByFrame.delete(frameId);
     this.explicitMaxDurationByFrame.delete(frameId);
+    this.rebuildGroupMemberships();
   }
 
   indexedExplicitFacts(frameId) {
