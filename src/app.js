@@ -12,6 +12,7 @@ import {
 } from "./exact.js";
 import { exportICS, importICS } from "./ics.js";
 import { additiveFrameTraits, preservedFrameSchema } from "./frame-edit.js";
+import { buildFixedCalendarStructure, editableFixedCalendarStructure } from "./calendar-structure.js";
 import {
   CommandHistory,
   addEvent,
@@ -1505,6 +1506,14 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
   const kind = isNew ? presetKind : frameKind(value);
   const frameLenses = ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"];
   const visibleFrameLenses = new Set(value.display?.lenses || frameLenses);
+  const fixedCalendar = editableFixedCalendarStructure(value);
+  const calendarUnits = fixedCalendar?.units || [
+    { name: "year" }, { name: "month", perParent: "12" }, { name: "week", perParent: "4" }, { name: "day", perParent: "7" }
+  ];
+  const fixedRows = calendarUnits.map((unit, index) => `<div class="calendar-unit-row">
+      <input aria-label="Unit ${index + 1} name" name="calendarUnitName" value="${escapeHTML(unit.name)}">
+      ${index === 0 ? "<span class=\"calendar-root-note\">top-level cycle</span>" : `<input aria-label="${escapeHTML(unit.name)} per parent" name="calendarUnitRadix" inputmode="numeric" value="${escapeHTML(unit.perParent)}"><input aria-label="${escapeHTML(unit.name)} names" name="calendarUnitLabels" value="${escapeHTML(unit.labels || "")}" placeholder="Optional names, comma-separated">`}
+    </div>`).join("");
   const wrapper = document.createElement("form");
   wrapper.className = "frame-form";
   const options = (items, selected) => items.map(([id, label]) =>
@@ -1537,13 +1546,58 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     <p class="field-note">Choose what appears together from Frames while viewing a calendar. This editor changes the frame itself.</p>
     <label class="field"><span>Basis frame</span><select name="basis"><option value="">None</option>${Object.values(chronolog.frames)
       .filter((item) => item.id !== value.id).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === value.basis ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}</select></label>
-    <label class="field"><span>Cycle period data (JSON)</span><textarea name="period" class="code" placeholder="Leave blank to preserve existing period">${escapeHTML(value.period ? JSON.stringify(value.period, null, 2) : "")}</textarea></label>
+    <details class="calendar-structure" ${fixedCalendar ? "open" : ""}>
+      <summary>Fixed calendar structure</summary>
+      <label class="check-chip calendar-structure-toggle"><input type="checkbox" name="useFixedCalendar" ${fixedCalendar ? "checked" : ""}>Use a regular unit hierarchy</label>
+      <small>For ordinary calendars with a constant number of units at every level. This writes exact values; leave it off to retain an unusual or rule-driven coordinate system.</small>
+      <div class="calendar-units" data-fixed-calendar-fields>
+        <div class="calendar-unit-heading"><span>Unit name</span><span>Count</span><span>Names within parent</span></div>
+        ${fixedRows}
+        <label class="field"><span>Smallest unit length in Earth days</span><input name="smallestUnitDays" value="${escapeHTML(fixedCalendar?.smallestUnitDays || "1")}" placeholder="1"></label>
+        <output class="calendar-period-preview">${fixedCalendar ? `One ${escapeHTML(fixedCalendar.units[0].name)} = ${escapeHTML(fixedCalendar.totalDays)} Earth days.` : "Turn this on to replace the coordinate JSON with a regular hierarchy."}</output>
+      </div>
+    </details>
     <details class="advanced-fields"><summary>Advanced frame data</summary>
+      <label class="field"><span>Cycle period data (JSON)</span><textarea name="period" class="code" placeholder="Leave blank to preserve existing period">${escapeHTML(value.period ? JSON.stringify(value.period, null, 2) : "")}</textarea></label>
       <label class="field"><span>Traits</span><input name="traits" value="${escapeHTML(value.traits.join(", "))}"></label>
       <label class="field"><span>Coordinate nesting (JSON)</span><textarea name="coordinate" class="code">${escapeHTML(value.coordinate ? JSON.stringify(value.coordinate, null, 2) : "")}</textarea></label>
     </details>
     <div class="inspector-actions"><button class="instrument-button primary" type="submit">${isNew ? "Create" : "Apply"}</button>
       ${isNew ? "" : `<button class="instrument-button" id="duplicate-object" type="button">Duplicate</button><button class="instrument-button danger" id="delete-object" type="button">Remove</button>`}</div>`;
+  const fixedCalendarToggle = wrapper.elements.useFixedCalendar;
+  const fixedCalendarFields = wrapper.querySelector("[data-fixed-calendar-fields]");
+  const fixedCalendarPreview = wrapper.querySelector(".calendar-period-preview");
+  function fixedCalendarDraft(data = new FormData(wrapper)) {
+    const names = data.getAll("calendarUnitName");
+    const radices = data.getAll("calendarUnitRadix");
+    const labels = data.getAll("calendarUnitLabels");
+    return {
+      units: names.map((name, index) => ({
+        name: String(name),
+        perParent: index ? String(radices[index - 1] || "") : undefined,
+        labels: index ? String(labels[index - 1] || "") : ""
+      })),
+      smallestUnitDays: String(data.get("smallestUnitDays") || ""),
+      periodFrame: (chronolog.frames[recordId] || value).period?.frame || "measure:human-time"
+    };
+  }
+  function refreshFixedCalendarPreview() {
+    const enabled = fixedCalendarToggle.checked;
+    for (const input of fixedCalendarFields.querySelectorAll("input")) input.disabled = !enabled;
+    if (!enabled) {
+      fixedCalendarPreview.textContent = "Leave this off to retain the existing coordinate and period data.";
+      return;
+    }
+    try {
+      const built = buildFixedCalendarStructure(fixedCalendarDraft());
+      fixedCalendarPreview.textContent = `One ${built.coordinate.fixed.units[0].name} = ${built.totalDays} Earth days (exact).`;
+    } catch (error) {
+      fixedCalendarPreview.textContent = error.message;
+    }
+  }
+  fixedCalendarToggle.addEventListener("change", refreshFixedCalendarPreview);
+  fixedCalendarFields.addEventListener("input", refreshFixedCalendarPreview);
+  refreshFixedCalendarPreview();
   wrapper.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(wrapper);
@@ -1563,7 +1617,12 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
           else delete display.radialMaxDays;
         }
         const existing = documentValue.frames[recordId] || {};
-        const schema = preservedFrameSchema(existing, data.get("coordinate"), data.get("period"));
+        const schema = data.has("useFixedCalendar")
+          ? (() => {
+              const built = buildFixedCalendarStructure({ ...fixedCalendarDraft(data), periodFrame: existing.period?.frame || "measure:human-time" });
+              return { coordinate: built.coordinate, period: built.period };
+            })()
+          : preservedFrameSchema(existing, data.get("coordinate"), data.get("period"));
         const payload = {
           ...existing, id: recordId,
           title: String(data.get("title") || "Untitled frame"),

@@ -382,6 +382,9 @@ test("frame manager exposes contextual calendar inclusion, group visibility, str
   for (const phrase of ["Frame type", "Strategic", "Promote to name", "Duplicate", "Remove"]) {
     assert.match(manager, new RegExp(phrase));
   }
+  for (const phrase of ["Fixed calendar structure", "Use a regular unit hierarchy", "Smallest unit length in Earth days"]) {
+    assert.match(manager, new RegExp(phrase));
+  }
   const browser = sourceSlice(app, "function openObjectBrowser", "function openStapleSuggestions");
   const viewCard = sourceSlice(app, "function frameViewCard", "function openObjectBrowser");
   assert.match(browser, /Current lens/);

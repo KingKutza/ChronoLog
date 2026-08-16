@@ -542,6 +542,25 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   font: 11px/1.4 var(--data);
 }
 .advanced-fields[open] summary { margin-bottom: 10px; }
+.calendar-structure {
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  color: var(--muted);
+  font: 11px/1.4 var(--data);
+}
+.calendar-structure[open] summary { margin-bottom: 10px; }
+.calendar-structure > small { display: block; margin: 8px 0; color: var(--faint); }
+.calendar-structure-toggle { margin-bottom: 7px; }
+.calendar-units { display: grid; gap: 6px; }
+.calendar-unit-heading,
+.calendar-unit-row { display: grid; grid-template-columns: minmax(0, .6fr) minmax(72px, .3fr) minmax(0, 1fr); gap: 6px; align-items: center; }
+.calendar-unit-heading { color: var(--faint); font-size: 10px; }
+.calendar-unit-heading span { white-space: nowrap; }
+.calendar-unit-row input { width: 100%; min-height: 30px; padding: 5px 7px; border: 1px solid var(--strong); border-radius: 6px; font: 12px/1.2 var(--data); }
+.calendar-root-note { grid-column: 2 / span 2; color: var(--faint); }
+.calendar-period-preview { color: var(--muted); font: 11px/1.4 var(--data); }
 .event-form:not(.has-recurrence) .recurrence-options { display: none; }
 
 .inspector-actions {
