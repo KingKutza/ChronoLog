@@ -38,6 +38,32 @@ Frames define their own nesting and may reference formula exports for conversion
 and projection. Gregorian conversion uses arbitrary-size integers rather than
 JavaScript `Date`.
 
+## Frame and mapping compatibility
+
+Frames are deliberately open-trait records, not selections from a closed type
+menu. A calendar, line, group, cycle, measure, or a composed context can share
+one Frame; traits state the roles that are actually present. A frame may reuse a
+shared coordinate definition with `basis`, but groups do not acquire a basis,
+period, or calendar semantics by implication.
+
+`coordinate-mapping` Relations are the explicit cross-frame bridge. They name
+one `from` Frame and one `to` Frame and carry one or more anchors. Each anchor
+maps either a point (`coordinate`) or an interval (`interval.start` /
+`interval.end`) in each frame. Its `continuity` is `continuous` or
+`discontinuous`; its relation direction is `forward`, `reverse`, or
+`bidirectional`. The engine and renderers must not invent interpolation between
+anchors, especially across a discontinuity. Existing `attachment` incidence,
+`shared-segment`, `termination`, and `displacement` Relations remain the
+topological vocabulary—coordinate mappings complement them rather than
+flattening time-travel topology into a calendar conversion.
+
+When loading an early prototype document, ChronoLog normalizes `basisFrame` to
+`basis`, a raw coordinate-level array to `{ kind: "nested", levels }`, and a
+legacy decimal `cyclePeriodDays` to an explicitly approximate `period`. This is
+an in-memory, loss-minimizing compatibility migration; old fields are retained
+until a normal save. Existing terrestrial and celestial fixtures therefore keep
+their present coordinate laws and behavior.
+
 Lens, scale, focus, minimap, and inspector state live in `ViewSession`, never in
 the canonical document.
 

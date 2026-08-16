@@ -1,4 +1,4 @@
-import { clone, validateDocument } from "./model.js";
+import { clone, migrateDocument, validateDocument } from "./model.js";
 
 function parsedRRule(value = "") {
   return Object.fromEntries(String(value).split(";").filter(Boolean).map((part) => {
@@ -36,6 +36,7 @@ function recoverDanglingOverrideReplacements(document) {
 }
 
 export function compactDocument(document) {
+  migrateDocument(document);
   recoverLegacyRecurrenceConstraints(document);
   recoverDanglingOverrideReplacements(document);
   for (const source of Object.values(document?.foreign?.ics?.sources || {})) {

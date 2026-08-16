@@ -141,6 +141,8 @@ export function validateDocument(document) {
       validateTermination(document, relation, errors);
     } else if (relation.type === "displacement") {
       validateDisplacement(document, relation, errors);
+    } else if (relation.type === "coordinate-mapping") {
+      validateCoordinateMapping(document, relation, errors);
     } else {
       errors.push(`Relation ${id} has an unknown type`);
     }
@@ -163,6 +165,77 @@ export function validateDocument(document) {
     }
   }
   return { valid: errors.length === 0, errors };
+}
+
+function isCoordinate(value) {
+  return Boolean(value && typeof value === "object" && Array.isArray(value.levels)
+    && value.levels.every((level) => level && typeof level.level === "string" && typeof level.value === "string"));
+}
+
+function validateMappingPosition(document, value, label, errors) {
+  if (!value || typeof value !== "object") {
+    errors.push(`${label} must be a coordinate or interval`);
+    return;
+  }
+  if (!document.frames?.[value.frame]) errors.push(`${label} references a missing frame ${value.frame || "(missing)"}`);
+  if (value.coordinate !== undefined) {
+    if (!isCoordinate(value.coordinate)) errors.push(`${label} coordinate must use nested levels`);
+    return;
+  }
+  const interval = value.interval;
+  if (!interval || typeof interval !== "object") errors.push(`${label} must contain coordinate or interval start/end coordinates`);
+  else {
+    if (!isCoordinate(interval.start)) errors.push(`${label} interval start must use nested levels`);
+    if (!isCoordinate(interval.end)) errors.push(`${label} interval end must use nested levels`);
+  }
+}
+
+function validateCoordinateMapping(document, relation, errors) {
+  if (!relation.from || !relation.to) {
+    errors.push(`Coordinate mapping ${relation.id} requires from and to frame ids`);
+    return;
+  }
+  if (!document.frames?.[relation.from]) errors.push(`Coordinate mapping ${relation.id} references a missing source frame`);
+  if (!document.frames?.[relation.to]) errors.push(`Coordinate mapping ${relation.id} references a missing target frame`);
+  if (relation.from === relation.to) errors.push(`Coordinate mapping ${relation.id} must relate distinct frames`);
+  if (!new Set(["forward", "reverse", "bidirectional"]).has(relation.direction || "bidirectional")) {
+    errors.push(`Coordinate mapping ${relation.id} has an invalid direction`);
+  }
+  const anchors = Array.isArray(relation.anchors) ? relation.anchors : [];
+  if (!anchors.length) errors.push(`Coordinate mapping ${relation.id} requires at least one anchor`);
+  for (const [index, anchor] of anchors.entries()) {
+    validateMappingPosition(document, anchor?.from, `Coordinate mapping ${relation.id} anchor ${index + 1} source`, errors);
+    validateMappingPosition(document, anchor?.to, `Coordinate mapping ${relation.id} anchor ${index + 1} target`, errors);
+    if (anchor?.from?.frame && anchor.from.frame !== relation.from) {
+      errors.push(`Coordinate mapping ${relation.id} anchor ${index + 1} source frame must match from`);
+    }
+    if (anchor?.to?.frame && anchor.to.frame !== relation.to) {
+      errors.push(`Coordinate mapping ${relation.id} anchor ${index + 1} target frame must match to`);
+    }
+    if (!new Set(["continuous", "discontinuous"]).has(anchor?.continuity || "continuous")) {
+      errors.push(`Coordinate mapping ${relation.id} anchor ${index + 1} has an invalid continuity`);
+    }
+  }
+}
+
+// Read old prototype descriptors without forcing a document-wide rewrite.  The
+// canonical result remains chronolog/1: generic Frame traits, authored unit
+// definitions under coordinate, and Relations for cross-frame meaning.
+export function migrateDocument(document) {
+  if (!document || typeof document !== "object") return document;
+  for (const frame of Object.values(document.frames || {})) {
+    if (!frame || typeof frame !== "object") continue;
+    if (!frame.basis && typeof frame.basisFrame === "string") frame.basis = frame.basisFrame;
+    if (Array.isArray(frame.coordinate)) frame.coordinate = { kind: "nested", levels: frame.coordinate };
+    if (frame.cyclePeriodDays !== undefined && !frame.period) {
+      frame.period = {
+        frame: "measure:human-time",
+        value: coordinate([{ level: "day", value: String(frame.cyclePeriodDays) }]),
+        provenance: { kind: "approximation", migratedFrom: "cyclePeriodDays" }
+      };
+    }
+  }
+  return document;
 }
 
 function attachmentFor(document, id) {
