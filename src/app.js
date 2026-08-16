@@ -970,11 +970,19 @@ function openEventInspector(eventId) {
     (pattern) => pattern.kind === "ics-rrule" && pattern.templateEvent === eventId
   );
   const originalRecurrenceChoice = recurrenceFormChoice(recurrence);
-  const memberships = new Set(
-    eventRelations(chronolog, eventId)
-      .filter((item) => chronolog.frames[item.frame]?.traits.includes("group"))
+  const membershipReasons = new Map(engine.eventGroupMemberships(eventId)
+    .map(({ group, provenance }) => [group, provenance]));
+  const memberships = new Set([
+    ...membershipReasons.keys(),
+    ...eventRelations(chronolog, eventId)
+      .filter((item) => chronolog.frames[item.frame]?.traits.includes("importance"))
       .map((item) => item.frame)
-  );
+  ]);
+  const membershipExplanation = (groupId) => (membershipReasons.get(groupId) || [])
+    .map((reason) => reason.kind === "authored" ? "authored membership"
+      : reason.kind === "query" ? "live query"
+        : `nested through ${reason.via}`)
+    .join("; ");
   const isTask = event.traits.includes("task");
   const startParts = relationDateParts(relation);
   const attachedImportance = importanceFrames.find((frame) => memberships.has(frame.id));
@@ -1059,7 +1067,7 @@ function openEventInspector(eventId) {
     </div>
     <div class="field"><span>Groups</span>
       <div class="check-row">
-        ${groups.map((frame) => `<label class="check-chip" style="--group-color:${escapeHTML(frame.color || "#2e8b57")}">
+        ${groups.map((frame) => `<label class="check-chip" title="${escapeHTML(membershipExplanation(frame.id))}" style="--group-color:${escapeHTML(frame.color || "#2e8b57")}">
           <input type="checkbox" name="groups" value="${escapeHTML(frame.id)}"
             ${memberships.has(frame.id) ? "checked" : ""}>${escapeHTML(frame.title)}
         </label>`).join("") || `<span style="color:var(--faint);font:11px var(--data)">No groups yet.</span>`}
