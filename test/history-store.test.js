@@ -341,6 +341,26 @@ test("draft deferral prevents whole-document serialization until the editor reso
   clearTimeout(store.timer);
 });
 
+test("a cancelled draft releases autosave exactly once even when close paths repeat", async () => {
+  const writes = [];
+  const store = new AutosaveStore({
+    delay: 60_000,
+    fetcher: async (url, options) => {
+      writes.push({ url, options });
+      return { ok: true, status: 204, async text() { return ""; } };
+    }
+  });
+  store.attach(measuredDocument("Cancelled draft"), { remoteUrl: "/api/document" });
+  store.beginDeferred();
+  store.markDirty();
+  store.endDeferred(); // Cancel resolves the transaction.
+  store.endDeferred(); // Escape/click-away after cancel is harmless.
+  assert.equal(store.deferred, 0);
+  assert.equal(await store.save(), true);
+  assert.equal(writes.length, 1);
+  clearTimeout(store.timer);
+});
+
 test("delta commands remain undoable without whole-document snapshots", () => {
   const doc = createDocument("Delta history");
   doc.foreign.counter = 0;

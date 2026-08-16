@@ -527,22 +527,7 @@ function toast(message, error = false) {
 }
 
 function closeInspector() {
-  if (provisionalEvent && session.inspector?.type === "event" && session.inspector.id === provisionalEvent.id) {
-    if (provisionalEvent.dirty) {
-      provisionalEvent.form?.requestSubmit();
-      if (provisionalEvent) return;
-    } else {
-      const eventId = provisionalEvent.id;
-      provisionalEvent = null;
-      executeEventChange("Discard empty draft", eventId, (documentValue) => {
-        delete documentValue.events[eventId];
-        for (const [id, relation] of Object.entries(documentValue.relations)) {
-          if (relation.event === eventId) delete documentValue.relations[id];
-        }
-      }, true);
-      store.endDeferred();
-    }
-  }
+  discardProvisionalDraft();
   dismissInspector();
 }
 
@@ -555,20 +540,34 @@ function dismissInspector() {
   if (wasFramesBrowser) byId("new-frame").focus();
 }
 
-function resolveProvisionalDraft(nextEventId = null) {
-  if (!provisionalEvent || provisionalEvent.id === nextEventId) return true;
-  if (provisionalEvent.dirty) {
-    provisionalEvent.form?.requestSubmit();
-    return !provisionalEvent;
-  }
+function discardProvisionalDraft(nextEventId = null) {
+  if (!provisionalEvent || provisionalEvent.id === nextEventId) return false;
   const eventId = provisionalEvent.id;
   provisionalEvent = null;
-  executeEventChange("Discard empty draft", eventId, (documentValue) => {
-    delete documentValue.events[eventId];
-    for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.event === eventId) delete documentValue.relations[id];
-    }
-  }, true);
+  try {
+    executeEventChange("Discard provisional draft", eventId, (documentValue) => {
+      delete documentValue.events[eventId];
+      for (const [id, relation] of Object.entries(documentValue.relations)) {
+        if (relation.event === eventId) delete documentValue.relations[id];
+      }
+    }, true);
+  } finally {
+    // A close or validation failure must never leave the document permanently
+    // deferred. The draft is a transaction, not an autosave lock.
+    store.endDeferred();
+  }
+  return true;
+}
+
+function resolveProvisionalDraft(nextEventId = null) {
+  if (!provisionalEvent || provisionalEvent.id === nextEventId) return true;
+  discardProvisionalDraft();
+  return true;
+}
+
+function commitProvisionalDraft(eventId) {
+  if (!provisionalEvent || provisionalEvent.id !== eventId) return false;
+  provisionalEvent = null;
   store.endDeferred();
   return true;
 }
@@ -578,6 +577,16 @@ function openInspector(title, body, panel = "object") {
   inspectorBody.replaceChildren(body);
   inspector.dataset.panel = panel;
   inspector.classList.add("open");
+}
+
+function focusInspectorEditor(eventId) {
+  requestAnimationFrame(() => {
+    if (session.inspector?.type !== "event" || session.inspector.id !== eventId) return;
+    const title = inspectorBody.querySelector('input[name="title"]');
+    if (!(title instanceof HTMLInputElement)) return;
+    title.focus({ preventScroll: true });
+    title.select();
+  });
 }
 
 function escapeHTML(value = "") {
@@ -908,9 +917,9 @@ function openVirtualInspector(virtualId) {
 }
 
 function openEventInspector(eventId) {
-  if (!resolveProvisionalDraft(eventId)) return;
+  if (!resolveProvisionalDraft(eventId)) return false;
   const event = chronolog.events[eventId];
-  if (!event) return;
+  if (!event) return false;
   session.inspector = { type: "event", id: eventId };
   const relation = primaryRelation(eventId);
   const completed = temporalRelations(eventId).find((item) => item.role === "completed");
@@ -1031,6 +1040,7 @@ function openEventInspector(eventId) {
     <div class="inspector-actions">
       <button class="instrument-button primary" type="submit">Save</button>
       ${event.provenance?.pattern ? `<button class="instrument-button" id="edit-series" type="button">Edit series</button>` : ""}
+      ${provisionalEvent?.id === eventId ? `<button class="instrument-button" id="cancel-draft" type="button">Cancel</button>` : ""}
       <button class="instrument-button danger" id="delete-object" type="button">Delete</button>
     </div>`;
   const syncRecurrenceFields = () => wrapper.classList.toggle(
@@ -1045,6 +1055,7 @@ function openEventInspector(eventId) {
     wrapper.addEventListener("change", () => { if (provisionalEvent?.id === eventId) provisionalEvent.dirty = true; });
   }
   openInspector(event.payload?.title || "Event", wrapper);
+  if (provisionalEvent?.id === eventId) focusInspectorEditor(eventId);
 
   wrapper.querySelector("#edit-series")?.addEventListener("click", () => {
     const pattern = chronolog.patterns[event.provenance?.pattern];
@@ -1083,8 +1094,6 @@ function openEventInspector(eventId) {
         });
         selectedGroups.add(groupId);
       }
-      const wasProvisional = provisionalEvent?.id === eventId;
-      if (wasProvisional) provisionalEvent = null;
       executeEventChange("Edit event", eventId, (documentValue) => {
         const target = documentValue.events[eventId];
         target.payload ||= {};
@@ -1219,7 +1228,7 @@ function openEventInspector(eventId) {
           }
         }
       });
-      if (wasProvisional) store.endDeferred();
+      commitProvisionalDraft(eventId);
       dismissInspector();
     } catch (error) {
       toast(error.message, true);
@@ -1246,6 +1255,11 @@ function openEventInspector(eventId) {
     if (wasProvisional) store.endDeferred();
     dismissInspector();
   });
+
+  wrapper.querySelector("#cancel-draft")?.addEventListener("click", () => {
+    if (discardProvisionalDraft()) dismissInspector();
+  });
+  return true;
 }
 
 function frameKind(frame) {
@@ -2003,24 +2017,8 @@ function openStapleSuggestions(suggestions) {
 }
 
 function createEventAt(startDay, endDay = startDay) {
-  if (provisionalEvent) {
-    if (provisionalEvent.dirty) {
-      provisionalEvent.form?.requestSubmit();
-      if (provisionalEvent) return;
-      store.beginDeferred();
-    } else {
-      const previousId = provisionalEvent.id;
-      provisionalEvent = null;
-      executeEventChange("Discard empty draft", previousId, (documentValue) => {
-        delete documentValue.events[previousId];
-        for (const [id, relation] of Object.entries(documentValue.relations)) {
-          if (relation.event === previousId) delete documentValue.relations[id];
-        }
-      }, true);
-    }
-  } else {
-    store.beginDeferred();
-  }
+  resolveProvisionalDraft();
+  store.beginDeferred();
   const eventId = createId("event");
   const relationId = createId("relation");
   const start = Rational.parse(startDay);
@@ -2032,26 +2030,35 @@ function createEventAt(startDay, endDay = startDay) {
       ? Rational.parse(session.intimateGrain).div(1440)
       : 1);
   }
-  executeEventChange("Create event", eventId, (documentValue) => {
-    const event = addEvent(documentValue, {
-      id: eventId,
-      traits: ["event"],
-      magnitudes: {
-        duration: durationMagnitude(orderedEnd.sub(orderedStart).mul(86400).toJSON(), "second")
-      },
-      payload: { title: "New event", description: "", location: "" }
-    });
-    addRelation(documentValue, {
-      id: relationId,
-      type: "attachment",
-      event: event.id,
-      frame: session.activeFrame,
-      role: "placed",
-      coordinate: daysToCivilCoordinate(orderedStart)
-    });
-  }, true);
-  provisionalEvent = { id: eventId, dirty: false, form: null };
-  openEventInspector(eventId);
+  try {
+    executeEventChange("Create event", eventId, (documentValue) => {
+      const event = addEvent(documentValue, {
+        id: eventId,
+        traits: ["event"],
+        magnitudes: {
+          duration: durationMagnitude(orderedEnd.sub(orderedStart).mul(86400).toJSON(), "second")
+        },
+        payload: { title: "New event", description: "", location: "" }
+      });
+      addRelation(documentValue, {
+        id: relationId,
+        type: "attachment",
+        event: event.id,
+        frame: session.activeFrame,
+        role: "placed",
+        coordinate: daysToCivilCoordinate(orderedStart)
+      });
+    }, true);
+    provisionalEvent = { id: eventId, dirty: false, form: null };
+    if (!openEventInspector(eventId)) {
+      discardProvisionalDraft();
+      dismissInspector();
+    }
+  } catch (error) {
+    if (provisionalEvent?.id === eventId) discardProvisionalDraft();
+    else store.endDeferred();
+    toast(`Could not create event: ${error.message}`, true);
+  }
 }
 
 let zoomWheel = 0;
@@ -2210,6 +2217,11 @@ byId("new-pattern").addEventListener("click", () => openObjectBrowser("pattern")
 byId("theme-settings").addEventListener("click", () => {
   byId("app-menu").open = false;
   openThemeEditor();
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!provisionalEvent || !inspector.classList.contains("open") || inspector.contains(event.target)) return;
+  closeInspector();
 });
 
 projection.addEventListener("wheel", panFromWheel, { passive: false });
