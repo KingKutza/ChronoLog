@@ -60,7 +60,25 @@ const inspectorBody = byId("inspector-body");
 const inspectorTitle = byId("inspector-title");
 const toastNode = byId("toast");
 const lensControls = byId("lens-controls");
-const WORKSPACE_TARGET = { remoteUrl: "/api/document", filename: "chronolog.chronolog" };
+function workspaceTarget() {
+  // LAN tokens arrive only in the fragment: browsers do not send fragments to
+  // the server or place them in normal HTTP request logs. Keep the token only
+  // for this browser session, then remove it from the visible address.
+  const fragment = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const supplied = fragment.get("chronolog-token");
+  if (supplied) {
+    sessionStorage.setItem("chronolog:lan-token", supplied);
+    globalThis.history.replaceState(null, "", `${location.pathname}${location.search}`);
+  }
+  const token = sessionStorage.getItem("chronolog:lan-token");
+  return {
+    remoteUrl: "/api/document",
+    filename: "chronolog.chronolog",
+    ...(token ? { remoteHeaders: { authorization: `Bearer ${token}` } } : {})
+  };
+}
+
+const WORKSPACE_TARGET = workspaceTarget();
 const LOCAL_WORKSPACE_TARGET = /^https?:$/.test(location.protocol) ? WORKSPACE_TARGET : {};
 const SESSION_STORAGE_KEY = "chronolog:view-session:1";
 const THEME_STORAGE_KEY = "chronolog:color-theme:1";
@@ -3189,7 +3207,9 @@ window.addEventListener("beforeunload", (event) => {
 async function loadWorkspaceDocument() {
   store.status("loading", "Loading workspace document…");
   try {
-    const response = await fetch(WORKSPACE_TARGET.remoteUrl, { cache: "no-store" });
+    const response = await fetch(WORKSPACE_TARGET.remoteUrl, {
+      cache: "no-store", headers: WORKSPACE_TARGET.remoteHeaders || {}
+    });
     if (response.status === 404) {
       store.attach(chronolog, WORKSPACE_TARGET);
       toast("No workspace document found; starting a new chronolog.chronolog file.");

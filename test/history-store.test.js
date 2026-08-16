@@ -331,11 +331,13 @@ test("a remote revision is sent with each local workspace write", async () => {
     }
   });
   store.attach(measuredDocument("Versioned"), {
-    remoteUrl: "/api/document", filename: "chronolog.chronolog", remoteRevision: '"base"'
+    remoteUrl: "/api/document", filename: "chronolog.chronolog", remoteRevision: '"base"',
+    remoteHeaders: { authorization: "Bearer lan-token" }
   });
   store.markDirty();
   assert.equal(await store.save(), true);
   assert.equal(writes[0].options.headers["if-match"], '"base"');
+  assert.equal(writes[0].options.headers.authorization, "Bearer lan-token");
   assert.equal(store.remoteRevision, '"next"');
   clearTimeout(store.timer);
 });
