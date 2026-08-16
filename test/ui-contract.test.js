@@ -566,7 +566,7 @@ test("continuous-time chrome and recurrence exceptions retain their governing co
   assert.match(css, /\.minimap-exact-mark/);
   assert.match(projections, /minimap-now-line/);
   assert.match(projections, /radial-now-line/);
-  assert.match(css, /left: calc\(33\.333% \+ 6px\)/);
+  assert.match(cssBlock(css, "#minimap"), /left: calc\(33\.333% \+ var\(--workspace-inner-half\)\)/);
   assert.match(html, /class="chronolog-mark"/);
   assert.match(html, /id="theme-settings"/);
 });
