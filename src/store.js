@@ -85,9 +85,11 @@ export class AutosaveStore {
     this.queued = null;
     this.queuedForce = false;
     this.deferred = 0;
+    this.remoteRevision = null;
+    this.conflict = null;
   }
 
-  attach(document, { handle = null, remoteUrl = null, filename = null } = {}) {
+  attach(document, { handle = null, remoteUrl = null, filename = null, remoteRevision = null } = {}) {
     clearTimeout(this.timer);
     this.timer = null;
     this.handle = handle;
@@ -97,6 +99,8 @@ export class AutosaveStore {
     this.revision = 0;
     this.savedRevision = 0;
     this.deferred = 0;
+    this.remoteRevision = remoteRevision;
+    this.conflict = null;
     this.status(
       this.handle || this.remoteUrl ? "clean" : "detached",
       this.handle || this.remoteUrl
@@ -106,7 +110,7 @@ export class AutosaveStore {
   }
 
   status(state, message, error = null) {
-    this.onStatus({ state, message, error, dirty: this.revision !== this.savedRevision });
+    this.onStatus({ state, message, error, dirty: this.revision !== this.savedRevision, conflict: this.conflict });
   }
 
   markDirty() {
@@ -195,10 +199,20 @@ export class AutosaveStore {
         if (!this.fetcher) throw new Error("This browser cannot reach the local autosave service");
         const response = await this.fetcher(remoteUrl, {
           method: "PUT",
-          headers: { "content-type": "application/x-chronolog" },
+          headers: {
+            "content-type": "application/x-chronolog",
+            ...(this.remoteRevision ? { "if-match": this.remoteRevision } : { "if-none-match": "*" })
+          },
           body: text
         });
+        if (response.status === 409) {
+          const currentRevision = response.headers?.get?.("etag") || null;
+          this.conflict = { localRevision: this.remoteRevision, remoteRevision: currentRevision, text };
+          this.status("conflict", "Conflict — local edits are safe; download a copy or reload latest");
+          return false;
+        }
         if (!response.ok) throw new Error(await response.text() || `Autosave returned ${response.status}`);
+        this.remoteRevision = response.headers?.get?.("etag") || this.remoteRevision;
       }
       if (attachedDocument !== this.document || handle !== this.handle || remoteUrl !== this.remoteUrl) return true;
       if (savingRevision > this.savedRevision) this.savedRevision = savingRevision;
@@ -218,6 +232,17 @@ export class AutosaveStore {
       this.status("error", `Save failed: ${error.message}`, error);
       return false;
     }
+  }
+
+  async readRemote() {
+    if (!this.remoteUrl || !this.fetcher) throw new Error("No local workspace is attached");
+    const response = await this.fetcher(this.remoteUrl, { method: "GET", cache: "no-store" });
+    if (!response.ok) throw new Error(await response.text() || `Open returned ${response.status}`);
+    return { text: await response.text(), remoteRevision: response.headers?.get?.("etag") || null };
+  }
+
+  clearConflict() {
+    this.conflict = null;
   }
 
   download(filename = "chronolog.chronolog") {

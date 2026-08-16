@@ -321,6 +321,75 @@ test("a server-attached document autosaves through the local document endpoint",
   clearTimeout(store.timer);
 });
 
+test("a remote revision is sent with each local workspace write", async () => {
+  const writes = [];
+  const store = new AutosaveStore({
+    delay: 60_000,
+    fetcher: async (url, options) => {
+      writes.push({ url, options });
+      return { ok: true, status: 204, headers: { get: () => '"next"' }, async text() { return ""; } };
+    }
+  });
+  store.attach(measuredDocument("Versioned"), {
+    remoteUrl: "/api/document", filename: "chronolog.chronolog", remoteRevision: '"base"'
+  });
+  store.markDirty();
+  assert.equal(await store.save(), true);
+  assert.equal(writes[0].options.headers["if-match"], '"base"');
+  assert.equal(store.remoteRevision, '"next"');
+  clearTimeout(store.timer);
+});
+
+test("a new workspace uses create-only save so another first writer cannot be overwritten", async () => {
+  const store = new AutosaveStore({
+    delay: 60_000,
+    fetcher: async (url, options) => {
+      assert.equal(options.headers["if-none-match"], "*");
+      return { ok: true, status: 204, headers: { get: () => '"first"' }, async text() { return ""; } };
+    }
+  });
+  store.attach(measuredDocument("First write"), { remoteUrl: "/api/document" });
+  store.markDirty();
+  assert.equal(await store.save(), true);
+  clearTimeout(store.timer);
+});
+
+test("a stale local workspace write becomes an explicit keep-both conflict", async () => {
+  const statuses = [];
+  const store = new AutosaveStore({
+    delay: 60_000,
+    onStatus: (status) => statuses.push(status),
+    fetcher: async () => ({
+      ok: false, status: 409, headers: { get: (name) => name === "etag" ? '"remote"' : null },
+      async text() { return "Workspace changed"; }
+    })
+  });
+  const document = measuredDocument("Conflicting local edit");
+  store.attach(document, { remoteUrl: "/api/document", remoteRevision: '"base"' });
+  store.markDirty();
+  assert.equal(await store.save(), false);
+  assert.equal(store.savedRevision, 0);
+  assert.equal(store.revision, 1);
+  assert.equal(store.conflict.remoteRevision, '"remote"');
+  assert.match(statuses.at(-1).message, /local edits are safe/);
+  clearTimeout(store.timer);
+});
+
+test("readRemote returns the current body and opaque revision without replacing local edits", async () => {
+  const store = new AutosaveStore({
+    fetcher: async () => ({
+      ok: true, headers: { get: () => '"remote"' }, async text() { return '{"schema":"chronolog/1"}'; }
+    })
+  });
+  store.attach(measuredDocument("Local"), { remoteUrl: "/api/document", remoteRevision: '"base"' });
+  store.markDirty();
+  const remote = await store.readRemote();
+  assert.equal(remote.remoteRevision, '"remote"');
+  assert.equal(remote.text, '{"schema":"chronolog/1"}');
+  assert.equal(store.revision, 1);
+  clearTimeout(store.timer);
+});
+
 test("draft deferral prevents whole-document serialization until the editor resolves", async () => {
   const writes = [];
   const store = new AutosaveStore({

@@ -114,6 +114,9 @@ const store = new AutosaveStore({
     const node = byId("save-status");
     node.dataset.state = status.state;
     node.textContent = status.message;
+    node.title = status.message;
+    byId("download-conflict").disabled = !status.conflict;
+    byId("reload-latest").disabled = !status.conflict;
   }
 });
 store.attach(chronolog, WORKSPACE_TARGET);
@@ -2912,6 +2915,23 @@ byId("save-as-document").addEventListener("click", async () => {
   }
 });
 
+byId("download-conflict").addEventListener("click", () => {
+  if (!store.conflict) return;
+  store.download(`chronolog-conflict-${new Date().toISOString().slice(0, 10)}.chronolog`);
+  toast("Downloaded your conflicting local copy. Reload latest only after keeping this copy.");
+});
+
+byId("reload-latest").addEventListener("click", async () => {
+  if (!store.conflict) return;
+  try {
+    const latest = await store.readRemote();
+    replaceDocument(parseDocument(latest.text), { ...WORKSPACE_TARGET, remoteRevision: latest.remoteRevision });
+    toast("Reloaded the latest workspace. Your conflicting local copy was not uploaded.");
+  } catch (error) {
+    toast(`Could not reload latest workspace: ${error.message}`, true);
+  }
+});
+
 const IMPORT_MAPS = ["frames", "events", "patterns", "relations", "overrides"];
 
 function importCalendar(text, label) {
@@ -3065,7 +3085,10 @@ async function loadWorkspaceDocument() {
     }
     if (!response.ok) throw new Error(await response.text() || `Open returned ${response.status}`);
     const loadedName = response.headers.get("x-chronolog-file") || "chronolog.chronolog";
-    replaceDocument(parseDocument(await response.text()), WORKSPACE_TARGET);
+    replaceDocument(parseDocument(await response.text()), {
+      ...WORKSPACE_TARGET,
+      remoteRevision: response.headers.get("etag")
+    });
     toast(loadedName === "chronolog.json"
       ? "Auto-loaded legacy chronolog.json · next autosave migrates to chronolog.chronolog"
       : `Auto-loaded ${loadedName}`);

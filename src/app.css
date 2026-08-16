@@ -170,6 +170,7 @@ button {
 .status-chip[data-state="dirty"] { color: #a46b12; }
 .status-chip[data-state="saving"] { color: var(--blue); }
 .status-chip[data-state="error"] { color: var(--now); }
+.status-chip[data-state="conflict"] { color: var(--now); }
 
 #lens-bar {
   position: absolute;

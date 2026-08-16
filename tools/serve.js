@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { createServer } from "node:http";
-import { readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, open, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +27,7 @@ const types = {
 const dataRoot = resolve(process.env.CHRONOLOG_DATA_DIR || root);
 const documentFile = join(dataRoot, "chronolog.chronolog");
 const legacyDocumentFile = join(dataRoot, "chronolog.json");
-const temporaryDocumentFile = join(dataRoot, ".chronolog-save.tmp");
+const recoveryDocumentFile = join(dataRoot, ".chronolog-recovery.chronolog");
 const MAX_DOCUMENT_BYTES = 512 * 1024 * 1024;
 
 function requestBody(request) {
@@ -59,6 +60,26 @@ async function workspaceDocument() {
   return null;
 }
 
+function revisionFor(body) {
+  return `\"${createHash("sha256").update(body).digest("hex")}\"`;
+}
+
+async function atomicWrite(file, body) {
+  const temporary = join(dataRoot, `.chronolog-save-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`);
+  const descriptor = await open(temporary, "wx", 0o600);
+  try {
+    await descriptor.writeFile(body);
+    await descriptor.sync();
+  } finally {
+    await descriptor.close();
+  }
+  try {
+    await rename(temporary, file);
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
+}
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", "http://localhost");
@@ -74,7 +95,8 @@ const server = createServer(async (request, response) => {
         "content-type": "application/x-chronolog; charset=utf-8",
         "content-length": info.size,
         "cache-control": "no-store",
-        "x-chronolog-file": file === documentFile ? "chronolog.chronolog" : "chronolog.json"
+        "x-chronolog-file": file === documentFile ? "chronolog.chronolog" : "chronolog.json",
+        etag: revisionFor(body || await readFile(file))
       });
       response.end(body);
       return;
@@ -82,14 +104,34 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/document" && request.method === "PUT") {
       const body = await requestBody(request);
       JSON.parse(body.toString("utf8"));
-      await writeFile(temporaryDocumentFile, body);
       try {
-        await rename(temporaryDocumentFile, documentFile);
-      } catch {
-        await writeFile(documentFile, body);
-        await unlink(temporaryDocumentFile).catch(() => {});
+        const current = await readFile(documentFile);
+        const currentRevision = revisionFor(current);
+        const expected = request.headers["if-match"];
+        const expectedAbsent = request.headers["if-none-match"] === "*";
+        if (expectedAbsent || (expected && expected !== currentRevision)) {
+          response.writeHead(409, { etag: currentRevision }).end("Workspace changed in another window; local edits were not written");
+          return;
+        }
+        await copyFile(documentFile, recoveryDocumentFile);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
       }
-      response.writeHead(204, { "x-chronolog-file": "chronolog.chronolog" }).end();
+      await atomicWrite(documentFile, body);
+      response.writeHead(204, {
+        "x-chronolog-file": "chronolog.chronolog",
+        etag: revisionFor(body)
+      }).end();
+      return;
+    }
+    if (url.pathname === "/api/document/recovery" && ["GET", "HEAD"].includes(request.method)) {
+      const body = request.method === "HEAD" ? null : await readFile(recoveryDocumentFile);
+      const content = body || await readFile(recoveryDocumentFile);
+      response.writeHead(200, {
+        "content-type": "application/x-chronolog; charset=utf-8",
+        "cache-control": "no-store",
+        etag: revisionFor(content)
+      }).end(body);
       return;
     }
     if (url.pathname === "/api/document") {
