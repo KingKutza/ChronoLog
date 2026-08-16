@@ -559,3 +559,25 @@ test("continuous-time chrome and recurrence exceptions retain their governing co
   assert.match(html, /class="chronolog-mark"/);
   assert.match(html, /id="theme-settings"/);
 });
+
+test("ChronoLog identity is an original, accessible topology mark rather than a clock glyph", async () => {
+  const [html, css, svg, identity] = await Promise.all([
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("src/app.css", "utf8"),
+    readFile("assets/chronolog-mark.svg", "utf8"),
+    readFile("docs/identity.md", "utf8")
+  ]);
+  assert.match(html, /rel="icon" href="\.\/assets\/chronolog-mark\.svg"/);
+  assert.match(html, /aria-label="ChronoLog: a timeline instrument"/);
+  assert.match(html, /chronolog-mark__frame--primary/);
+  assert.match(html, /chronolog-mark__frame--secondary/);
+  assert.match(html, /chronolog-mark__staple/);
+  assert.match(html, /chronolog-mark__join/);
+  assert.match(html, /<title id="chronolog-mark-title">Interlocking timeline frames joined by a staple<\/title>/);
+  assert.match(cssBlock(css, ".chronolog-mark"), /color: var\(--ink\)/);
+  assert.match(cssBlock(css, ".chronolog-mark__join"), /fill: var\(--accent\)/);
+  assert.match(svg, /Two interlocking timeline frames joined by a central staple/);
+  assert.match(svg, /<title id="title">ChronoLog mark<\/title>/);
+  assert.match(identity, /original, repository-native SVG/);
+  assert.match(identity, /not a clock face, calendar\s+page, or generic checkmark/);
+});

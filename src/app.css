@@ -119,6 +119,9 @@ button {
   text-transform: uppercase;
 }
 
+.chronolog-wordmark { white-space: nowrap; }
+.chronolog-wordmark > span { color: var(--primary); }
+
 .instrument-button,
 .icon-button,
 .select-control,
@@ -250,8 +253,21 @@ button {
   text-transform: uppercase;
 }
 
-.chronolog-mark { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-.chronolog-mark circle:last-child { fill: currentColor; stroke: none; }
+.chronolog-mark {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  overflow: visible;
+  fill: none;
+  color: var(--ink);
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.chronolog-mark__frame { stroke-width: 2.4; }
+.chronolog-mark__frame--secondary { opacity: .58; }
+.chronolog-mark__staple { stroke-width: 1.45; opacity: .82; }
+.chronolog-mark__join { fill: var(--accent); stroke: var(--paper); stroke-width: 1.2; }
 
 #document-menu { flex: none; margin-left: auto; position: relative; }
 #document-menu > summary {

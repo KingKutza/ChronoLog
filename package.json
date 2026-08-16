@@ -9,6 +9,7 @@
   },
   "files": [
     "bin/",
+    "assets/",
     "src/",
     "tools/",
     "pocket-instrument.html",
