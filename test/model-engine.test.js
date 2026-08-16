@@ -1,0 +1,154 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createCelestialDocument } from "../src/celestial.js";
+import { ChronologEngine } from "../src/engine.js";
+import { coordinate } from "../src/exact.js";
+import {
+  addEvent,
+  addFrame,
+  addPattern,
+  addRelation,
+  durationMagnitude,
+  suppressVirtual,
+  validateDocument
+} from "../src/model.js";
+
+function date(year, month = "1", day = "1") {
+  return coordinate([
+    { level: "year", value: String(year) },
+    { level: "month", value: String(month) },
+    { level: "day", value: String(day) }
+  ]);
+}
+
+test("celestial state and cycle facts exist at remote dates", () => {
+  const engine = new ChronologEngine(createCelestialDocument());
+  for (const year of ["1026", "3026", "100002026", "-99997974"]) {
+    const state = engine.queryState({
+      frame: "calendar:celestial",
+      coordinate: date(year)
+    });
+    const facts = engine.queryFacts({
+      frame: "calendar:celestial",
+      start: date(year),
+      end: date(year, "2", "1")
+    });
+    assert.equal(state.errors.length, 0);
+    assert.ok(state.values["pattern:celestial"]);
+    assert.ok(facts.facts.length >= 3);
+    assert.equal(facts.errors.length, 0);
+  }
+});
+
+test("virtual facts are suppressed and replaced without materializing a series", () => {
+  const document = createCelestialDocument();
+  const engine = new ChronologEngine(document);
+  const query = {
+    frame: "calendar:celestial",
+    start: date("3026"),
+    end: date("3026", "2", "1")
+  };
+  const first = engine.queryFacts(query);
+  const target = first.facts[0];
+  suppressVirtual(document, target.virtualId);
+  assert.equal(engine.queryFacts(query).facts.some((fact) => fact.virtualId === target.virtualId), false);
+  assert.equal(Object.keys(document.events).length, 0);
+});
+
+test("one event may attach repeatedly and shared frames compose by reference", () => {
+  const document = createCelestialDocument();
+  const branchA = addFrame(document, { title: "Branch A", traits: ["line", "timeline"], basis: "frame:wall-time" });
+  const branchB = addFrame(document, { title: "Branch B", traits: ["line", "timeline"], basis: "frame:wall-time" });
+  const shared = addFrame(document, { title: "Shared history", traits: ["line", "segment"], basis: "frame:wall-time" });
+  addRelation(document, { type: "composition", parent: branchA.id, child: shared.id, role: "shared" });
+  addRelation(document, { type: "composition", parent: branchB.id, child: shared.id, role: "shared" });
+  const event = addEvent(document, {
+    traits: ["event", "terminator"],
+    magnitudes: { duration: durationMagnitude("0") },
+    payload: { title: "Boundary" }
+  });
+  addRelation(document, { type: "attachment", event: event.id, frame: branchA.id, role: "boundary", coordinate: date("2030") });
+  addRelation(document, { type: "attachment", event: event.id, frame: branchA.id, role: "placed", coordinate: date("2031") });
+  assert.equal(validateDocument(document).valid, true);
+});
+
+test("overlap queries retain a multi-day event after its start day", () => {
+  const document = createCelestialDocument();
+  const event = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("9", "day") },
+    payload: { title: "PTO" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: event.id,
+    frame: "calendar:personal",
+    role: "placed",
+    coordinate: date("2026", "8", "1")
+  });
+  const engine = new ChronologEngine(document);
+  const window = {
+    frame: "calendar:personal",
+    start: date("2026", "8", "5"),
+    end: date("2026", "8", "6")
+  };
+  assert.equal(engine.queryFacts(window).facts.length, 0);
+  assert.deepEqual(
+    engine.queryFacts({ ...window, includeOverlaps: true }).facts.map((fact) => fact.event.payload.title),
+    ["PTO"]
+  );
+  assert.equal(engine.queryFacts({
+    ...window,
+    start: date("2026", "8", "10"),
+    end: date("2026", "8", "11"),
+    includeOverlaps: true
+  }).facts.length, 0);
+});
+
+test("task and terminator traits enforce zero duration and retrospective calendar roles", () => {
+  const document = createCelestialDocument();
+  const task = addEvent(document, {
+    traits: ["event", "task"],
+    magnitudes: { duration: durationMagnitude("1", "hour") },
+    payload: { title: "Invalid prospective task" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: task.id,
+    frame: "calendar:personal",
+    role: "placed",
+    coordinate: date("2030")
+  });
+  const errors = validateDocument(document).errors.join("\n");
+  assert.match(errors, /zero duration/);
+  assert.match(errors, /retrospective/);
+});
+
+test("frame coordinate laws execute in the same formula runtime", () => {
+  const document = createCelestialDocument();
+  const law = addPattern(document, {
+    title: "Hooperbun conversion",
+    source: `
+      export fn toDays(ctx) = num(ctx.value.levels[0].value) * 2;
+      export fn fromDays(ctx) = {
+        levels: [{ level: "hooperbun", value: num(ctx.days) / 2 }]
+      };
+      export fn state(ctx) = {};
+      export fn facts(ctx) = [];
+    `,
+    exports: { state: "state", facts: "facts" }
+  });
+  const frame = addFrame(document, {
+    title: "Hooper time",
+    traits: ["line", "temporal"],
+    coordinate: { kind: "nested", levels: [{ name: "hooperbun" }] },
+    law: { pattern: law.id, toDays: "toDays", fromDays: "fromDays" }
+  });
+  const engine = new ChronologEngine(document);
+  const value = coordinate([{ level: "hooperbun", value: "3.125" }]);
+  assert.equal(engine.coordinateDays(frame.id, value).toJSON(), "25/4");
+  assert.deepEqual(
+    engine.daysCoordinate(frame.id, "25/4"),
+    coordinate([{ level: "hooperbun", value: "25/8" }])
+  );
+});

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ece5d8">
+  <title>Chronolog</title>
+  <link rel="stylesheet" href="./src/app.css">
+</head>
+<body>
+  <main id="app">
+    <header id="hud" aria-label="Chronolog controls">
+      <div id="brand"><svg class="chronolog-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="13"></circle><circle cx="16" cy="16" r="7"></circle>
+        <path d="M16 3v6M29 16h-6M16 29v-6M3 16h6M16 16l8-8"></path><circle cx="16" cy="16" r="2"></circle>
+      </svg><span>Chronolog</span></div>
+      <button class="instrument-button primary" id="new-event" type="button">New event</button>
+      <button class="instrument-button optional" id="new-frame" type="button" aria-controls="inspector" aria-expanded="false">Frames</button>
+      <select class="select-control" id="active-calendar" aria-label="Active calendar"></select>
+      <div class="history-controls" aria-label="Edit history">
+        <button class="icon-button" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
+        <button class="icon-button" id="redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo (Ctrl+Shift+Z)">↷</button>
+      </div>
+      <span id="save-status" class="status-chip" data-state="clean" role="status" aria-live="polite" aria-label="Save status" title="Current save status">Saved</span>
+      <details id="document-menu">
+        <summary title="Document actions" aria-label="Document actions">Document</summary>
+        <div class="document-menu-panel">
+          <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
+          <button class="instrument-button" id="new-pattern" type="button">Advanced patterns</button>
+          <label class="status-chip" title="Keep one focus coordinate between projections"><input id="shared-focus" type="checkbox" checked>shared date</label>
+          <button class="instrument-button" id="open-document" type="button">Open document</button>
+          <button class="instrument-button" id="save-document" type="button">Save now</button>
+          <button class="instrument-button" id="save-as-document" type="button">Save as</button>
+          <button class="instrument-button" id="import-ics" type="button">Import ICS</button>
+          <button class="instrument-button" id="export-ics" type="button">Export ICS</button>
+        </div>
+      </details>
+    </header>
+
+    <nav id="lens-bar" aria-label="Time lens">
+      <button type="button" data-lens="intimate">Intimate</button>
+      <button type="button" data-lens="tactical">Tactical</button>
+      <button type="button" data-lens="strategic">Strategic</button>
+      <button type="button" data-lens="wall">Wall</button>
+      <button type="button" data-lens="lines">Lines</button>
+      <button type="button" data-lens="spiral">Spiral</button>
+      <button type="button" data-lens="radial">Radial</button>
+    </nav>
+
+    <section id="lens-controls" aria-label="Lens window controls"></section>
+
+    <section id="viewport" aria-live="polite">
+      <div id="projection"></div>
+    </section>
+
+    <div id="focus-readout"></div>
+    <div id="minimap" title="Drag the outlined view window. Layered color shows event density; red is now and black is the view center."></div>
+
+    <aside id="inspector" aria-label="Object inspector">
+      <header class="inspector-head">
+        <h2 id="inspector-title">Inspector</h2>
+        <button class="icon-button" id="close-inspector" type="button" aria-label="Close inspector">×</button>
+      </header>
+      <div id="inspector-body"></div>
+    </aside>
+
+    <input id="document-file" type="file" accept=".chronolog,.json,application/x-chronolog,application/json" hidden>
+    <input id="ics-file" type="file" accept=".ics,text/calendar" multiple hidden>
+    <div id="toast" role="status"></div>
+  </main>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

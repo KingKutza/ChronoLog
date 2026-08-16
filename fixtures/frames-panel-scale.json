@@ -1,0 +1,837 @@
+{
+  "description": "Non-private 30-calendar / 50-group Frames panel scale fixture.",
+  "frames": [
+    {
+      "id": "calendar:scale-1",
+      "title": "Scale calendar 01",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {
+        "overlays": []
+      }
+    },
+    {
+      "id": "calendar:scale-2",
+      "title": "Scale calendar 02",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-3",
+      "title": "Scale calendar 03",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-4",
+      "title": "Scale calendar 04",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-5",
+      "title": "Scale calendar 05",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-6",
+      "title": "Scale calendar 06",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-7",
+      "title": "Scale calendar 07",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-8",
+      "title": "Scale calendar 08",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-9",
+      "title": "Scale calendar 09",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-10",
+      "title": "Scale calendar 10",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-11",
+      "title": "Scale calendar 11",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-12",
+      "title": "Scale calendar 12",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-13",
+      "title": "Scale calendar 13",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-14",
+      "title": "Scale calendar 14",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-15",
+      "title": "Scale calendar 15",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-16",
+      "title": "Scale calendar 16",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-17",
+      "title": "Scale calendar 17",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-18",
+      "title": "Scale calendar 18",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-19",
+      "title": "Scale calendar 19",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-20",
+      "title": "Scale calendar 20",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-21",
+      "title": "Scale calendar 21",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-22",
+      "title": "Scale calendar 22",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-23",
+      "title": "Scale calendar 23",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-24",
+      "title": "Scale calendar 24",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-25",
+      "title": "Scale calendar 25",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-26",
+      "title": "Scale calendar 26",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-27",
+      "title": "Scale calendar 27",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-28",
+      "title": "Scale calendar 28",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-29",
+      "title": "Scale calendar 29",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "calendar:scale-30",
+      "title": "Scale calendar 30",
+      "traits": [
+        "set",
+        "calendar",
+        "timeline"
+      ],
+      "color": "#2e8b57",
+      "display": {}
+    },
+    {
+      "id": "group:scale-1",
+      "title": "Scale group 01 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-2",
+      "title": "Scale group 02 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-3",
+      "title": "Scale group 03 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-4",
+      "title": "Scale group 04 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-5",
+      "title": "Scale group 05 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-6",
+      "title": "Scale group 06 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-7",
+      "title": "Scale group 07 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-8",
+      "title": "Scale group 08 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-9",
+      "title": "Scale group 09 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-10",
+      "title": "Scale group 10 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-11",
+      "title": "Scale group 11 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-12",
+      "title": "Scale group 12 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-13",
+      "title": "Scale group 13 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-14",
+      "title": "Scale group 14 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-15",
+      "title": "Scale group 15 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-16",
+      "title": "Scale group 16 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-17",
+      "title": "Scale group 17 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-18",
+      "title": "Scale group 18 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-19",
+      "title": "Scale group 19 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-20",
+      "title": "Scale group 20 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-21",
+      "title": "Scale group 21 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-22",
+      "title": "Scale group 22 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-23",
+      "title": "Scale group 23 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-24",
+      "title": "Scale group 24 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-25",
+      "title": "Scale group 25 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-26",
+      "title": "Scale group 26 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-27",
+      "title": "Scale group 27 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-28",
+      "title": "Scale group 28 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-29",
+      "title": "Scale group 29 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-30",
+      "title": "Scale group 30 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-31",
+      "title": "Scale group 31 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-32",
+      "title": "Scale group 32 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-33",
+      "title": "Scale group 33 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-34",
+      "title": "Scale group 34 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-35",
+      "title": "Scale group 35 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-36",
+      "title": "Scale group 36 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-37",
+      "title": "Scale group 37 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-38",
+      "title": "Scale group 38 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-39",
+      "title": "Scale group 39 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-40",
+      "title": "Scale group 40 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-41",
+      "title": "Scale group 41 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-42",
+      "title": "Scale group 42 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-43",
+      "title": "Scale group 43 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-44",
+      "title": "Scale group 44 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-45",
+      "title": "Scale group 45 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-46",
+      "title": "Scale group 46 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-47",
+      "title": "Scale group 47 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-48",
+      "title": "Scale group 48 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-49",
+      "title": "Scale group 49 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    },
+    {
+      "id": "group:scale-50",
+      "title": "Scale group 50 with a deliberately long descriptive label",
+      "traits": [
+        "set",
+        "group"
+      ],
+      "color": "#4e6fa4",
+      "display": {}
+    }
+  ]
+}
