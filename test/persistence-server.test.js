@@ -6,10 +6,10 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-function startServer(root) {
+function startServer(root, extraEnvironment = {}) {
   const child = spawn(process.execPath, ["tools/serve.js"], {
     cwd: process.cwd(),
-    env: { ...process.env, CHRONOLOG_DATA_DIR: root, CHRONOLOG_PORT: "0" },
+    env: { ...process.env, CHRONOLOG_DATA_DIR: root, CHRONOLOG_PORT: "0", ...extraEnvironment },
     stdio: ["ignore", "pipe", "pipe"]
   });
   return new Promise((resolve, reject) => {
@@ -50,6 +50,47 @@ test("local workspace saves are atomic, revision-guarded, and retain one recover
     assert.equal(stale.status, 409);
     assert.equal(await (await fetch(`${running.url}/api/document`)).text(), second);
     assert.equal(await readFile(join(root, "chronolog.chronolog"), "utf8"), second);
+  } finally {
+    if (running?.child.exitCode === null) {
+      const stopped = once(running.child, "exit");
+      running.child.kill();
+      await stopped;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("LAN sync requires its bearer token, preserves both clients on conflict, and rejects cross-origin browsers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chronolog-lan-"));
+  let running;
+  try {
+    running = await startServer(root, { CHRONOLOG_LAN: "1", CHRONOLOG_LAN_TOKEN: "a-tested-lan-token-with-entropy" });
+    const first = '{"schema":"chronolog/1","client":"A"}\n';
+    const denied = await fetch(`${running.url}/api/document`, { method: "PUT", body: first });
+    assert.equal(denied.status, 403);
+
+    const authenticated = { authorization: "Bearer a-tested-lan-token-with-entropy" };
+    const writeA = await fetch(`${running.url}/api/document`, { method: "PUT", headers: authenticated, body: first });
+    assert.equal(writeA.status, 204);
+    const revisionA = writeA.headers.get("etag");
+
+    const second = '{"schema":"chronolog/1","client":"B"}\n';
+    const writeB = await fetch(`${running.url}/api/document`, {
+      method: "PUT", headers: { ...authenticated, "if-match": revisionA }, body: second
+    });
+    assert.equal(writeB.status, 204);
+    const staleA = await fetch(`${running.url}/api/document`, {
+      method: "PUT", headers: { ...authenticated, "if-match": revisionA }, body: '{"schema":"chronolog/1","client":"A-conflict"}\n'
+    });
+    assert.equal(staleA.status, 409);
+    assert.equal(await (await fetch(`${running.url}/api/document`, { headers: authenticated })).text(), second);
+    assert.equal(await (await fetch(`${running.url}/api/document/recovery`, { headers: authenticated })).text(), first);
+
+    const crossOrigin = await fetch(`${running.url}/api/document`, {
+      headers: { ...authenticated, origin: "http://untrusted.example" }
+    });
+    assert.equal(crossOrigin.status, 403);
+    assert.equal(crossOrigin.headers.get("access-control-allow-origin"), null);
   } finally {
     if (running?.child.exitCode === null) {
       const stopped = once(running.child, "exit");

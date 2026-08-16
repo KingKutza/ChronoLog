@@ -15,17 +15,22 @@ export function defaultDataDirectory(environment = process.env, platform = proce
 }
 
 export function parseArguments(argv) {
-  const options = { open: true, port: 0, dataDirectory: null };
+  const options = { open: true, port: 0, dataDirectory: null, lan: false, lanToken: null };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--no-open") options.open = false;
-    else if (value === "--port" || value === "--data-dir") {
+    else if (value === "--lan") options.lan = true;
+    else if (value === "--port" || value === "--data-dir" || value === "--lan-token") {
       const next = argv[++index];
       if (!next) throw new Error(`${value} requires a value`);
       if (value === "--port") {
         options.port = Number(next);
         if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) throw new Error("--port must be an integer from 0 to 65535");
-      } else options.dataDirectory = resolve(next);
+      } else if (value === "--data-dir") options.dataDirectory = resolve(next);
+      else {
+        if (next.length < 16) throw new Error("--lan-token must be at least 16 characters");
+        options.lanToken = next;
+      }
     } else if (value === "--help" || value === "-h") options.help = true;
     else throw new Error(`Unknown option: ${value}`);
   }
@@ -33,7 +38,7 @@ export function parseArguments(argv) {
 }
 
 function usage() {
-  return `Usage: chronolog [--port PORT] [--data-dir DIRECTORY] [--no-open]\n\nStarts ChronoLog locally and opens it in your default browser.\nData is stored separately from the installed application.\n`;
+  return `Usage: chronolog [--port PORT] [--data-dir DIRECTORY] [--no-open] [--lan] [--lan-token TOKEN]\n\nStarts ChronoLog locally and opens it in your default browser.\n--lan explicitly exposes it on the local network and prints a bearer-token link.\nData is stored separately from the installed application.\n`;
 }
 
 function browserCommand(url) {
@@ -56,7 +61,14 @@ export async function launch(argv = process.argv.slice(2), environment = process
   const now = new Date().toISOString();
   await log.appendFile(`\n${now} starting ChronoLog\napp=${appRoot}\ndata=${dataDirectory}\n`);
   const child = spawn(process.execPath, [join(appRoot, "tools", "serve.js")], {
-    env: { ...environment, CHRONOLOG_APP_ROOT: appRoot, CHRONOLOG_DATA_DIR: dataDirectory, CHRONOLOG_PORT: String(options.port) },
+    env: {
+      ...environment,
+      CHRONOLOG_APP_ROOT: appRoot,
+      CHRONOLOG_DATA_DIR: dataDirectory,
+      CHRONOLOG_PORT: String(options.port),
+      ...(options.lan ? { CHRONOLOG_LAN: "1" } : {}),
+      ...(options.lanToken ? { CHRONOLOG_LAN_TOKEN: options.lanToken } : {})
+    },
     stdio: ["ignore", "pipe", "pipe"]
   });
   const copy = (chunk) => { log.appendFile(chunk).catch(() => {}); };
@@ -72,7 +84,7 @@ export async function launch(argv = process.argv.slice(2), environment = process
     const match = chunk.toString().match(/Chronolog \(installed\): (http:\/\/127\.0\.0\.1:\d+\/)/);
     if (!match) return;
     process.stdout.write(`${chunk}Diagnostics: ${logPath}\n`);
-    if (options.open) {
+    if (options.open && !options.lan) {
       const [command, args] = browserCommand(match[1]);
       spawn(command, args, { detached: true, stdio: "ignore" }).unref();
     }

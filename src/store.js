@@ -87,10 +87,11 @@ export class AutosaveStore {
     this.queuedForce = false;
     this.deferred = 0;
     this.remoteRevision = null;
+    this.remoteHeaders = null;
     this.conflict = null;
   }
 
-  attach(document, { handle = null, remoteUrl = null, filename = null, remoteRevision = null } = {}) {
+  attach(document, { handle = null, remoteUrl = null, filename = null, remoteRevision = null, remoteHeaders = null } = {}) {
     clearTimeout(this.timer);
     this.timer = null;
     this.handle = handle;
@@ -101,6 +102,7 @@ export class AutosaveStore {
     this.savedRevision = 0;
     this.deferred = 0;
     this.remoteRevision = remoteRevision;
+    this.remoteHeaders = remoteHeaders;
     this.conflict = null;
     this.status(
       this.handle || this.remoteUrl ? "clean" : "detached",
@@ -202,6 +204,7 @@ export class AutosaveStore {
           method: "PUT",
           headers: {
             "content-type": "application/x-chronolog",
+            ...(this.remoteHeaders || {}),
             ...(this.remoteRevision ? { "if-match": this.remoteRevision } : { "if-none-match": "*" })
           },
           body: text
@@ -237,7 +240,9 @@ export class AutosaveStore {
 
   async readRemote() {
     if (!this.remoteUrl || !this.fetcher) throw new Error("No local workspace is attached");
-    const response = await this.fetcher(this.remoteUrl, { method: "GET", cache: "no-store" });
+    const response = await this.fetcher(this.remoteUrl, {
+      method: "GET", cache: "no-store", headers: this.remoteHeaders || {}
+    });
     if (!response.ok) throw new Error(await response.text() || `Open returned ${response.status}`);
     return { text: await response.text(), remoteRevision: response.headers?.get?.("etag") || null };
   }

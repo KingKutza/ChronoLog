@@ -59,3 +59,20 @@ to save only after the user grants them. No network endpoint, account, cloud
 provider, credential, telemetry, or background upload is introduced by this
 design. A future sync provider must implement the revision contract above and
 make its account/security boundary explicit in its own UI.
+
+## Opt-in LAN transport
+
+The bundled launcher can act as a small LAN document provider with
+`chronolog --lan`. It remains bound to `127.0.0.1` unless that flag is present.
+LAN mode binds to all interfaces and creates a high-entropy bearer token (or
+uses an explicit `--lan-token`). The startup link places the token in a URL
+fragment so it is not transmitted as part of the page request. The application
+keeps it in session storage only and removes it from the visible URL.
+
+Every `/api/` request in LAN mode requires that bearer token. Browser API calls
+also require an Origin equal to the serving ChronoLog origin; no CORS permission
+is granted to other origins. Command-line diagnostics can use the token without
+an Origin header. This is an intentional simple LAN boundary, not encryption:
+use trusted networks only. The server never falls back to unauthenticated
+last-write-wins; its existing ETag CAS contract and recovery copy apply equally
+to LAN clients.

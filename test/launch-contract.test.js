@@ -13,8 +13,12 @@ assert.equal(packageInfo.scripts.dev, "node tools/serve.js");
 assert.equal(packageInfo.scripts.start, "node bin/chronolog.js");
 assert.match(await readFile(join(root, "tools", "serve.js"), "utf8"), /Chronolog \(\$\{mode\}\):/);
 assert.deepEqual(parseArguments(["--no-open", "--port", "4312", "--data-dir", "./data"]), {
-  open: false, port: 4312, dataDirectory: join(process.cwd(), "data")
+  open: false, port: 4312, dataDirectory: join(process.cwd(), "data"), lan: false, lanToken: null
 });
+assert.deepEqual(parseArguments(["--lan", "--lan-token", "a-long-enough-lan-token"]), {
+  open: true, port: 0, dataDirectory: null, lan: true, lanToken: "a-long-enough-lan-token"
+});
+assert.throws(() => parseArguments(["--lan-token", "short"]), /at least 16/);
 assert.throws(() => parseArguments(["--port", "wat"]), /--port/);
 assert.equal(defaultDataDirectory({ HOME: "/home/alex" }, "linux"), "/home/alex/.local/share/chronolog");
 assert.equal(defaultDataDirectory({ XDG_DATA_HOME: "/data" }, "linux"), "/data/chronolog");
