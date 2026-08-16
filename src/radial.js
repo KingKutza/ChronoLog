@@ -1,4 +1,5 @@
 import { Rational, civilFromDays, daysFromCivil } from "./exact.js";
+import { eventCycleWindow, resolveEventCycle } from "./event-cycle.js";
 
 const FIXED_LEVEL_DAYS = {
   week: "7",
@@ -50,6 +51,12 @@ export function resolveRadialCycle(options, activeCycle, focus = null) {
     || (choice.days ? positiveRadialCycle(choice.days) : null);
   if (fixed) return { id: choice.id, period: fixed, dynamic: false, unsupported: false };
 
+  if (choice.period?.kind === "event-defined" && focus !== null) {
+    const resolved = resolveEventCycle(choice.period, focus);
+    if (resolved.resolved) return { id: choice.id, ...resolved, dynamic: true, eventDefined: true, unsupported: false };
+    return { id: choice.id, period: null, dynamic: false, unsupported: true, error: resolved.error };
+  }
+
   const levels = choice.period?.value?.levels || choice.value?.levels;
   const monthCount = Array.isArray(levels) && levels.length === 1 && levels[0]?.level === "month"
     ? Number(levels[0].value)
@@ -74,6 +81,10 @@ export function resolveRadialCycle(options, activeCycle, focus = null) {
 
 /** Return exact calendar boundaries for the visible dynamic spiral window. */
 export function radialCycleWindow(resolution, past = 0, future = 0) {
+  if (resolution?.eventDefined) {
+    const window = eventCycleWindow({ kind: "event-defined", frame: resolution.frame, boundaries: resolution.boundaries.map((boundary) => ({ ...boundary, at: boundary.at.toJSON() })) }, resolution.start, past, future);
+    return window.resolved ? { start: window.windowStart, end: window.windowEnd } : null;
+  }
   if (!resolution?.dynamic || !resolution.anchor || !Number.isInteger(resolution.monthCount)) return null;
   try {
     const before = Math.max(0, Math.floor(Number(past)));
