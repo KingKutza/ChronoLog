@@ -50,3 +50,17 @@ test("prototype frame descriptors migrate loss-minimizingly on parse", () => {
   assert.equal(migrated.frames["frame:old"].period.provenance.kind, "approximation");
   assert.equal(parseDocument(JSON.stringify(legacy)).frames["frame:old"].period.value.levels[0].value, "512");
 });
+
+test("the general frame model documents semantic separation and legacy migration", async () => {
+  const guide = await readFile(new URL("../docs/frame-model.md", import.meta.url), "utf8");
+  for (const phrase of [
+    "open, composable record shape",
+    "Groups and importance sets organize membership",
+    "period.kind: \"event-defined\"",
+    "coordinate-mapping",
+    "basisFrame",
+    "cyclePeriodDays",
+    "five Earth hours corresponding",
+    "to nine Skyland days"
+  ]) assert.match(guide, new RegExp(phrase));
+});
