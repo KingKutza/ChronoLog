@@ -58,9 +58,10 @@ function layeredCalendarFrames(context, requestedFrame) {
   const contextual = (base?.display?.overlays || [])
     .map((id) => context.document.frames[id])
     .filter((frame) => frame && frame.id !== requestedFrame);
-  const legacy = contextual.length ? [] : calendarFrames(context.document)
-    .filter((frame) => frame.id !== requestedFrame && ["overlay", "underlay"].includes(frame.display?.mode));
-  return [...new Map([base, ...contextual, ...legacy]
+  // Companions are a workspace choice owned by the leading frame.  Do not
+  // fall back to global display.mode flags: that legacy heuristic made an
+  // unrelated calendar appear merely because no companion was selected.
+  return [...new Map([base, ...contextual]
     .filter(Boolean).map((frame) => [frame.id, frame])).values()];
 }
 
@@ -131,13 +132,17 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
   const base = context.document.frames[frame];
   for (const [groupId, mode] of Object.entries(base?.display?.groupModes || {})) {
     if (mode !== "show") continue;
-    for (const relation of engine.relationsByFrame.get(groupId) || []) {
-      const calendarId = engine.eventCalendarFrame(relation.event);
-      const calendar = context.document.frames[calendarId];
-      if (!calendar || sources.get(calendarId)?.filterGroups === null) continue;
-      const source = sources.get(calendarId) || { frame: calendar, filterGroups: new Set() };
-      source.filterGroups.add(groupId);
-      sources.set(calendarId, source);
+    // Group membership is composable (authored, queried, and recursively
+    // inherited), so inclusion cannot be inferred from legacy attachments.
+    for (const eventId of engine.groupEventMembers(groupId)) {
+      for (const calendarId of engine.eventCalendarFrames(eventId)) {
+        const calendar = context.document.frames[calendarId];
+        if (!calendar) continue;
+        const source = sources.get(calendarId) || { frame: calendar, filterGroups: new Set() };
+        if (source.filterGroups === null) continue;
+        source.filterGroups.add(groupId);
+        sources.set(calendarId, source);
+      }
     }
   }
   const perFrameLimit = Math.max(80, Math.ceil(limit / Math.max(1, sources.size)) + 24);

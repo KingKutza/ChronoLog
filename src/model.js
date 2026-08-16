@@ -79,6 +79,10 @@ export function validateDocument(document) {
     if (frame.id !== id) errors.push(`Frame map key ${id} does not match its id`);
     if (!Array.isArray(frame.traits)) errors.push(`Frame ${id} requires traits`);
     if (frame.basis && !document.frames?.[frame.basis]) errors.push(`Frame ${id} has a missing basis`);
+    if (frame.coordinateDefinition && !document.frames?.[frame.coordinateDefinition]) {
+      errors.push(`Frame ${id} has a missing coordinate definition`);
+    }
+    if (frame.coordinateDefinition === id) errors.push(`Frame ${id} cannot define coordinates through itself`);
     if (frame.law?.pattern && !document.patterns?.[frame.law.pattern]) {
       errors.push(`Frame ${id} references a missing law pattern`);
     }
@@ -412,24 +416,38 @@ export function frameChildren(document, frameId) {
 }
 
 export function coordinateToDays(document, frameId, value) {
+  return coordinateToDaysSeen(document, frameId, value, new Set());
+}
+
+function coordinateToDaysSeen(document, frameId, value, seen) {
+  if (seen.has(frameId)) throw new Error(`Coordinate definition cycle at ${frameId}`);
+  seen.add(frameId);
   const frame = document.frames[frameId];
   if (!frame) throw new Error(`Unknown frame: ${frameId}`);
+  if (frame.coordinateDefinition) return coordinateToDaysSeen(document, frame.coordinateDefinition, value, seen);
   if (frame.coordinate?.kind === "gregorian" || frame.traits.includes("gregorian")) {
     return civilCoordinateToDays(value);
   }
-  if (frame.basis) return coordinateToDays(document, frame.basis, value);
+  if (frame.basis) return coordinateToDaysSeen(document, frame.basis, value, seen);
   const days = value?.levels?.find((entry) => entry.level === "day");
   if (days) return Rational.parse(days.value);
   throw new Error(`Frame ${frameId} has no temporal coordinate law`);
 }
 
 export function daysToCoordinate(document, frameId, days) {
+  return daysToCoordinateSeen(document, frameId, days, new Set());
+}
+
+function daysToCoordinateSeen(document, frameId, days, seen) {
+  if (seen.has(frameId)) throw new Error(`Coordinate definition cycle at ${frameId}`);
+  seen.add(frameId);
   const frame = document.frames[frameId];
   if (!frame) throw new Error(`Unknown frame: ${frameId}`);
+  if (frame.coordinateDefinition) return daysToCoordinateSeen(document, frame.coordinateDefinition, days, seen);
   if (frame.coordinate?.kind === "gregorian" || frame.traits.includes("gregorian")) {
     return daysToCivilCoordinate(days);
   }
-  if (frame.basis) return daysToCoordinate(document, frame.basis, days);
+  if (frame.basis) return daysToCoordinateSeen(document, frame.basis, days, seen);
   return coordinate([{ level: "day", value: Rational.parse(days).toJSON() }]);
 }
 
