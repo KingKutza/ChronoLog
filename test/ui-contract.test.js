@@ -174,9 +174,10 @@ test("openInspector only accepts DOM nodes", async () => {
 });
 
 test("Frames button toggles its browser panel with accessible state and preserves panel closing controls", async () => {
-  const [html, app] = await Promise.all([
+  const [html, app, css] = await Promise.all([
     readFile("pocket-instrument.html", "utf8"),
-    readFile("src/app.js", "utf8")
+    readFile("src/app.js", "utf8"),
+    readFile("src/app.css", "utf8")
   ]);
   assert.match(html, /id="new-frame"[^>]*aria-controls="inspector"[^>]*aria-expanded="false"/);
   const framesButton = sourceSlice(app, 'byId("new-frame").addEventListener', 'byId("new-pattern")');
@@ -186,7 +187,12 @@ test("Frames button toggles its browser panel with accessible state and preserve
   const browser = sourceSlice(app, "function openObjectBrowser", "function openStapleSuggestions");
   assert.match(browser, /"frames-browser"/);
   assert.match(browser, /aria-expanded", "true"/);
-  assert.match(browser, /search\.focus\(\)/);
+  assert.match(browser, /search\.focus\(\{ preventScroll: true \}\)/);
+  assert.doesNotMatch(browser, /scheduleRender\(\)/, "opening the drawer must not rerender or reset the projection");
+  const inspector = cssBlock(css, "#inspector");
+  assert.match(inspector, /position: absolute/);
+  assert.match(inspector, /contain: layout paint/);
+  assert.match(inspector, /will-change: transform/);
   const refresh = sourceSlice(app, "function refreshFramesPanel", "function openStapleSuggestions");
   assert.match(refresh, /dataset\.panel === "frames-browser"/);
   assert.doesNotMatch(app, /dataset\.objectBrowser/);
