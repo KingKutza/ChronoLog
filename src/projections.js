@@ -18,6 +18,12 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
+// The minimap is a topology preview, not a second event list.  These bounds
+// deliberately cap both the indexed input and the foreground marks so a busy
+// document stays responsive while the filled density trace remains honest.
+const MINIMAP_FACT_LIMIT = 1200;
+const MINIMAP_EXACT_MARK_LIMIT = 280;
+const MINIMAP_BIN_COUNT = 140;
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -1306,7 +1312,7 @@ export function renderMinimap(target, context) {
       if (indexed[middle].day.compare(outerStart) < 0) low = middle + 1;
       else high = middle;
     }
-    for (let index = low; index < indexed.length && facts.length < 1200; index += 1) {
+    for (let index = low; index < indexed.length && facts.length < MINIMAP_FACT_LIMIT; index += 1) {
       if (indexed[index].day.compare(outerEnd) > 0) break;
       facts.push({ ...indexed[index].fact, displayFrame: frame.id });
     }
@@ -1336,42 +1342,65 @@ export function renderMinimap(target, context) {
     label.textContent = formatCivil(daysToCivilCoordinate(tickDay)).replace(/ 00:00:00$/, "");
     svg.append(label);
   }
-  const binCount = 140;
-  const densityLayers = new Map();
+  const binCount = MINIMAP_BIN_COUNT;
+  const density = new Float32Array(binCount);
+  const exactMarks = [];
+  const rangeDays = outerEnd.sub(outerStart);
   for (const fact of facts) {
-    const fraction = Rational.parse(fact.day).sub(outerStart).div(outerEnd.sub(outerStart)).toNumber();
-    const bin = Math.max(0, Math.min(binCount - 1, Math.floor(fraction * binCount)));
-    const color = factColor(context, fact);
-    const bins = densityLayers.get(color) || new Uint16Array(binCount);
-    bins[bin] += 1;
-    densityLayers.set(color, bins);
+    const start = Rational.parse(fact.day);
+    const duration = Rational.parse(String(durationMinutes(fact.event))).div(1440);
+    const startFraction = start.sub(outerStart).div(rangeDays).toNumber();
+    const endFraction = start.add(duration).sub(outerStart).div(rangeDays).toNumber();
+    const firstBin = Math.max(0, Math.min(binCount - 1, Math.floor(startFraction * binCount)));
+    const lastBin = Math.max(firstBin, Math.min(binCount - 1, Math.floor(endFraction * binCount)));
+    // A span contributes across every occupied bin.  Point events get one
+    // exact mark as well as one unit of density, making aggregation legible
+    // without treating color as the only carrier of meaning.
+    for (let bin = firstBin; bin <= lastBin; bin += 1) density[bin] += 1;
+    exactMarks.push({
+      x: 20 + (Math.max(0, Math.min(1, startFraction)) * 960),
+      color: factColor(context, fact),
+      duration: duration.compare(0) > 0
+    });
   }
-  const totals = new Uint16Array(binCount);
-  for (const bins of densityLayers.values()) {
-    for (let bin = 0; bin < binCount; bin += 1) totals[bin] += bins[bin];
-  }
-  const peak = Math.max(1, ...totals);
-  const stacked = new Float32Array(binCount);
-  for (const [color, bins] of densityLayers) {
-    let d = "";
-    for (let bin = 0; bin < binCount; bin += 1) {
-      if (!bins[bin]) continue;
-      const height = Math.max(1, Math.round(bins[bin] / peak * 35));
-      const x = 20 + (bin + 0.5) / binCount * 960;
-      for (let dot = 0; dot < height; dot += 1) {
-        const offset = stacked[bin] + dot * 1.35 + .8;
-        d += `M${x.toFixed(2)} ${(60 - offset).toFixed(2)}h.01M${x.toFixed(2)} ${(60 + offset).toFixed(2)}h.01`;
-      }
-      stacked[bin] += height * 1.35;
+  // Spread only into adjacent bins.  It joins dense neighbouring activity
+  // into a continuous waveform, but preserves genuinely empty intervals.
+  const topology = new Float32Array(binCount);
+  const kernel = [0.18, 0.55, 1, 0.55, 0.18];
+  for (let bin = 0; bin < binCount; bin += 1) {
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const source = bin + offset;
+      if (source >= 0 && source < binCount) topology[bin] += density[source] * kernel[offset + 2];
     }
+  }
+  const peak = Math.max(1, ...topology);
+  const heights = Array.from(topology, (value) => value ? 2 + Math.sqrt(value / peak) * 35 : 0);
+  const points = heights.map((height, bin) => ({ x: 20 + (bin + .5) / binCount * 960, height }));
+  const upper = points.map(({ x, height }) => `${x.toFixed(2)} ${(60 - height).toFixed(2)}`).join(" L");
+  const lower = [...points].reverse().map(({ x, height }) => `${x.toFixed(2)} ${(60 + height).toFixed(2)}`).join(" L");
+  if (facts.length) {
     const layer = svgElement("path", {
-      d, fill: "none", stroke: color, "stroke-width": 1.45, "stroke-linecap": "round", opacity: 0.82,
-      class: "minimap-density-layer"
+      d: `M${upper} L${lower} Z`, class: "minimap-density-topology"
     });
     const title = svgElement("title");
-    title.textContent = "Event density; color identifies its frame or group";
+    title.textContent = "Aggregated event density. The horizontal axis is time; waveform height is the local count of events and occupied spans.";
     layer.append(title);
     svg.append(layer);
+  }
+  const markStride = Math.max(1, Math.ceil(exactMarks.length / MINIMAP_EXACT_MARK_LIMIT));
+  for (let index = 0; index < exactMarks.length; index += markStride) {
+    const mark = exactMarks[index];
+    svg.append(svgElement("circle", {
+      cx: mark.x, cy: 60, r: mark.duration ? 1.8 : 1.25, fill: mark.color,
+      class: "minimap-exact-mark", "aria-hidden": "true"
+    }));
+  }
+  if (facts.length >= MINIMAP_FACT_LIMIT || exactMarks.length > MINIMAP_EXACT_MARK_LIMIT) {
+    const summary = svgElement("text", { x: 980, y: 117, "text-anchor": "end", class: "minimap-summary" });
+    summary.textContent = facts.length >= MINIMAP_FACT_LIMIT
+      ? `Topology sampled from first ${MINIMAP_FACT_LIMIT} indexed events`
+      : `Showing every ${markStride}th exact event mark`;
+    svg.append(summary);
   }
   const viewportStart = context.session.currentFocus().sub(span.div(2));
   const x = 20 + viewportStart.sub(outerStart).div(outerEnd.sub(outerStart)).toNumber() * 960;

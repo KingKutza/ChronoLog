@@ -1047,7 +1047,15 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 .minimap-center-line { stroke: color-mix(in srgb, var(--ink) 32%, transparent); stroke-width: 1; }
 .minimap-focus-line { stroke: var(--ink); stroke-width: 1.6; }
 .minimap-now-line { stroke: var(--now); stroke-width: 2.2; }
-.minimap-density-layer { pointer-events: none; }
+.minimap-density-topology {
+  fill: color-mix(in srgb, var(--ink) 32%, transparent);
+  stroke: color-mix(in srgb, var(--ink) 66%, transparent);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.minimap-exact-mark { pointer-events: none; stroke: var(--paper); stroke-width: .55; }
+.minimap-summary { fill: var(--muted); font: 650 7px/1 var(--data); pointer-events: none; }
 .minimap-label { fill: var(--muted); font: 700 8px/1 var(--data); }
 
 .object-browser-toolbar,
