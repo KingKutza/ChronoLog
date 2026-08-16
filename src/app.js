@@ -126,6 +126,7 @@ let pendingIntimateZoom = null;
 let intimateScrollGuard = 0;
 let provisionalEvent = null;
 let documentLoading = true;
+let framesReturnTarget = null;
 
 const store = new AutosaveStore({
   onStatus(status) {
@@ -133,6 +134,7 @@ const store = new AutosaveStore({
     node.dataset.state = status.state;
     node.textContent = status.message;
     node.title = status.message;
+    node.setAttribute("aria-label", `Save status: ${status.message}`);
     byId("download-conflict").disabled = !status.conflict;
     byId("reload-latest").disabled = !status.conflict;
   }
@@ -597,11 +599,16 @@ function closeInspector() {
 
 function dismissInspector() {
   const wasFramesBrowser = inspector.dataset.panel === "frames-browser";
+  const returnTarget = framesReturnTarget;
   inspector.classList.remove("open");
   delete inspector.dataset.panel;
   session.inspector = null;
-  byId("new-frame").setAttribute("aria-expanded", "false");
-  if (wasFramesBrowser) byId("new-frame").focus();
+  for (const id of ["new-frame", "manage-frames"]) byId(id).setAttribute("aria-expanded", "false");
+  framesReturnTarget = null;
+  if (wasFramesBrowser) {
+    const visibleToolbarTrigger = byId("new-frame").getClientRects().length ? byId("new-frame") : null;
+    (returnTarget || visibleToolbarTrigger || byId("document-menu").querySelector("summary")).focus();
+  }
 }
 
 function discardProvisionalDraft(nextEventId = null) {
@@ -2387,7 +2394,7 @@ function openObjectBrowser(kind) {
   const isFramesBrowser = kind === "frame";
   openInspector(kind === "frame" ? "Frames" : "Patterns", wrapper, isFramesBrowser ? "frames-browser" : "object-browser");
   if (isFramesBrowser) {
-    byId("new-frame").setAttribute("aria-expanded", "true");
+    for (const id of ["new-frame", "manage-frames"]) byId(id).setAttribute("aria-expanded", "true");
     // Opening Frames is intentionally passive for the workspace.  Focusing
     // the filter remains useful for keyboard users, but must not ask the
     // browser to scroll the projection or its focused timeline into view.
@@ -2651,12 +2658,21 @@ byId("undo").addEventListener("click", () => history.undo());
 byId("redo").addEventListener("click", () => history.redo());
 byId("close-inspector").addEventListener("click", closeInspector);
 byId("new-event").addEventListener("click", () => createEventAt(session.currentFocus()));
-byId("new-frame").addEventListener("click", () => {
+function toggleFramesBrowser(returnTarget) {
   if (inspector.classList.contains("open") && inspector.dataset.panel === "frames-browser") {
     closeInspector();
     return;
   }
+  framesReturnTarget = returnTarget;
   openObjectBrowser("frame");
+}
+byId("new-frame").addEventListener("click", () => {
+  toggleFramesBrowser(byId("new-frame"));
+});
+byId("manage-frames").addEventListener("click", () => {
+  const returnTarget = byId("document-menu").querySelector("summary");
+  closeDocumentMenu();
+  toggleFramesBrowser(returnTarget);
 });
 byId("new-pattern").addEventListener("click", () => openObjectBrowser("pattern"));
 byId("theme-settings").addEventListener("click", () => {

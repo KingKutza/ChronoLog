@@ -116,7 +116,7 @@ test("primary toolbar exposes reversible history while document actions live in 
   assert.match(toolbar, /class="history-controls" aria-label="Edit history"/);
   assert.match(toolbar, /id="undo"[^>]*title="Undo \(Ctrl\+Z\)"/);
   assert.match(toolbar, /id="redo"[^>]*title="Redo \(Ctrl\+Shift\+Z\)"/);
-  assert.match(documentMenu, /<summary[^>]*>Document<\/summary>/);
+  assert.match(documentMenu, /<summary[^>]*>[\s\S]*responsive-label-long[^>]*>Document<\/span>[\s\S]*<\/summary>/);
   for (const id of ["open-document", "save-document", "save-as-document", "import-ics", "export-ics"]) {
     assert.match(documentMenu, new RegExp(`id="${id}"`));
   }
@@ -234,17 +234,22 @@ test("openInspector only accepts DOM nodes", async () => {
   assert.match(inspectorSource, /replaceChildren\(body\)/);
 });
 
-test("Frames button toggles its browser panel with accessible state and preserves panel closing controls", async () => {
+test("Frames triggers toggle one browser panel with accessible state and coherent focus return", async () => {
   const [html, app, css] = await Promise.all([
     readFile("pocket-instrument.html", "utf8"),
     readFile("src/app.js", "utf8"),
     readFile("src/app.css", "utf8")
   ]);
   assert.match(html, /id="new-frame"[^>]*aria-controls="inspector"[^>]*aria-expanded="false"/);
-  const framesButton = sourceSlice(app, 'byId("new-frame").addEventListener', 'byId("new-pattern")');
-  assert.match(framesButton, /inspector\.dataset\.panel === "frames-browser"/);
-  assert.match(framesButton, /closeInspector\(\)/);
-  assert.match(framesButton, /openObjectBrowser\("frame"\)/);
+  assert.match(html, /id="manage-frames"[^>]*aria-controls="inspector"[^>]*aria-expanded="false"/);
+  const framesToggle = sourceSlice(app, "function toggleFramesBrowser", 'byId("new-pattern")');
+  assert.match(framesToggle, /inspector\.dataset\.panel === "frames-browser"/);
+  assert.match(framesToggle, /closeInspector\(\)/);
+  assert.match(framesToggle, /openObjectBrowser\("frame"\)/);
+  assert.match(framesToggle, /toggleFramesBrowser\(returnTarget\)/);
+  const dismissal = sourceSlice(app, "function dismissInspector", "function discardProvisionalDraft");
+  assert.match(dismissal, /framesReturnTarget/);
+  assert.match(dismissal, /document-menu/);
   const browser = sourceSlice(app, "function openObjectBrowser", "function openStapleSuggestions");
   assert.match(browser, /"frames-browser"/);
   assert.match(browser, /aria-expanded", "true"/);
@@ -259,7 +264,7 @@ test("Frames button toggles its browser panel with accessible state and preserve
   assert.doesNotMatch(app, /dataset\.objectBrowser/);
   const dismiss = sourceSlice(app, "function dismissInspector", "function resolveProvisionalDraft");
   assert.match(dismiss, /aria-expanded", "false"/);
-  assert.match(dismiss, /new-frame"\)\.focus\(\)/);
+  assert.match(dismiss, /returnTarget \|\| visibleToolbarTrigger \|\|/);
   const keydown = sourceSlice(app, 'window.addEventListener("keydown"', 'window.addEventListener("beforeunload"');
   assert.match(keydown, /event\.key === "Escape"/);
   assert.match(keydown, /closeInspector\(\)/);
@@ -566,7 +571,7 @@ test("continuous-time chrome and recurrence exceptions retain their governing co
   assert.match(css, /\.minimap-exact-mark/);
   assert.match(projections, /minimap-now-line/);
   assert.match(projections, /radial-now-line/);
-  assert.match(cssBlock(css, "#minimap"), /left: calc\(33\.333% \+ var\(--workspace-inner-half\)\)/);
+  assert.match(cssBlock(css, "#minimap"), /left: calc\(var\(--workspace-control-edge\) \+ var\(--workspace-inner-half\)\)/);
   assert.match(html, /class="chronolog-mark"/);
   assert.match(html, /id="theme-settings"/);
 });
