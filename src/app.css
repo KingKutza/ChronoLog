@@ -18,6 +18,23 @@
   --shadow: 0 12px 36px rgba(52, 43, 31, .13);
   --ui: "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --data: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Workspace chrome follows one outer inset and one inner relationship.
+     The half-gap keeps the wide 1:2 control/minimap split centered while the
+     full inner gap is used between every neighboring workspace surface. */
+  --workspace-outer: 12px;
+  --workspace-inner: 8px;
+  --workspace-inner-half: 4px;
+  --workspace-primary-row: 44px;
+  --workspace-control-row: 42px;
+  --workspace-stack-height: calc(
+    var(--workspace-primary-row) + var(--workspace-control-row) + var(--workspace-control-row)
+    + var(--workspace-inner) + var(--workspace-inner)
+  );
+  --workspace-minimap-height: var(--workspace-stack-height);
+  --workspace-minimap-top: var(--workspace-outer);
+  --workspace-projection-top: calc(
+    var(--workspace-minimap-top) + var(--workspace-minimap-height) + var(--workspace-inner)
+  );
 }
 
 :root[data-theme="night"] { color-scheme: dark; }
@@ -65,7 +82,7 @@ button {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  padding: 158px 12px 12px;
+  padding: var(--workspace-projection-top) var(--workspace-outer) var(--workspace-outer);
   background:
     radial-gradient(circle at 50% 30%, rgba(255,255,255,.72), transparent 55%),
     var(--ground);
@@ -87,12 +104,12 @@ button {
 #hud {
   position: absolute;
   z-index: 20;
-  top: 10px;
-  left: 12px;
+  top: var(--workspace-outer);
+  left: var(--workspace-outer);
   right: auto;
-  width: calc(33.333% - 18px);
-  height: 42px;
-  min-height: 44px;
+  width: calc(33.333% - var(--workspace-outer) - var(--workspace-inner-half));
+  height: var(--workspace-primary-row);
+  min-height: var(--workspace-primary-row);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -189,10 +206,10 @@ button {
 #lens-bar {
   position: absolute;
   z-index: 21;
-  top: 62px;
-  left: 12px;
-  width: calc(33.333% - 18px);
-  height: 42px;
+  top: calc(var(--workspace-outer) + var(--workspace-primary-row) + var(--workspace-inner));
+  left: var(--workspace-outer);
+  width: calc(33.333% - var(--workspace-outer) - var(--workspace-inner-half));
+  height: var(--workspace-control-row);
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 4px;
@@ -219,11 +236,14 @@ button {
 #lens-controls {
   position: absolute;
   z-index: 21;
-  top: 106px;
-  left: 12px;
+  top: calc(
+    var(--workspace-outer) + var(--workspace-primary-row) + var(--workspace-control-row)
+    + var(--workspace-inner) + var(--workspace-inner)
+  );
+  left: var(--workspace-outer);
   right: auto;
-  width: calc(33.333% - 18px);
-  height: 42px;
+  width: calc(33.333% - var(--workspace-outer) - var(--workspace-inner-half));
+  height: var(--workspace-control-row);
   display: flex;
   align-items: center;
   gap: 5px;
@@ -389,11 +409,11 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 #minimap {
   position: absolute;
   z-index: 17;
-  left: calc(33.333% + 6px);
-  right: 12px;
-  top: 10px;
+  left: calc(33.333% + var(--workspace-inner-half));
+  right: var(--workspace-outer);
+  top: var(--workspace-minimap-top);
   bottom: auto;
-  height: 138px;
+  height: var(--workspace-minimap-height);
   border: 1px solid var(--strong);
   border-radius: 12px;
   background: color-mix(in srgb, var(--paper) 92%, transparent);
@@ -407,8 +427,8 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 #focus-readout {
   position: absolute;
   z-index: 19;
-  left: calc(33.333% + 18px);
-  top: 126px;
+  left: calc(33.333% + var(--workspace-inner-half) + var(--workspace-inner));
+  top: calc(var(--workspace-minimap-top) + var(--workspace-minimap-height) - 22px);
   bottom: auto;
   padding: 4px 8px;
   border-radius: 7px;
@@ -1212,25 +1232,31 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 #inspector-body { overflow-x: hidden; }
 
 @media (max-width: 1000px) {
-  #viewport { padding-top: 250px; }
+  :root {
+    --workspace-minimap-height: 86px;
+    --workspace-minimap-top: calc(
+      var(--workspace-outer) + var(--workspace-stack-height) + var(--workspace-inner)
+    );
+  }
   #hud,
   #lens-bar,
-  #lens-controls { left: 12px; right: 12px; width: auto; }
-  #lens-controls { top: 106px; }
-  #minimap { top: 154px; left: 12px; right: 12px; height: 86px; }
-  #focus-readout { top: 222px; left: 20px; }
+  #lens-controls { left: var(--workspace-outer); right: var(--workspace-outer); width: auto; }
+  #minimap { left: var(--workspace-outer); right: var(--workspace-outer); }
+  #focus-readout { left: calc(var(--workspace-outer) + var(--workspace-inner)); }
 }
 
 @media (max-width: 780px) {
-  #viewport { padding: 236px 7px 7px; }
-  #hud { top: 6px; left: 6px; right: 6px; min-height: 42px; padding: 4px 6px; }
+  :root {
+    --workspace-outer: 7px;
+    --workspace-inner: 6px;
+    --workspace-inner-half: 3px;
+    --workspace-primary-row: 42px;
+    --workspace-minimap-height: 78px;
+  }
+  #hud { right: var(--workspace-outer); padding: 4px 6px; }
   #brand { font-size: 10px; }
   #hud .optional { display: none; }
-  #lens-bar { top: 54px; left: 6px; right: 6px; width: auto; }
   #lens-bar button { font-size: 8px; }
-  #lens-controls { top: 102px; left: 6px; right: 6px; }
-  #minimap { top: 148px; left: 7px; right: 7px; bottom: auto; height: 78px; }
-  #focus-readout { top: 207px; left: 14px; bottom: auto; }
   #inspector {
     top: auto;
     width: 100%;
