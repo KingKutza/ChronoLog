@@ -66,6 +66,21 @@ test("save status remains a legible, accessible status badge", async () => {
   assert.match(statusUpdate, /node\.textContent = status\.message/);
 });
 
+test("workspace conflicts offer explicit download-or-reload recovery instead of last-write-wins", async () => {
+  const [app, html, store] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("src/store.js", "utf8")
+  ]);
+  assert.match(html, /id="download-conflict"[^>]*disabled/);
+  assert.match(html, /id="reload-latest"[^>]*disabled/);
+  assert.match(app, /Downloaded your conflicting local copy/);
+  assert.match(app, /store\.readRemote\(\)/);
+  assert.match(store, /response\.status === 409/);
+  assert.match(store, /local edits are safe/);
+  assert.match(store, /"if-match"/);
+});
+
 test("primary toolbar exposes reversible history while document actions live in a named menu", async () => {
   const [html, css, app] = await Promise.all([
     readFile("pocket-instrument.html", "utf8"),
