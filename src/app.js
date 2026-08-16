@@ -28,6 +28,7 @@ import {
   touch,
   validateDocument
 } from "./model.js";
+import { OBJECT_KINDS, normalizeObjectKind, objectKindForEvent, traitsForObjectKind } from "./object-kinds.js";
 import {
   calendarFrames,
   groupFrames,
@@ -304,6 +305,10 @@ function updateChrome() {
 
 function closeDocumentMenu() {
   byId("document-menu").open = false;
+}
+
+function closeCreateMenu() {
+  byId("create-menu").open = false;
 }
 
 function confirmDocumentReplacement() {
@@ -1106,7 +1111,7 @@ function openEventInspector(eventId) {
       : reason.kind === "query" ? "live query"
         : `nested through ${reason.via}`)
     .join("; ");
-  const isTask = event.traits.includes("task");
+  const objectKind = objectKindForEvent(event);
   const startParts = relationDateParts(relation);
   const attachedImportance = importanceFrames.find((frame) => memberships.has(frame.id));
   const importance = attachedImportance?.id || (event.traits.includes("landmark") ? "landmark"
@@ -1121,18 +1126,23 @@ function openEventInspector(eventId) {
   const wrapper = document.createElement("form");
   wrapper.className = "event-form";
   wrapper.innerHTML = `
+    <label class="field"><span>Kind</span>
+      <select name="objectKind">
+        ${Object.entries(OBJECT_KINDS).map(([value, definition]) => `<option value="${value}" ${objectKind === value ? "selected" : ""}>${definition.label}</option>`).join("")}
+      </select>
+    </label>
     <label class="field"><span>Title</span>
       <input name="title" value="${escapeHTML(event.payload?.title || "")}" required>
     </label>
     <div class="form-row">
-      <label class="field"><span>${isTask ? "Observed date" : "Start date"}</span>
+      <label class="field"><span data-object-date-label>Start date</span>
         <input name="startDate" type="date" value="${escapeHTML(startParts.date)}">
       </label>
-      <label class="field"><span>${isTask ? "Observed time" : "Start time"}</span>
+      <label class="field"><span data-object-time-label>Start time</span>
         <input name="startTime" type="time" step="60" value="${escapeHTML(startParts.time)}">
       </label>
     </div>
-    <div class="form-row">
+    <div class="form-row" data-duration-row>
       <label class="field"><span>Duration</span>
         <input name="duration" inputmode="decimal" value="${escapeHTML(duration.amount)}">
       </label>
@@ -1163,9 +1173,9 @@ function openEventInspector(eventId) {
     <label class="field recurrence-options"><span>Ends after</span>
       <input name="count" type="number" min="1" max="10000" value="${escapeHTML(recurrence?.rrule?.COUNT || "")}" placeholder="Leave blank to continue">
     </label>
-    ${isTask ? `<label class="field"><span>Completed at (optional)</span>
+    <label class="field" data-completed-field><span>Completed at (optional)</span>
       <input name="completed" value="${escapeHTML(relationDate(completed))}">
-    </label>` : ""}
+    </label>
     <label class="field"><span>Description</span>
       <textarea name="description">${escapeHTML(event.payload?.description || "")}</textarea>
     </label>
@@ -1216,8 +1226,21 @@ function openEventInspector(eventId) {
     "has-recurrence",
     Boolean(wrapper.elements.repeat.value)
   );
+  const syncObjectKind = () => {
+    const kind = normalizeObjectKind(wrapper.elements.objectKind.value);
+    const definition = OBJECT_KINDS[kind];
+    wrapper.querySelector("[data-object-date-label]").textContent = kind === "todo" ? "Observed date" : kind === "note" ? "Pinned date" : "Start date";
+    wrapper.querySelector("[data-object-time-label]").textContent = kind === "todo" ? "Observed time" : kind === "note" ? "Pinned time" : "Start time";
+    wrapper.querySelector("[data-duration-row]").hidden = definition.zeroDuration;
+    wrapper.elements.duration.disabled = definition.zeroDuration;
+    wrapper.elements.unit.disabled = definition.zeroDuration;
+    wrapper.querySelector("[data-completed-field]").hidden = kind !== "todo";
+    wrapper.elements.completed.disabled = kind !== "todo";
+  };
   wrapper.elements.repeat.addEventListener("change", syncRecurrenceFields);
+  wrapper.elements.objectKind.addEventListener("change", syncObjectKind);
   syncRecurrenceFields();
+  syncObjectKind();
   if (provisionalEvent?.id === eventId) {
     provisionalEvent.form = wrapper;
     wrapper.addEventListener("input", () => { if (provisionalEvent?.id === eventId) provisionalEvent.dirty = true; });
@@ -1239,7 +1262,8 @@ function openEventInspector(eventId) {
         ? parseDateText(`${data.get("startDate")} ${data.get("startTime") || "00:00"}`)
         : null;
       const dateOnly = !String(data.get("startTime") || "");
-      const completedCoordinate = isTask && data.get("completed")
+      const objectKindChoice = normalizeObjectKind(data.get("objectKind"));
+      const completedCoordinate = objectKindChoice === "todo" && data.get("completed")
         ? parseDateText(data.get("completed"))
         : null;
       const repeatChoice = String(data.get("repeat") || "");
@@ -1269,8 +1293,10 @@ function openEventInspector(eventId) {
         target.payload.title = String(data.get("title") || "(untitled)");
         target.payload.description = String(data.get("description") || "");
         target.payload.location = String(data.get("location") || "");
-        target.traits = String(data.get("traits") || "event")
-          .split(",").map((item) => item.trim()).filter(Boolean);
+        target.traits = traitsForObjectKind(
+          String(data.get("traits") || "event").split(",").map((item) => item.trim()).filter(Boolean),
+          objectKindChoice
+        );
         target.traits = target.traits.filter((trait) => !["important", "landmark"].includes(trait));
         const importanceChoice = String(data.get("importance") || "standard");
         if (["important", "landmark"].includes(importanceChoice)) target.traits.push(importanceChoice);
@@ -1287,7 +1313,7 @@ function openEventInspector(eventId) {
         if (data.get("useColor")) target.display.color = String(data.get("eventColor") || "#d4552d");
         else delete target.display.color;
         target.magnitudes ||= {};
-        const requiresZero = target.traits.includes("task") || target.traits.includes("terminator");
+        const requiresZero = OBJECT_KINDS[objectKindChoice].zeroDuration || target.traits.includes("terminator");
         target.magnitudes.duration = durationMagnitude(
           requiresZero ? "0" : String(data.get("duration") || "0"),
           String(data.get("unit") || "second")
@@ -2468,36 +2494,41 @@ function openStapleSuggestions(suggestions) {
   openInspector("Staple suggestions", wrapper);
 }
 
-function createEventAt(startDay, endDay = startDay) {
+function createEventAt(startDay, endDay = startDay, requestedKind = "event") {
   resolveProvisionalDraft();
   store.beginDeferred();
+  const objectKind = normalizeObjectKind(requestedKind);
+  const definition = OBJECT_KINDS[objectKind];
   const eventId = createId("event");
   const relationId = createId("relation");
   const start = Rational.parse(startDay);
   const end = Rational.parse(endDay);
   const orderedStart = start.compare(end) <= 0 ? start : end;
   let orderedEnd = start.compare(end) <= 0 ? end : start;
-  if (orderedEnd.compare(orderedStart) === 0) {
+  if (!definition.zeroDuration && orderedEnd.compare(orderedStart) === 0) {
     orderedEnd = orderedStart.add(session.currentLens() === "intimate"
       ? Rational.parse(session.intimateGrain).div(1440)
       : 1);
   }
   try {
-    executeEventChange("Create event", eventId, (documentValue) => {
+    executeEventChange(`Create ${definition.label}`, eventId, (documentValue) => {
       const event = addEvent(documentValue, {
         id: eventId,
-        traits: ["event"],
+        traits: traitsForObjectKind([], objectKind),
         magnitudes: {
-          duration: durationMagnitude(orderedEnd.sub(orderedStart).mul(86400).toJSON(), "second")
+          duration: durationMagnitude(
+            definition.zeroDuration ? "0" : orderedEnd.sub(orderedStart).mul(86400).toJSON(),
+            "second"
+          )
         },
-        payload: { title: "New event", description: "", location: "" }
+        payload: { title: definition.newTitle, description: "", location: "" }
       });
       addRelation(documentValue, {
         id: relationId,
         type: "attachment",
         event: event.id,
         frame: session.activeFrame,
-        role: "placed",
+        role: definition.relationRole,
         coordinate: daysToCivilCoordinate(orderedStart)
       });
     }, true);
@@ -2657,7 +2688,18 @@ function goToToday() {
 byId("undo").addEventListener("click", () => history.undo());
 byId("redo").addEventListener("click", () => history.redo());
 byId("close-inspector").addEventListener("click", closeInspector);
-byId("new-event").addEventListener("click", () => createEventAt(session.currentFocus()));
+for (const [id, kind] of [["new-event", "event"], ["new-todo", "todo"], ["new-note", "note"]]) {
+  byId(id).addEventListener("click", () => {
+    closeCreateMenu();
+    createEventAt(session.currentFocus(), session.currentFocus(), kind);
+  });
+}
+byId("create-menu").addEventListener("toggle", (event) => {
+  if (event.currentTarget.open) closeDocumentMenu();
+});
+byId("document-menu").addEventListener("toggle", (event) => {
+  if (event.currentTarget.open) closeCreateMenu();
+});
 function toggleFramesBrowser(returnTarget) {
   if (inspector.classList.contains("open") && inspector.dataset.panel === "frames-browser") {
     closeInspector();
@@ -2685,6 +2727,8 @@ byId("lens-settings").addEventListener("click", () => {
 });
 
 document.addEventListener("pointerdown", (event) => {
+  const createMenu = byId("create-menu");
+  if (createMenu.open && !createMenu.contains(event.target)) closeCreateMenu();
   if (!provisionalEvent || !inspector.classList.contains("open") || inspector.contains(event.target)) return;
   closeInspector();
 });

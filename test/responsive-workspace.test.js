@@ -16,6 +16,8 @@ test("responsive workspace keeps every toolbar action reachable without minimap 
   assert.match(css, /@media \(max-width: 520px\)[\s\S]*\.responsive-label-short \{ display: inline; \}/);
 
   assert.match(html, /id="manage-frames"[^>]*aria-controls="inspector"/);
+  assert.match(html, /id="create-menu"[\s\S]*id="new-todo"[\s\S]*id="new-note"/);
+  assert.match(css, /#create-menu > summary[\s\S]*width: 34px/);
   assert.match(html, /data-lens="strategic" aria-label="Strategic"/);
   assert.match(app, /toggleFramesBrowser\(returnTarget\)/);
   assert.match(app, /framesReturnTarget/);

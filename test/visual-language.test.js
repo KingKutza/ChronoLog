@@ -33,6 +33,7 @@ test("visual grammar maps structural event roles to stable sigils", () => {
   assert.equal(sigilForFact({ event: { traits: ["event"] } }), "point");
   assert.equal(sigilForFact({ event: { traits: ["event", "milestone"] } }), "milestone");
   assert.equal(sigilForFact({ event: { traits: ["event", "task"] } }), "task");
+  assert.equal(sigilForFact({ event: { traits: ["event", "note"] } }), "note");
   assert.equal(sigilForFact({ event: { traits: ["event", "terminator"] } }), "terminator");
   assert.equal(sigilForFact({ event: { traits: ["event", "celestial"] } }), "celestial");
   assert.equal(sigilForFact({ event: { traits: ["event"] }, virtualId: "repeat:1" }), "repeat");
