@@ -288,7 +288,7 @@ test("navigation chrome never performs a second recurrence query", async () => {
   const minimap = sourceSlice(projections, "export function renderMinimap", null);
   assert.doesNotMatch(minimap, /queryFacts\(/);
   assert.match(minimap, /indexedExplicitFacts/);
-  assert.match(minimap, /sampleIndexedRanges/);
+  assert.match(minimap, /minimapDotGrid/);
 });
 
 test("explicit rendered events carry drag placement data and reschedule through history", async () => {
@@ -573,14 +573,14 @@ test("continuous-time chrome and recurrence exceptions retain their governing co
   assert.match(app, /Restore recurring occurrence/);
   assert.match(app, /animateRadialWheel/);
   assert.match(app, /name="frameLenses"/);
-  assert.match(projections, /MINIMAP_FACT_LIMIT = 1200/);
-  assert.match(projections, /MINIMAP_EXACT_MARK_LIMIT = 280/);
-  assert.match(projections, /minimap-density-topology/);
-  assert.match(projections, /minimap-exact-mark/);
-  assert.match(projections, /Topology evenly sampled across/);
-  assert.match(projections, /const kernel = \[0\.18, 0\.55, 1, 0\.55, 0\.18\]/);
-  assert.match(css, /\.minimap-density-topology/);
-  assert.match(css, /\.minimap-exact-mark/);
+  assert.match(projections, /minimapDotGrid/);
+  assert.match(projections, /minimapEventMagnitude/);
+  assert.match(projections, /minimap-grid-baseline/);
+  assert.match(projections, /minimap-grid-active/);
+  assert.match(projections, /fixed magnitude/);
+  assert.doesNotMatch(projections, /Math\.sqrt\(value \/ peak\)/);
+  assert.match(css, /\.minimap-grid-unlit/);
+  assert.match(css, /\.minimap-grid-active/);
   assert.match(projections, /minimap-now-line/);
   assert.match(projections, /radial-now-line/);
   assert.match(cssBlock(css, "#minimap"), /left: calc\(var\(--workspace-control-edge\) \+ var\(--workspace-inner-half\)\)/);

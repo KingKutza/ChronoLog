@@ -13,7 +13,7 @@ import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./rad
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
-import { sampleIndexedRanges } from "./minimap.js";
+import { MINIMAP_GRID_ROWS, minimapDotGrid, minimapEventMagnitude } from "./minimap.js";
 import { SIGIL_VOCABULARY, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -22,11 +22,7 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
-// The minimap is a topology preview, not a second event list.  These bounds
-// deliberately cap both the indexed input and the foreground marks so a busy
-// document stays responsive while the filled density trace remains honest.
-const MINIMAP_FACT_LIMIT = 1200;
-const MINIMAP_EXACT_MARK_LIMIT = 280;
+// The minimap is a fixed-scale topology preview, not a second event list.
 const MINIMAP_BIN_COUNT = 140;
 
 function element(tag, className, text) {
@@ -1540,10 +1536,9 @@ export function renderMinimap(target, context) {
     }
   }
   context.session.minimapRange = { key: rangeKey, start: outerStart, end: outerEnd };
-  // The minimap is navigation chrome, so it must never trigger a second
-  // recurrence expansion. Explicit placements are already indexed and give a
-  // useful density trace at essentially constant cost; recurring detail remains
-  // in the primary lens where its result is bounded.
+  // The minimap is navigation chrome, so it never triggers a second recurrence
+  // expansion. Binary-search the explicit indexes, then aggregate only the
+  // in-range entries into the fixed number of display columns.
   const indexedRanges = [];
   for (const frame of layeredCalendarFrames(context, context.session.activeFrame)) {
     const indexed = context.engine.indexedExplicitFacts(frame.id);
@@ -1563,12 +1558,35 @@ export function renderMinimap(target, context) {
     }
     indexedRanges.push({ entries: indexed, start: low, end: after });
   }
-  const indexedFacts = sampleIndexedRanges(indexedRanges, MINIMAP_FACT_LIMIT);
-  const facts = indexedFacts.map((entry) => ({
-    ...entry.fact,
-    displayFrame: entry.fact.relation?.frame
-  }));
-  const indexedFactCount = indexedRanges.reduce((sum, range) => sum + range.end - range.start, 0);
+  const binCount = MINIMAP_BIN_COUNT;
+  const magnitudes = new Float64Array(binCount);
+  const rangeDays = outerEnd.sub(outerStart);
+  const seenFacts = new Set();
+  let indexedFactCount = 0;
+  for (const range of indexedRanges) {
+    for (let index = range.start; index < range.end; index += 1) {
+      const fact = { ...range.entries[index].fact, displayFrame: range.entries[index].fact.relation?.frame };
+      const key = `${fact.event.id}\u0000${fact.day}`;
+      if (seenFacts.has(key)) continue;
+      seenFacts.add(key);
+      indexedFactCount += 1;
+      const start = Rational.parse(fact.day);
+      const duration = Rational.parse(String(durationMinutes(fact.event))).div(1440);
+      const startFraction = start.sub(outerStart).div(rangeDays).toNumber();
+      const endFraction = start.add(duration).sub(outerStart).div(rangeDays).toNumber();
+      const firstBin = Math.max(0, Math.min(binCount - 1, Math.floor(startFraction * binCount)));
+      const lastBin = Math.max(firstBin, Math.min(binCount - 1, Math.floor(endFraction * binCount)));
+      const occupiedBins = lastBin - firstBin + 1;
+      const sourceId = fact.event.id;
+      const magnitude = minimapEventMagnitude({
+        durationDays: duration.toNumber(),
+        stapleCount: Math.max(0, context.engine.eventFrames(sourceId).length - 1),
+        importance: factImportance(context, fact)
+      }) / occupiedBins;
+      for (let bin = firstBin; bin <= lastBin; bin += 1) magnitudes[bin] += magnitude;
+    }
+  }
+  const dotGrid = minimapDotGrid(magnitudes, { rows: MINIMAP_GRID_ROWS });
   const svg = svgElement("svg", {
     viewBox: "0 0 1000 120",
     preserveAspectRatio: "none",
@@ -1577,7 +1595,48 @@ export function renderMinimap(target, context) {
   });
   svg.dataset.minimapStart = outerStart.toJSON();
   svg.dataset.minimapEnd = outerEnd.toJSON();
-  svg.append(svgElement("line", { x1: 20, y1: 60, x2: 980, y2: 60, class: "minimap-center-line" }));
+  const title = svgElement("title");
+  title.textContent = "Fixed-scale activity grid. Every event contributes a base magnitude plus duration and cross-frame staples, multiplied by importance.";
+  const gridTop = 20;
+  const gridHeight = 80;
+  const columnWidth = 960 / dotGrid.columns;
+  const rowHeight = gridHeight / dotGrid.rows;
+  const definitions = svgElement("defs");
+  const dotPattern = svgElement("pattern", {
+    id: "minimap-dot-pattern",
+    x: 20,
+    y: gridTop,
+    width: columnWidth,
+    height: rowHeight,
+    patternUnits: "userSpaceOnUse"
+  });
+  dotPattern.append(svgElement("circle", {
+    cx: columnWidth / 2,
+    cy: rowHeight / 2,
+    r: 1.15,
+    class: "minimap-grid-unlit"
+  }));
+  definitions.append(dotPattern);
+  svg.append(title, definitions, svgElement("rect", {
+    x: 20,
+    y: gridTop,
+    width: 960,
+    height: gridHeight,
+    fill: "url(#minimap-dot-pattern)",
+    class: "minimap-dot-field"
+  }));
+  for (let row = 0; row < dotGrid.rows; row += 1) {
+    for (let column = 0; column < dotGrid.columns; column += 1) {
+      if (!dotGrid.cells[row * dotGrid.columns + column]) continue;
+      svg.append(svgElement("circle", {
+        cx: 20 + (column + .5) * columnWidth,
+        cy: gridTop + (row + .5) * rowHeight,
+        r: row === dotGrid.center ? 1.35 : 1.8,
+        class: row === dotGrid.center ? "minimap-grid-baseline" : "minimap-grid-active",
+        "aria-hidden": "true"
+      }));
+    }
+  }
   for (let index = 0; index <= 7; index += 1) {
     const fraction = index / 7;
     const tickX = 20 + fraction * 960;
@@ -1594,64 +1653,9 @@ export function renderMinimap(target, context) {
     label.textContent = formatCivil(daysToCivilCoordinate(tickDay)).replace(/ 00:00:00$/, "");
     svg.append(label);
   }
-  const binCount = MINIMAP_BIN_COUNT;
-  const density = new Float32Array(binCount);
-  const exactMarks = [];
-  const rangeDays = outerEnd.sub(outerStart);
-  for (const fact of facts) {
-    const start = Rational.parse(fact.day);
-    const duration = Rational.parse(String(durationMinutes(fact.event))).div(1440);
-    const startFraction = start.sub(outerStart).div(rangeDays).toNumber();
-    const endFraction = start.add(duration).sub(outerStart).div(rangeDays).toNumber();
-    const firstBin = Math.max(0, Math.min(binCount - 1, Math.floor(startFraction * binCount)));
-    const lastBin = Math.max(firstBin, Math.min(binCount - 1, Math.floor(endFraction * binCount)));
-    // A span contributes across every occupied bin.  Point events get one
-    // exact mark as well as one unit of density, making aggregation legible
-    // without treating color as the only carrier of meaning.
-    for (let bin = firstBin; bin <= lastBin; bin += 1) density[bin] += 1;
-    exactMarks.push({
-      x: 20 + (Math.max(0, Math.min(1, startFraction)) * 960),
-      color: factColor(context, fact),
-      duration: duration.compare(0) > 0
-    });
-  }
-  // Spread only into adjacent bins.  It joins dense neighbouring activity
-  // into a continuous waveform, but preserves genuinely empty intervals.
-  const topology = new Float32Array(binCount);
-  const kernel = [0.18, 0.55, 1, 0.55, 0.18];
-  for (let bin = 0; bin < binCount; bin += 1) {
-    for (let offset = -2; offset <= 2; offset += 1) {
-      const source = bin + offset;
-      if (source >= 0 && source < binCount) topology[bin] += density[source] * kernel[offset + 2];
-    }
-  }
-  const peak = Math.max(1, ...topology);
-  const heights = Array.from(topology, (value) => value ? 2 + Math.sqrt(value / peak) * 35 : 0);
-  const points = heights.map((height, bin) => ({ x: 20 + (bin + .5) / binCount * 960, height }));
-  const upper = points.map(({ x, height }) => `${x.toFixed(2)} ${(60 - height).toFixed(2)}`).join(" L");
-  const lower = [...points].reverse().map(({ x, height }) => `${x.toFixed(2)} ${(60 + height).toFixed(2)}`).join(" L");
-  if (facts.length) {
-    const layer = svgElement("path", {
-      d: `M${upper} L${lower} Z`, class: "minimap-density-topology"
-    });
-    const title = svgElement("title");
-    title.textContent = "Aggregated event density. The horizontal axis is time; waveform height is the local count of events and occupied spans.";
-    layer.append(title);
-    svg.append(layer);
-  }
-  const markStride = Math.max(1, Math.ceil(exactMarks.length / MINIMAP_EXACT_MARK_LIMIT));
-  for (let index = 0; index < exactMarks.length; index += markStride) {
-    const mark = exactMarks[index];
-    svg.append(svgElement("circle", {
-      cx: mark.x, cy: 60, r: mark.duration ? 1.8 : 1.25, fill: mark.color,
-      class: "minimap-exact-mark", "aria-hidden": "true"
-    }));
-  }
-  if (indexedFactCount > MINIMAP_FACT_LIMIT || exactMarks.length > MINIMAP_EXACT_MARK_LIMIT) {
+  if (indexedFactCount) {
     const summary = svgElement("text", { x: 980, y: 117, "text-anchor": "end", class: "minimap-summary" });
-    summary.textContent = indexedFactCount > MINIMAP_FACT_LIMIT
-      ? `Topology evenly sampled across ${indexedFactCount} indexed events`
-      : `Showing every ${markStride}th exact event mark`;
+    summary.textContent = `${indexedFactCount} event${indexedFactCount === 1 ? "" : "s"} · fixed magnitude`;
     svg.append(summary);
   }
   const viewportStart = context.session.currentFocus().sub(span.div(2));
