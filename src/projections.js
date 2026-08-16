@@ -13,7 +13,7 @@ import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./rad
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
-import { SIGIL_VOCABULARY, sigilDescription, sigilForFact } from "./visual-language.js";
+import { SIGIL_VOCABULARY, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -107,11 +107,17 @@ function factVisibleInLens(context, fact) {
 function factColor(context, fact) {
   const pattern = context.document.patterns[fact.event.provenance?.pattern];
   const source = pattern?.templateEvent ? context.document.events[pattern.templateEvent] : fact.event;
-  if (source?.display?.color || fact.event.display?.color) return source?.display?.color || fact.event.display.color;
-  if (fact.event.traits?.includes("celestial")) return "#6d63b8";
-  const groupFrame = factGroupFrame(context, fact);
-  if (groupFrame) return context.document.frames[groupFrame]?.color || "#2e8b57";
-  return context.document.frames[fact.displayFrame || fact.relation?.frame]?.color || "#d4552d";
+  return resolveObjectColor({
+    document: context.document,
+    engine: context.engine,
+    object: fact.event,
+    sourceObject: source,
+    activeFrame: context.session.activeFrame,
+    displayFrame: fact.displayFrame,
+    relationFrame: fact.relation?.frame,
+    groupSizes: context.colorGroupSizes ||= new Map(),
+    fallback: fact.event.traits?.includes("celestial") ? "#6d63b8" : "#d4552d"
+  });
 }
 
 function factImportance(context, fact) {
