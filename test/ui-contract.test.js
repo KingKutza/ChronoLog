@@ -48,6 +48,17 @@ test("application shell exposes seven explicit lenses with contextual window con
   assert.match(app, /localStorage\.setItem/);
 });
 
+test("event creation and dragging use the defined exact duration converter", async () => {
+  const [app, model] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/model.js", "utf8")
+  ]);
+  assert.match(model, /export function durationMagnitudeDays/);
+  assert.match(app, /durationMagnitudeDays\(event\?\.magnitudes\?\.duration\)/);
+  assert.match(app, /durationMagnitudeDays\(chronolog\.events\[item\.dataset\.eventId\]/);
+  assert.doesNotMatch(app, /\bmagnitudeDays\(/);
+});
+
 test("lens workspace uses a registry, persisted order, and a visible configuration entry point", async () => {
   const [html, app, session] = await Promise.all([
     readFile("pocket-instrument.html", "utf8"),

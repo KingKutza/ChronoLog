@@ -22,6 +22,7 @@ import {
   clone,
   createId,
   durationMagnitude,
+  durationMagnitudeDays,
   eventRelations,
   stapleEvents,
   touch,
@@ -676,7 +677,7 @@ function parseDateText(text) {
 }
 
 function friendlyDuration(event) {
-  const seconds = magnitudeDays(event?.magnitudes?.duration).mul(86400).toNumber();
+  const seconds = durationMagnitudeDays(event?.magnitudes?.duration).mul(86400).toNumber();
   if (!Number.isFinite(seconds) || seconds <= 0) return { amount: "0", unit: "minute" };
   for (const [unit, factor] of [["day", 86400], ["hour", 3600], ["minute", 60]]) {
     const amount = seconds / factor;
@@ -2850,7 +2851,7 @@ projection.addEventListener("pointerdown", (event) => {
     startX: event.clientX,
     startY: event.clientY,
     title: item.textContent.trim() || item.getAttribute("aria-label") || "Event",
-    durationDays: magnitudeDays(chronolog.events[item.dataset.eventId]?.magnitudes?.duration).toNumber(),
+    durationDays: durationMagnitudeDays(chronolog.events[item.dataset.eventId]?.magnitudes?.duration).toNumber(),
     active: false
   };
 });
