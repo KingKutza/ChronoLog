@@ -1530,10 +1530,10 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     <div class="frame-type-banner"><strong>${escapeHTML(value.title)}</strong><span>${kind}</span></div>
     <label class="field"><span>Title</span><input name="title" value="${escapeHTML(value.title)}" required></label>
     <div class="form-row">
-      <label class="field"><span>Frame type</span><select name="kind">${options([
+      <label class="field"><span>Frame type / add capability</span><select name="kind">${options([
         ["calendar", "Calendar / timeline"], ["group", "Group"], ["importance", "Importance"], ["cycle", "Cycle"],
         ["line", "Line"], ["measure", "Measure"], ["other", "Other"]
-      ], kind)}</select></label>
+      ], kind)}</select><small>This adds a capability; it never removes the frame's existing traits.</small></label>
       <label class="field"><span>Color</span><input name="color" type="color" value="${escapeHTML(value.color || "#2e8b57")}"></label>
     </div>
     ${kind === "group" ? `<div class="form-row">
@@ -1551,7 +1551,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     <div class="field"><span>Visible in lenses</span><div class="check-row frame-lens-checks">
       ${frameLenses.map((lens) => `<label class="check-chip"><input type="checkbox" name="frameLenses" value="${lens}" ${visibleFrameLenses.has(lens) ? "checked" : ""}>${lens}</label>`).join("")}
     </div><small>Unchecked lenses hide events governed by this frame.</small></div>
-    <p class="field-note">Choose what appears together from Frames while viewing a calendar. This editor changes the frame itself.</p>
+    <p class="field-note">Choose what appears together from Frames while viewing a calendar. This editor changes the frame itself; group membership and cross-frame mappings are separate authored objects.</p>
     <label class="field"><span>Basis frame</span><select name="basis"><option value="">None</option>${Object.values(chronolog.frames)
       .filter((item) => item.id !== value.id).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === value.basis ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}</select></label>
     <details class="calendar-structure" ${fixedCalendar ? "open" : ""}>
@@ -1566,6 +1566,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
         <output class="calendar-period-preview">${fixedCalendar ? `One ${escapeHTML(fixedCalendar.units[0].name)} = ${escapeHTML(fixedCalendar.totalDays)} Earth days.` : "Turn this on to replace the coordinate JSON with a regular hierarchy."}</output>
       </div>
     </details>
+    <p class="field-note coordinate-definition-note">A coordinate definition names positions inside this frame. It does not establish a conversion to another frame; author those relationships as mappings.</p>
     <details class="advanced-fields"><summary>Advanced frame data</summary>
       <label class="field"><span>Cycle period data (JSON)</span><textarea name="period" class="code" placeholder="Leave blank to preserve existing period">${escapeHTML(value.period ? JSON.stringify(value.period, null, 2) : "")}</textarea></label>
       <label class="field"><span>Traits</span><input name="traits" value="${escapeHTML(value.traits.join(", "))}"></label>
@@ -1860,7 +1861,7 @@ const objectBrowserScope = { frame: "all", pattern: "current" };
 // document so filtering and folded sections never mutate frame data.
 const framesPanelState = {
   query: "",
-  sections: { leading: true, companions: true, groups: true }
+  sections: { leading: true, companions: true, groups: true, objects: true }
 };
 
 function patternRelevantToLens(pattern) {
@@ -1895,7 +1896,7 @@ function frameViewCard() {
   const viewCard = document.createElement("section");
   viewCard.className = "frame-view-card";
   const normalizedQuery = framesPanelState.query.trim().toLocaleLowerCase();
-  const matches = (frame) => !normalizedQuery || `${frame.title || frame.id} ${frameKind(frame)}`
+  const matches = (frame) => !normalizedQuery || `${frame.title || frame.id} ${frameKind(frame)} ${(frame.traits || []).join(" ")}`
     .toLocaleLowerCase().includes(normalizedQuery);
   const section = (id, label, content) => {
     const details = document.createElement("details");
@@ -1910,7 +1911,7 @@ function frameViewCard() {
   const filter = document.createElement("input");
   filter.id = "frame-view-filter";
   filter.type = "search";
-  filter.placeholder = "Filter companions and groups";
+  filter.placeholder = "Filter companion frames and groups";
   filter.value = framesPanelState.query;
   filter.setAttribute("aria-label", "Filter companion frames and groups");
   filter.addEventListener("input", () => {
@@ -1923,7 +1924,7 @@ function frameViewCard() {
   const leading = document.createElement("label");
   leading.className = "field";
   const leadingLabel = document.createElement("span");
-  leadingLabel.textContent = "Leading frame";
+  leadingLabel.textContent = "Leading frame — primary coordinates";
   const leadingSelect = document.createElement("select");
   leadingSelect.id = "frame-leading-select";
   for (const frame of calendarFrames(chronolog)) {
@@ -1936,14 +1937,18 @@ function frameViewCard() {
   leadingSelect.addEventListener("change", () => selectLeadingFrame(leadingSelect.value));
   leading.append(leadingLabel, leadingSelect);
   const heading = document.createElement("h3");
-  heading.textContent = `Shown with ${active?.title || "active calendar"}`;
+  heading.textContent = `Workspace for ${active?.title || "active calendar"}`;
+  heading.title = `Shown with ${active?.title || "active calendar"}`;
   const note = document.createElement("p");
   note.className = "field-note";
-  note.textContent = "Events on this calendar bring their groups automatically. Include another calendar or line, force a whole group into this view, or hide a group here.";
+  note.textContent = "The leading frame supplies the primary coordinates. Companions are projected with it; groups organise event membership and never become temporal coordinates.";
+  const leadingHint = document.createElement("p");
+  leadingHint.className = "field-note";
+  leadingHint.textContent = "Changing this selection updates the toolbar and every open projection immediately.";
   const leadingContent = document.createElement("div");
   leadingContent.className = "frame-view-section-content";
-  leadingContent.append(leading);
-  viewCard.append(section("leading", "Leading frame", leadingContent), toolbar, heading, note);
+  leadingContent.append(leading, leadingHint);
+  viewCard.append(toolbar, heading, note, section("leading", "Leading frame", leadingContent));
   const included = new Set(display.overlays || []);
   const related = Object.values(chronolog.frames).filter((frame) => frame.id !== activeFrameId
     && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline")));
@@ -1983,7 +1988,13 @@ function frameViewCard() {
     const content = document.createElement("div");
     content.className = "frame-view-section-content";
     content.append(choices);
-    viewCard.append(section("companions", `Include calendars and lines (${related.length})`, content));
+    const selectedCount = related.filter((frame) => included.has(frame.id)).length;
+    const companionNote = document.createElement("p");
+    companionNote.className = "field-note";
+    companionNote.textContent = "These are subordinate display companions only. Their coordinates are not converted or inferred.";
+    content.prepend(companionNote);
+    const companionLabel = `Include calendars and lines (${related.length})`;
+    viewCard.append(section("companions", `Companions projected with ${active?.title || "leading frame"} (${selectedCount}/${related.length}) — ${companionLabel}`, content));
   }
   const groups = groupFrames(chronolog);
   if (groups.length) {
@@ -2043,7 +2054,12 @@ function frameViewCard() {
     const content = document.createElement("div");
     content.className = "frame-view-section-content";
     content.append(groupList);
-    viewCard.append(section("groups", `Groups in this view (${groups.length})`, content));
+    const groupNote = document.createElement("p");
+    groupNote.className = "field-note";
+    groupNote.textContent = "Groups organise memberships. Visibility affects this workspace; strategic priority is a group-wide display choice.";
+    content.prepend(groupNote);
+    const groupLabel = `Groups in this view (${groups.length})`;
+    viewCard.append(section("groups", `Groups in this workspace (${groups.length}) — ${groupLabel}`, content));
   }
   return viewCard;
 }
@@ -2069,6 +2085,10 @@ function openObjectBrowser(kind) {
   wrapper.append(toolbar);
   if (kind === "frame") {
     wrapper.append(frameViewCard());
+    const objects = document.createElement("section");
+    objects.className = "frame-object-guide";
+    objects.innerHTML = "<h3>Frame definitions and organisational objects</h3><p class=\"field-note\">Edit a frame's coordinate definition and capabilities below. Groups are organisational objects; mappings and other advanced structures remain explicit rather than being inferred from group membership.</p>";
+    wrapper.append(objects);
     const createRow = document.createElement("div");
     createRow.className = "object-create-row";
     for (const [value, label] of [["calendar", "+ Calendar"], ["group", "+ Group"], ["importance", "+ Importance"], ["cycle", "+ Cycle"], ["line", "+ Line"]]) {
