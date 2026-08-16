@@ -36,7 +36,7 @@ test("fixed calendar editor writes an exact Skyland hierarchy and round-trips it
     units: [
       { name: "year" }, { name: "month", perParent: "8", labels: "Frost, Rain, Bloom, Sun, Heat, Harvest, Leaf, Snow" },
       { name: "week", perParent: "8" }, { name: "day", perParent: "8", labels: "First, Second, Third, Fourth, Fifth, Sixth, Seventh, Eighth" }
-    ], smallestUnitDays: "1", periodFrame: "measure:human-time", totalDays: "512"
+    ], smallestUnitDays: "1", epochDays: "0", periodFrame: "measure:human-time", totalDays: "512"
   });
 });
 

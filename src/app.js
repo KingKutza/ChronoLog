@@ -1554,6 +1554,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
         <div class="calendar-unit-heading"><span>Unit name</span><span>Count</span><span>Names within parent</span></div>
         ${fixedRows}
         <label class="field"><span>Smallest unit length in Earth days</span><input name="smallestUnitDays" value="${escapeHTML(fixedCalendar?.smallestUnitDays || "1")}" placeholder="1"></label>
+        <label class="field"><span>Epoch in Earth days</span><input name="fixedCalendarEpoch" value="${escapeHTML(fixedCalendar?.epochDays || "0")}" placeholder="0"></label>
         <output class="calendar-period-preview">${fixedCalendar ? `One ${escapeHTML(fixedCalendar.units[0].name)} = ${escapeHTML(fixedCalendar.totalDays)} Earth days.` : "Turn this on to replace the coordinate JSON with a regular hierarchy."}</output>
       </div>
     </details>
@@ -1578,6 +1579,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
         labels: index ? String(labels[index - 1] || "") : ""
       })),
       smallestUnitDays: String(data.get("smallestUnitDays") || ""),
+      epochDays: String(data.get("fixedCalendarEpoch") || "0"),
       periodFrame: (chronolog.frames[recordId] || value).period?.frame || "measure:human-time"
     };
   }
