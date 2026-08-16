@@ -19,11 +19,12 @@
   --ui: "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --data: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   /* Workspace chrome follows one outer inset and one inner relationship.
-     The half-gap keeps the wide 1:2 control/minimap split centered while the
-     full inner gap is used between every neighboring workspace surface. */
+     The adaptive edge gives controls enough room before the minimap-below
+     breakpoint; the full inner gap separates neighboring workspace surfaces. */
   --workspace-outer: 12px;
   --workspace-inner: 8px;
   --workspace-inner-half: 4px;
+  --workspace-control-edge: min(720px, 50%);
   --workspace-primary-row: 44px;
   --workspace-control-row: 42px;
   --workspace-stack-height: calc(
@@ -107,7 +108,7 @@ button {
   top: var(--workspace-outer);
   left: var(--workspace-outer);
   right: auto;
-  width: calc(33.333% - var(--workspace-outer) - var(--workspace-inner-half));
+  width: calc(var(--workspace-control-edge) - var(--workspace-outer) - var(--workspace-inner-half));
   height: var(--workspace-primary-row);
   min-height: var(--workspace-primary-row);
   display: flex;
@@ -138,6 +139,7 @@ button {
 
 .chronolog-wordmark { white-space: nowrap; }
 .chronolog-wordmark > span { color: var(--primary); }
+.responsive-label-short { display: none; }
 
 .instrument-button,
 .icon-button,
@@ -202,13 +204,20 @@ button {
 .status-chip[data-state="saving"] { color: var(--blue); }
 .status-chip[data-state="error"] { color: var(--now); }
 .status-chip[data-state="conflict"] { color: var(--now); }
+#save-status {
+  min-width: 20px;
+  max-width: 180px;
+  flex: 0 1 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 #lens-bar {
   position: absolute;
   z-index: 21;
   top: calc(var(--workspace-outer) + var(--workspace-primary-row) + var(--workspace-inner));
   left: var(--workspace-outer);
-  width: calc(33.333% - var(--workspace-outer) - var(--workspace-inner-half));
+  width: calc(var(--workspace-control-edge) - var(--workspace-outer) - var(--workspace-inner-half));
   height: var(--workspace-control-row);
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -242,7 +251,7 @@ button {
   );
   left: var(--workspace-outer);
   right: auto;
-  width: calc(33.333% - var(--workspace-outer) - var(--workspace-inner-half));
+  width: calc(var(--workspace-control-edge) - var(--workspace-outer) - var(--workspace-inner-half));
   height: var(--workspace-control-row);
   display: flex;
   align-items: center;
@@ -309,9 +318,9 @@ button {
 .document-menu-panel {
   position: fixed;
   z-index: 80;
-  top: 54px;
-  left: 12px;
-  width: min(310px, calc(100vw - 24px));
+  top: calc(var(--workspace-outer) + var(--workspace-primary-row) + var(--workspace-inner));
+  left: var(--workspace-outer);
+  width: min(310px, calc(100vw - var(--workspace-outer) - var(--workspace-outer)));
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
@@ -409,7 +418,7 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 #minimap {
   position: absolute;
   z-index: 17;
-  left: calc(33.333% + var(--workspace-inner-half));
+  left: calc(var(--workspace-control-edge) + var(--workspace-inner-half));
   right: var(--workspace-outer);
   top: var(--workspace-minimap-top);
   bottom: auto;
@@ -427,7 +436,7 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 #focus-readout {
   position: absolute;
   z-index: 19;
-  left: calc(33.333% + var(--workspace-inner-half) + var(--workspace-inner));
+  left: calc(var(--workspace-control-edge) + var(--workspace-inner-half) + var(--workspace-inner));
   top: calc(var(--workspace-minimap-top) + var(--workspace-minimap-height) - 22px);
   bottom: auto;
   padding: 4px 8px;
@@ -1231,6 +1240,21 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 .frame-lens-checks .check-chip { text-transform: capitalize; }
 #inspector-body { overflow-x: hidden; }
 
+@media (max-width: 1400px) {
+  .chronolog-wordmark { display: none; }
+  #brand { gap: 0; margin-right: 0; }
+  #save-status {
+    width: 20px;
+    min-width: 20px;
+    justify-content: center;
+    gap: 0;
+    overflow: hidden;
+    padding: 0;
+    font-size: 0;
+  }
+  #save-status::before { flex: none; }
+}
+
 @media (max-width: 1000px) {
   :root {
     --workspace-minimap-height: 86px;
@@ -1267,6 +1291,22 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
   }
   #inspector.open { transform: translateY(0); }
   .wall-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  #hud { gap: 5px; }
+  #new-event { width: 34px; padding: 0; }
+  #new-event .responsive-label-long,
+  #document-menu > summary .responsive-label-long,
+  #lens-bar .responsive-label-long { display: none; }
+  #new-event .responsive-label-short,
+  #document-menu > summary .responsive-label-short,
+  #lens-bar .responsive-label-short { display: inline; }
+  #new-event .responsive-label-short { font-size: 18px; }
+  #document-menu > summary { width: 32px; justify-content: center; padding: 0; }
+  #document-menu > summary::after { display: none; }
+  #document-menu > summary .responsive-label-short { font-size: 16px; }
+  #lens-bar button { overflow: hidden; letter-spacing: 0; text-overflow: ellipsis; }
 }
 
 @media print {

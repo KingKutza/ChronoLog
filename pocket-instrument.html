@@ -18,7 +18,7 @@
         <path class="chronolog-mark__staple" d="M12 16h8"></path>
         <circle class="chronolog-mark__join" cx="16" cy="16" r="2.1"></circle>
       </svg><span class="chronolog-wordmark">Chrono<span>Log</span></span></div>
-      <button class="instrument-button primary" id="new-event" type="button">New event</button>
+      <button class="instrument-button primary" id="new-event" type="button" aria-label="New event"><span class="responsive-label-long">New event</span><span class="responsive-label-short" aria-hidden="true">+</span></button>
       <button class="instrument-button optional" id="new-frame" type="button" aria-controls="inspector" aria-expanded="false">Frames</button>
       <select class="select-control" id="active-calendar" aria-label="Active calendar"></select>
       <div class="history-controls" aria-label="Edit history">
@@ -27,8 +27,9 @@
       </div>
       <span id="save-status" class="status-chip" data-state="clean" role="status" aria-live="polite" aria-label="Save status" title="Current save status">Saved</span>
       <details id="document-menu">
-        <summary title="Document actions" aria-label="Document actions">Document</summary>
+        <summary title="Document actions" aria-label="Document actions"><span class="responsive-label-long">Document</span><span class="responsive-label-short" aria-hidden="true">⋮</span></summary>
         <div class="document-menu-panel">
+          <button class="instrument-button" id="manage-frames" type="button" aria-controls="inspector" aria-expanded="false">Frames workspace</button>
           <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
           <button class="instrument-button" id="lens-settings" type="button">Configure lenses</button>
           <button class="instrument-button" id="new-pattern" type="button">Advanced patterns</button>
@@ -45,13 +46,13 @@
     </header>
 
     <nav id="lens-bar" aria-label="Time lens">
-      <button type="button" data-lens="intimate">Intimate</button>
-      <button type="button" data-lens="tactical">Tactical</button>
-      <button type="button" data-lens="strategic">Strategic</button>
-      <button type="button" data-lens="wall">Wall</button>
-      <button type="button" data-lens="lines">Lines</button>
-      <button type="button" data-lens="spiral">Spiral</button>
-      <button type="button" data-lens="radial">Radial</button>
+      <button type="button" data-lens="intimate" aria-label="Intimate"><span class="responsive-label-long">Intimate</span><span class="responsive-label-short" aria-hidden="true">Int</span></button>
+      <button type="button" data-lens="tactical" aria-label="Tactical"><span class="responsive-label-long">Tactical</span><span class="responsive-label-short" aria-hidden="true">Tac</span></button>
+      <button type="button" data-lens="strategic" aria-label="Strategic"><span class="responsive-label-long">Strategic</span><span class="responsive-label-short" aria-hidden="true">Strat</span></button>
+      <button type="button" data-lens="wall" aria-label="Wall"><span class="responsive-label-long">Wall</span><span class="responsive-label-short" aria-hidden="true">Wall</span></button>
+      <button type="button" data-lens="lines" aria-label="Lines"><span class="responsive-label-long">Lines</span><span class="responsive-label-short" aria-hidden="true">Lines</span></button>
+      <button type="button" data-lens="spiral" aria-label="Spiral"><span class="responsive-label-long">Spiral</span><span class="responsive-label-short" aria-hidden="true">Spir</span></button>
+      <button type="button" data-lens="radial" aria-label="Radial"><span class="responsive-label-long">Radial</span><span class="responsive-label-short" aria-hidden="true">Rad</span></button>
     </nav>
 
     <section id="lens-controls" aria-label="Lens window controls"></section>
