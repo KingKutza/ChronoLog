@@ -11,6 +11,7 @@ import {
 } from "./exact.js";
 import { radialGuideSettings, radialRenderState } from "./radial.js";
 import { lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
+import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -174,6 +175,28 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
     facts,
     errors: results.flatMap(({ result }) => result.errors || []),
     truncated: facts.length >= limit || results.some(({ result }) => result.truncated)
+  };
+}
+
+function queryStrategicFacts(context, frame, start, end) {
+  const ordinary = queryFacts(context, frame, new Rational(start), new Rational(end), 800);
+  if (!ordinary.truncated) return { ...ordinary, density: null };
+  const density = aggregateStrategicDays({
+    start,
+    end,
+    perDayLimit: STRATEGIC_DAY_FACT_LIMIT,
+    queryDay(dayStart, dayEnd, limit) {
+      return queryFacts(context, frame, new Rational(dayStart), new Rational(dayEnd), limit);
+    }
+  });
+  return {
+    ...ordinary,
+    // This is no longer an error condition: every date has a bounded,
+    // deterministic sample and advertises any lower-bound count in its cell.
+    facts: density.days.flatMap((entry) => entry.facts),
+    errors: density.errors,
+    truncated: false,
+    density
   };
 }
 
@@ -566,8 +589,23 @@ function renderStrategic(target, context) {
   const lastMonth = addMonths(firstMonth.year, firstMonth.month, monthCount);
   const start = daysFromCivil(firstMonth.year, firstMonth.month, 1n);
   const end = daysFromCivil(lastMonth.year, lastMonth.month, 1n);
-  const result = queryFacts(context, context.session.activeFrame, new Rational(start), new Rational(end), 800);
-  const byDay = factsByDay(result.facts, start, end);
+  const result = queryStrategicFacts(context, context.session.activeFrame, start, end);
+  const byDay = result.density
+    ? new Map(result.density.days.map((entry) => [
+      entry.day,
+      factsByDay(entry.facts, BigInt(entry.day), BigInt(entry.day) + 1n).get(entry.day) || []
+    ]))
+    : factsByDay(result.facts, start, end);
+  const densityByDay = new Map((result.density?.days || []).map((entry) => [entry.day, entry]));
+  if (result.density) {
+    const notice = element(
+      "div",
+      "strategic-density-notice",
+      `Dense view · each day shows up to ${result.density.perDayLimit} events; ${result.density.perDayLimit}+ marks a lower bound.`
+    );
+    notice.dataset.density = "aggregated";
+    target.append(notice);
+  }
   const path = element("div", "strategic-path");
   path.dataset.scrollKey = "strategic";
   path.style.setProperty("--strategic-months", String(monthCount));
@@ -614,6 +652,12 @@ function renderStrategic(target, context) {
           pips.append(pip);
         }
         cell.append(pips);
+      }
+      const density = densityByDay.get(ordinal.toString());
+      if (density?.truncated) {
+        const overflow = element("div", "strategic-density-count", `${density.shown}+`);
+        overflow.title = `At least ${density.minimum} events on this day; the Strategic view shows its first ${density.shown} stable events.`;
+        cell.append(overflow);
       }
       row.append(cell);
     }
