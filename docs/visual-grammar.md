@@ -51,3 +51,21 @@ rewriting imported calendars while preserving the user's instrument treatment.
 
 Every sigil has a text title/ARIA label, and the visible mark is paired with
 shape, border, or label so a theme or grayscale display does not erase meaning.
+
+## Object color inheritance
+
+Events, tasks, todos, notes, and generated occurrences use the same color
+cascade in every lens:
+
+1. An explicit color on the object overrides all inherited color.
+2. A group color overrides temporal-frame color. When an object belongs to
+   several groups, a group explicitly shown by the active frame wins; otherwise
+   the group with the most event members wins. Authored membership order is the
+   stable tie-breaker.
+3. The active temporal frame wins when the object belongs to several frames,
+   followed by the frame supplying the rendered fact, then its other authored
+   frame attachments.
+4. A semantic fallback is used only when none of those sources has a color.
+
+This precedence is implemented once in `src/visual-language.js`; renderers do
+not choose colors independently.

@@ -519,7 +519,7 @@ test("interaction refinements expose continuous intimate scroll, tactical shift 
   assert.match(app, /session\.move\(event\.shiftKey \? steps : steps \* session\.tacticalColumns\)/);
   assert.match(app, /event\.key === "Delete" && session\.inspector\?\.type === "event"/);
   assert.match(app, /\["importance", "\+ Importance"\]/);
-  assert.match(app, /Override group color/);
+  assert.match(app, /Override inherited color/);
   assert.match(projections, /other\.start < item\.end && other\.end > item\.start/);
   assert.match(projections, /frame\.display\?\.radialMinDays/);
   assert.match(engine, /eventFrames\(eventId\)/);

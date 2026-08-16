@@ -1185,7 +1185,7 @@ function openEventInspector(eventId) {
       </select></label>
     </div>
     <div class="form-row event-color-row">
-      <label class="check-chip"><input type="checkbox" name="useColor" ${event.display?.color ? "checked" : ""}>Override group color</label>
+      <label class="check-chip"><input type="checkbox" name="useColor" ${event.display?.color ? "checked" : ""}>Override inherited color</label>
       <label class="field"><span>Event color</span><input name="eventColor" type="color" value="${escapeHTML(event.display?.color || "#d4552d")}"></label>
     </div>
     <div class="field"><span>Groups</span>
