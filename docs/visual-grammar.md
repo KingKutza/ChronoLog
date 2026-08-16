@@ -70,3 +70,15 @@ cascade in every lens:
 
 This precedence is implemented once in `src/visual-language.js`; renderers do
 not choose colors independently.
+
+## Minimap magnitude
+
+The minimap uses a fixed-scale dot field rather than a window-normalized
+waveform. Every column has a faint background grid and an always-lit center
+dot. Event activity grows above and below that center first, then spills into
+neighboring columns only when the local column fills.
+
+An event's magnitude is `(1 + cross-frame staples + duration in days) ×
+importance`, where standard, important, and landmark multipliers are stable.
+Two dots represent one magnitude unit. Moving the minimap window therefore
+does not rescale the same activity merely because a denser event enters view.
