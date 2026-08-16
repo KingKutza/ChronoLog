@@ -283,7 +283,10 @@ function renderIntimate(target, context) {
   const lastDay = firstDay + BigInt(dayCount - 1);
   const hourPixels = context.session.intimateHourPixels;
   const visibleHours = Math.max(1, (target.clientHeight - 70) / hourPixels);
-  const bufferDays = BigInt(Math.max(1, Math.ceil(visibleHours / 48)));
+  // Leave several complete days on either side of the viewport.  Rebuilding a
+  // virtual rail is still necessary eventually, but keeping that seam well
+  // away from the next midnight makes ordinary day-to-day scrolling continuous.
+  const bufferDays = BigInt(Math.max(3, Math.ceil(visibleHours / 24) + 1));
   const queryStart = firstDay - bufferDays;
   const queryEnd = lastDay + bufferDays + 1n;
   const result = queryFacts(
@@ -334,7 +337,7 @@ function renderIntimate(target, context) {
   }
   for (let boundary = 1; boundary < railDays; boundary += 1) {
     const line = element("div", "intimate-midnight-line");
-    line.style.top = `${boundary * hourPixels}px`;
+    line.style.top = `${boundary * 24 * hourPixels}px`;
     gutter.append(line);
   }
   body.append(gutter);

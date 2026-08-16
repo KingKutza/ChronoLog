@@ -2225,6 +2225,22 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 projection.addEventListener("wheel", panFromWheel, { passive: false });
+
+// Keep the browser's scroll position continuous when the finite Intimate rail
+// is recentered.  This has to happen in the same scroll task: deferring the
+// replacement to another animation frame lets the user see the rail pause at
+// its seam (usually near a midnight marker).
+function rebaseIntimateScroll(scroll, direction) {
+  const hourPixels = Number(scroll.dataset.hourPixels || 56);
+  const dayPixels = hourPixels * 24;
+  pendingIntimateRebase = {
+    top: Math.max(0, scroll.scrollTop - direction * dayPixels),
+    left: scroll.scrollLeft
+  };
+  session.move(direction);
+  render();
+}
+
 projection.addEventListener("scroll", (event) => {
   const scroll = event.target;
   if (!(scroll instanceof HTMLElement)
@@ -2235,13 +2251,9 @@ projection.addEventListener("scroll", (event) => {
   const hourPixels = Number(scroll.dataset.hourPixels || 56);
   const edge = hourPixels * 6;
   if (scroll.scrollTop < edge) {
-    pendingIntimateRebase = { top: scroll.scrollTop + hourPixels * 24, left: scroll.scrollLeft };
-    session.move(-1);
-    scheduleRender();
+    rebaseIntimateScroll(scroll, -1);
   } else if (scroll.scrollTop + scroll.clientHeight > scroll.scrollHeight - edge) {
-    pendingIntimateRebase = { top: scroll.scrollTop - hourPixels * 24, left: scroll.scrollLeft };
-    session.move(1);
-    scheduleRender();
+    rebaseIntimateScroll(scroll, 1);
   }
 }, true);
 
