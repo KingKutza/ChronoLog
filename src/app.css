@@ -894,6 +894,29 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
   grid-template-rows: repeat(var(--strategic-months, 9), minmax(68px, 1fr));
   padding: 8px;
 }
+.strategic-density-notice {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin: 0 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--strong);
+  background: color-mix(in srgb, var(--paper) 94%, var(--now));
+  color: var(--muted);
+  font: 700 9px/1.25 var(--data);
+}
+.strategic-density-count {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  min-width: 16px;
+  padding: 1px 2px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 800 8px/1 var(--data);
+  text-align: center;
+}
 .strategic-row {
   min-width: 1040px;
   min-height: 68px;

@@ -430,6 +430,21 @@ test("radial uses whole-cycle scrolling, populated calendar-group bands, collisi
   assert.match(projections, /Dense window · showing the first 350 events/);
 });
 
+test("Strategic turns dense windows into stable day topology instead of a moving truncation warning", async () => {
+  const [projections, css] = await Promise.all([
+    readFile("src/projections.js", "utf8"),
+    readFile("src/app.css", "utf8")
+  ]);
+  const strategic = sourceSlice(projections, "function queryStrategicFacts", "function factsByDay");
+  assert.match(strategic, /aggregateStrategicDays/);
+  assert.match(strategic, /truncated: false/);
+  const render = sourceSlice(projections, "function renderStrategic", "function renderCalendar");
+  assert.match(render, /strategic-density-notice/);
+  assert.match(render, /strategic-density-count/);
+  assert.match(render, /densityByDay/);
+  assert.match(cssBlock(css, ".strategic-density-notice"), /position: sticky/);
+});
+
 test("Radial guide controls expose Auto, document the tick cap, and keep major marks independent until invalid", async () => {
   const [app, css] = await Promise.all([
     readFile("src/app.js", "utf8"),
