@@ -274,6 +274,15 @@ function updateChrome() {
   });
 }
 
+function closeDocumentMenu() {
+  byId("document-menu").open = false;
+}
+
+function confirmDocumentReplacement() {
+  if (store.revision === store.savedRevision) return true;
+  return globalThis.confirm("Open a different document? Unsaved changes in the current document are already recoverable through its autosave target, but this session will switch documents.");
+}
+
 function shiftFocusMonths(offset) {
   const focus = session.currentFocus();
   const civil = civilFromDays(focus.floor());
@@ -2318,7 +2327,7 @@ byId("new-frame").addEventListener("click", () => {
 });
 byId("new-pattern").addEventListener("click", () => openObjectBrowser("pattern"));
 byId("theme-settings").addEventListener("click", () => {
-  byId("app-menu").open = false;
+  closeDocumentMenu();
   openThemeEditor();
 });
 
@@ -2766,6 +2775,8 @@ minimap.addEventListener("pointercancel", () => {
 });
 
 byId("open-document").addEventListener("click", async () => {
+  if (!confirmDocumentReplacement()) return;
+  closeDocumentMenu();
   if (!globalThis.showOpenFilePicker) {
     byId("document-file").click();
     return;
@@ -2792,6 +2803,7 @@ byId("document-file").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
+    if (!confirmDocumentReplacement()) return;
     replaceDocument(parseDocument(await file.text()), LOCAL_WORKSPACE_TARGET);
     toast(`Opened ${file.name} · autosave attached to the local workspace`);
   } catch (error) {
@@ -2802,6 +2814,7 @@ byId("document-file").addEventListener("change", async (event) => {
 });
 
 byId("save-document").addEventListener("click", async () => {
+  closeDocumentMenu();
   try {
     if (!store.handle && !store.remoteUrl && LOCAL_WORKSPACE_TARGET.remoteUrl) {
       store.attach(chronolog, LOCAL_WORKSPACE_TARGET);
@@ -2816,6 +2829,7 @@ byId("save-document").addEventListener("click", async () => {
 });
 
 byId("save-as-document").addEventListener("click", async () => {
+  closeDocumentMenu();
   try {
     if (globalThis.showSaveFilePicker) await store.chooseFile();
     else store.download("chronolog.chronolog");
@@ -2881,7 +2895,10 @@ function importCalendar(text, label) {
   return result;
 }
 
-byId("import-ics").addEventListener("click", () => byId("ics-file").click());
+byId("import-ics").addEventListener("click", () => {
+  closeDocumentMenu();
+  byId("ics-file").click();
+});
 byId("ics-file").addEventListener("change", async (event) => {
   for (const file of event.target.files || []) {
     try {
@@ -2903,6 +2920,7 @@ byId("ics-file").addEventListener("change", async (event) => {
 });
 
 byId("export-ics").addEventListener("click", () => {
+  closeDocumentMenu();
   try {
     const window = session.window();
     const text = exportICS(chronolog, {

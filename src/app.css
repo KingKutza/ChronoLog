@@ -241,21 +241,24 @@ button {
 .chronolog-mark { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 .chronolog-mark circle:last-child { fill: currentColor; stroke: none; }
 
-#app-menu { flex: none; margin-left: auto; position: relative; }
-#app-menu > summary {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
+#document-menu { flex: none; margin-left: auto; position: relative; }
+#document-menu > summary {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid var(--strong);
   border-radius: 7px;
   cursor: pointer;
   list-style: none;
-  font: 900 15px/1 var(--data);
+  background: var(--surface);
+  font: 700 10px/1 var(--data);
 }
-#app-menu > summary::-webkit-details-marker { display: none; }
-#app-menu > summary:hover,
-#app-menu[open] > summary { background: var(--ink); color: var(--paper); }
-.app-menu-panel {
+#document-menu > summary::-webkit-details-marker { display: none; }
+#document-menu > summary::after { content: "▾"; margin-left: 5px; }
+#document-menu > summary:hover,
+#document-menu[open] > summary { border-color: var(--ink); background: var(--paper); }
+.document-menu-panel {
   position: fixed;
   z-index: 80;
   top: 54px;
@@ -270,9 +273,10 @@ button {
   background: var(--paper);
   box-shadow: var(--shadow);
 }
-.app-menu-panel > * { width: 100%; }
-.app-menu-panel .status-chip { grid-column: 1 / -1; }
-.menu-pair { display: flex; gap: 6px; }
+.document-menu-panel > * { width: 100%; }
+.document-menu-panel .status-chip { grid-column: 1 / -1; }
+.history-controls { display: inline-flex; flex: none; gap: 4px; }
+.history-controls .icon-button { width: 30px; height: 30px; font-size: 15px; }
 
 button.lens-control { cursor: pointer; color: var(--ink); }
 button.lens-control:hover { border-color: var(--ink); background: var(--paper); }

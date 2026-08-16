@@ -17,14 +17,17 @@
       <button class="instrument-button primary" id="new-event" type="button">New event</button>
       <button class="instrument-button optional" id="new-frame" type="button" aria-controls="inspector" aria-expanded="false">Frames</button>
       <select class="select-control" id="active-calendar" aria-label="Active calendar"></select>
+      <div class="history-controls" aria-label="Edit history">
+        <button class="icon-button" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
+        <button class="icon-button" id="redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo (Ctrl+Shift+Z)">↷</button>
+      </div>
       <span id="save-status" class="status-chip" data-state="clean" role="status" aria-live="polite" aria-label="Save status" title="Current save status">Saved</span>
-      <details id="app-menu">
-        <summary title="Application controls">☰</summary>
-        <div class="app-menu-panel">
+      <details id="document-menu">
+        <summary title="Document actions" aria-label="Document actions">Document</summary>
+        <div class="document-menu-panel">
           <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
           <button class="instrument-button" id="new-pattern" type="button">Advanced patterns</button>
           <label class="status-chip" title="Keep one focus coordinate between projections"><input id="shared-focus" type="checkbox" checked>shared date</label>
-          <div class="menu-pair"><button class="icon-button" id="undo" type="button" title="Undo">↶</button><button class="icon-button" id="redo" type="button" title="Redo">↷</button></div>
           <button class="instrument-button" id="open-document" type="button">Open document</button>
           <button class="instrument-button" id="save-document" type="button">Save now</button>
           <button class="instrument-button" id="save-as-document" type="button">Save as</button>
