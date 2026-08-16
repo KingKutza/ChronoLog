@@ -498,7 +498,14 @@ test("continuous-time chrome and recurrence exceptions retain their governing co
   assert.match(app, /Restore recurring occurrence/);
   assert.match(app, /animateRadialWheel/);
   assert.match(app, /name="frameLenses"/);
-  assert.match(projections, /minimap-density-layer/);
+  assert.match(projections, /MINIMAP_FACT_LIMIT = 1200/);
+  assert.match(projections, /MINIMAP_EXACT_MARK_LIMIT = 280/);
+  assert.match(projections, /minimap-density-topology/);
+  assert.match(projections, /minimap-exact-mark/);
+  assert.match(projections, /Topology sampled from first/);
+  assert.match(projections, /const kernel = \[0\.18, 0\.55, 1, 0\.55, 0\.18\]/);
+  assert.match(css, /\.minimap-density-topology/);
+  assert.match(css, /\.minimap-exact-mark/);
   assert.match(projections, /minimap-now-line/);
   assert.match(projections, /radial-now-line/);
   assert.match(css, /left: calc\(33\.333% \+ 6px\)/);
