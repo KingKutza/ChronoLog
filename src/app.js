@@ -1960,7 +1960,10 @@ function openObjectBrowser(kind) {
   openInspector(kind === "frame" ? "Frames" : "Patterns", wrapper, isFramesBrowser ? "frames-browser" : "object-browser");
   if (isFramesBrowser) {
     byId("new-frame").setAttribute("aria-expanded", "true");
-    search.focus();
+    // Opening Frames is intentionally passive for the workspace.  Focusing
+    // the filter remains useful for keyboard users, but must not ask the
+    // browser to scroll the projection or its focused timeline into view.
+    search.focus({ preventScroll: true });
   }
 }
 

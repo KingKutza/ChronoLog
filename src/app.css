@@ -386,6 +386,11 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   border-left: 1px solid var(--strong);
   background: var(--paper);
   box-shadow: -16px 0 44px rgba(43, 35, 25, .18);
+  /* The drawer is an overlay, never a participant in the workspace layout.
+     Keeping its layout and paint contained prevents its long Frames list (and
+     its own scrollbar) from perturbing the projection behind it. */
+  contain: layout paint;
+  will-change: transform;
   transform: translateX(102%);
   transition: transform 160ms ease;
 }
