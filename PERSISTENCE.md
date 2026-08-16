@@ -6,6 +6,19 @@ source components, and their provenance. View focus, lens settings, and theme
 are browser-local preferences: they are never silently placed in a document or
 synchronized with it.
 
+The schema name versions the portable data model. Each acknowledged store write
+also has an opaque resource revision, which versions the complete document at
+that location without pretending to be a domain timestamp. Undo/redo snapshots
+are bounded, in-memory editing aids; they are neither durable document data nor
+part of synchronization. The ownership boundary is therefore:
+
+| Data | Canonical owner | Portable | Synchronized |
+| --- | --- | --- | --- |
+| Frames, events, mappings, patterns, overrides, and source provenance | `chronolog/1` document | Yes | As one revision-guarded document |
+| Focus, lens layout/settings, and theme | This browser profile | No | No |
+| Undo/redo history and open inspector state | This running tab | No | No |
+| Provider credentials and refresh tokens | Provider adapter/OS credential boundary | No | Never inside a document |
+
 ## Local ownership and recovery
 
 The supported local launcher (#18) owns one workspace file in the user data
@@ -44,6 +57,56 @@ The status indicator has these exact meanings:
   dirty and export is available.
 - **Conflict** — another writer changed the workspace; this window's edits are
   preserved locally and require download/reload resolution.
+
+A network adapter may add these states without changing the local meanings:
+
+- **Offline · local changes safe** — the canonical local document accepted the
+  edit, but the provider is unreachable. A retry is pending and "Synced" must
+  not be shown.
+- **Syncing** — a provider exchange is in flight from a known local revision.
+- **Synced** — the provider acknowledged that exact local revision and no newer
+  local edit exists. It never means merely "Autosaved".
+- **Sync failed · local changes safe** — the provider rejected or could not
+  complete an exchange. The last provider cursor and the local document remain
+  intact for an idempotent retry.
+
+Offline editing always targets the canonical local document first. A provider
+cursor advances only after its entire response has been parsed, validated, and
+committed locally. Closing the application before local autosave completes can
+still lose the in-memory edit; the pending/failed status and before-unload guard
+are the visible warning. Reconnecting retries from the last acknowledged
+provider cursor. It does not infer success, discard a local edit, or advance a
+cursor after a partial response.
+
+## Provider-neutral boundary
+
+Domain code exchanges complete validated documents with a document transport
+and imported calendar records with a calendar adapter. The minimum contracts
+are deliberately small:
+
+```text
+DocumentTransport.read() -> { documentText, revision }
+DocumentTransport.create(documentText) -> { revision }       // create-only
+DocumentTransport.write(documentText, expectedRevision) -> { revision }
+
+CalendarAdapter.pull(cursor?) -> { sources, nextCursor }
+CalendarAdapter.push(changes, expectedRevision?) -> { acknowledgements, nextCursor }
+```
+
+Transport revisions and calendar cursors are opaque. An adapter maps its wire
+format into `foreign.<provider>` source records and normal ChronoLog events; it
+does not leak provider objects into frames, mappings, projections, or history.
+Pull is committed as one undoable document change. Push is limited to records
+that explicitly retain writable provider provenance; imported source records
+remain read-only unless the user promotes or links them. Adapters must be safe
+to retry and must surface authentication, throttling, validation, and revision
+conflicts distinctly.
+
+Interrupted pulls retain the previous cursor and source snapshot. Interrupted
+pushes reconcile the provider's stable identifiers before retrying so that a
+timeout cannot create duplicates. A provider conflict keeps the local authored
+record and the new remote record as distinct versions until the user chooses a
+resolution; silent last-write-wins is forbidden.
 
 ## Imports, export, migration, privacy
 
