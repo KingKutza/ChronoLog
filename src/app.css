@@ -1014,7 +1014,7 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
 .month-heading strong { font-size: 12px; }
 .month-heading span { color: var(--faint); font: 9px/1 var(--data); }
 .month-weekdays,
-.month-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.month-days { display: grid; grid-template-columns: repeat(var(--calendar-columns, 7), minmax(0, 1fr)); }
 .month-weekdays span {
   display: grid;
   place-items: center;
@@ -1022,7 +1022,7 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
   font: 8px/1 var(--data);
 }
 
-.month-days { grid-template-rows: repeat(6, minmax(0, 1fr)); min-height: 0; }
+.month-days { grid-template-rows: repeat(var(--calendar-rows, 6), minmax(0, 1fr)); min-height: 0; }
 .month-day,
 .month-pad {
   position: relative;

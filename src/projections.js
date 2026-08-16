@@ -12,6 +12,7 @@ import {
 import { radialGuideSettings, radialRenderState } from "./radial.js";
 import { lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
+import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -277,7 +278,8 @@ function eventChip(context, fact, compact = false) {
   bindFact(chip, fact);
   chip.style.setProperty("--event-color", factColor(context, fact));
   chip.textContent = fact.event.payload?.title || "(untitled)";
-  chip.title = `${chip.textContent} · ${formatCivil(fact.coordinate, true)}`;
+  const frame = context.document.frames[fact.displayFrame || fact.relation?.frame || context.session.activeFrame];
+  chip.title = `${chip.textContent} · ${fixedDayLabel(frame, fact.day) || formatCivil(fact.coordinate, true)}`;
   return chip;
 }
 
@@ -306,6 +308,7 @@ function renderErrors(target, result) {
 }
 
 function renderIntimate(target, context) {
+  const calendar = context.document.frames[context.session.activeFrame];
   const focus = context.session.currentFocus();
   const firstDay = focus.floor() - BigInt(context.session.intimateBack);
   const dayCount = context.session.intimateBack + context.session.intimateForward + 1;
@@ -333,13 +336,15 @@ function renderIntimate(target, context) {
   const now = new Date();
   const today = daysFromCivil(BigInt(now.getFullYear()), BigInt(now.getMonth() + 1), BigInt(now.getDate()));
   for (let day = firstDay; day <= lastDay; day += 1n) {
-    const civil = civilFromDays(day);
-    const weekday = Number(floorMod(day + 4n, 7n));
     const dayHeader = element("div", `intimate-dayhead${day === today ? " today" : ""}`);
     dayHeader.dataset.createDay = day.toString();
     const allDay = (byDay.get(day.toString()) || []).filter((fact) => fact.relation.parameters?.dateOnly
       || (context.session.intimateZoneFill && durationMinutes(fact.event) >= 1440));
-    dayHeader.append(element("strong", "", `${WEEKDAYS[weekday]} ${civil.month}/${civil.day}`));
+    dayHeader.append(element("strong", "", fixedDayLabel(calendar, day) || (() => {
+      const civil = civilFromDays(day);
+      const weekday = Number(floorMod(day + 4n, 7n));
+      return `${WEEKDAYS[weekday]} ${civil.month}/${civil.day}`;
+    })()));
     const allDayLane = element("div", "intimate-all-day-lane");
     const zoneFact = applyZoneDay(context, dayHeader, allDay, allDayLane);
     for (const fact of allDay.filter((item) => item !== zoneFact).slice(0, 2)) allDayLane.append(eventChip(context, fact, true));
@@ -452,9 +457,9 @@ function renderIntimate(target, context) {
       const marker = element("div", "intimate-midnight-marker");
       marker.style.top = `${boundary * 24 * hourPixels}px`;
       marker.append(
-        element("span", "midnight-before", `${previousCivil.month}/${previousCivil.day}`),
+        element("span", "midnight-before", fixedDayLabel(calendar, boundaryDay - 1n, true) || `${previousCivil.month}/${previousCivil.day}`),
         element("strong", "", "MIDNIGHT"),
-        element("span", "midnight-after", `${nextCivil.month}/${nextCivil.day}`)
+        element("span", "midnight-after", fixedDayLabel(calendar, boundaryDay, true) || `${nextCivil.month}/${nextCivil.day}`)
       );
       column.append(marker);
     }
@@ -493,6 +498,7 @@ function strategicPresentation(context, fact) {
 }
 
 function renderTactical(target, context) {
+  const calendar = context.document.frames[context.session.activeFrame];
   const focusDay = context.session.currentFocus().floor();
   const total = context.session.tacticalRows * context.session.tacticalColumns;
   const start = focusDay - BigInt(Math.floor(total / 2));
@@ -505,13 +511,14 @@ function renderTactical(target, context) {
     const day = start + offset;
     const civil = civilFromDays(day);
     const weekday = Number(floorMod(day + 4n, 7n));
+    const fixed = fixedCalendarParts(calendar, day);
     const cell = element("section", `tactical-day${weekday === 0 || weekday === 6 ? " weekend" : ""}`);
     cell.dataset.createDay = day.toString();
     const header = element("header", "day-heading");
     header.append(
-      element("span", "weekday", WEEKDAYS[weekday]),
-      element("strong", "", `${civil.month}/${civil.day}`),
-      element("small", "", civil.year.toString())
+      element("span", "weekday", fixed?.parts.at(-1)?.label || fixed?.parts.at(-1)?.name || WEEKDAYS[weekday]),
+      element("strong", "", fixedDayLabel(calendar, day, true) || `${civil.month}/${civil.day}`),
+      element("small", "", fixed ? fixed.parts[0].value.toString() : civil.year.toString())
     );
     cell.append(header);
     const dayFacts = byDay.get(day.toString()) || [];
@@ -582,7 +589,82 @@ function monthCard(context, year, month, facts, detailed = false) {
   return card;
 }
 
+function fixedMonthCard(context, frame, start, span, facts, detailed = false) {
+  const definition = fixedCalendarDefinition(frame);
+  const first = fixedCalendarParts(frame, start);
+  if (!definition || !first) return null;
+  const card = element("section", detailed ? "wall-month fixed-month" : "strategic-month fixed-month");
+  const monthPart = first.parts[1];
+  const dayUnit = definition.units.at(-1);
+  const columns = Number(definition.radices.at(-1));
+  card.style.setProperty("--calendar-columns", String(columns));
+  card.style.setProperty("--calendar-rows", String(Math.ceil(Number(span) / columns)));
+  const heading = element("header", "month-heading");
+  heading.append(
+    element("strong", "", monthPart.label || `${monthPart.name} ${monthPart.value}`),
+    element("span", "", `${first.parts[0].name} ${first.parts[0].value}`)
+  );
+  card.append(heading);
+  const headers = element("div", "month-weekdays");
+  headers.style.setProperty("--calendar-columns", String(columns));
+  for (let index = 0; index < columns; index += 1) {
+    headers.append(element("span", "", dayUnit.labels?.[index] || `${dayUnit.name} ${index + 1}`));
+  }
+  card.append(headers);
+  const grid = element("div", "month-days");
+  grid.style.setProperty("--calendar-columns", String(columns));
+  grid.style.setProperty("--calendar-rows", String(Math.ceil(Number(span) / columns)));
+  const today = daysFromCivil(BigInt(new Date().getFullYear()), BigInt(new Date().getMonth() + 1), BigInt(new Date().getDate()));
+  for (let offset = 0n; offset < span; offset += 1n) {
+    const ordinal = start + offset;
+    const parts = fixedCalendarParts(frame, ordinal)?.parts || [];
+    const cell = element("div", "month-day");
+    if (context.session.wallRecordSlashes && ordinal < today) cell.classList.add("record-slash");
+    cell.dataset.createDay = ordinal.toString();
+    const dayLabel = element("b", "month-number", parts.at(-1)?.label || parts.at(-1)?.value?.toString() || String(offset + 1n));
+    cell.append(dayLabel);
+    const entries = (facts.get(ordinal.toString()) || []).filter((item) => !(item.continuation && durationMinutes(item.event) < 1440));
+    const zoneFact = applyZoneDay(context, cell, entries, dayLabel);
+    if (detailed) {
+      for (const fact of entries.filter((item) => item !== zoneFact).slice(0, 4)) cell.append(eventChip(context, fact, true));
+    } else {
+      const pips = element("div", "event-pips");
+      for (const fact of entries.slice(0, 8)) {
+        const pip = element("button", "event-pip");
+        pip.type = "button";
+        bindFact(pip, fact);
+        pip.style.background = factColor(context, fact);
+        pip.title = fact.event.payload?.title || "(untitled)";
+        pips.append(pip);
+      }
+      cell.append(pips);
+    }
+    grid.append(cell);
+  }
+  card.append(grid);
+  return card;
+}
+
+function renderFixedCalendarMonths(target, context, detailed) {
+  const frame = context.document.frames[context.session.activeFrame];
+  const count = detailed ? context.session.wallMonths : context.session.strategicMonths;
+  const months = fixedMonthWindow(frame, context.session.currentFocus(), count);
+  if (!months) return false;
+  const start = months[0].start;
+  const after = months.at(-1).start + months.at(-1).span;
+  const result = queryFacts(context, context.session.activeFrame, new Rational(start), new Rational(after), 800);
+  const byDay = factsByDay(result.facts, start, after);
+  const container = element("div", detailed ? "wall-grid fixed-calendar-grid" : "wall-grid fixed-calendar-grid strategic-fixed-grid");
+  container.dataset.scrollKey = detailed ? "wall" : "strategic";
+  container.style.setProperty("--wall-columns", String(Math.min(count, count <= 2 ? count : 3)));
+  for (const month of months) container.append(fixedMonthCard(context, frame, month.start, month.span, byDay, detailed));
+  target.append(container);
+  renderErrors(target, result);
+  return true;
+}
+
 function renderStrategic(target, context) {
+  if (renderFixedCalendarMonths(target, context, false)) return;
   const focusCivil = civilFromDays(context.session.currentFocus().floor());
   const monthCount = context.session.strategicMonths;
   const firstMonth = addMonths(focusCivil.year, focusCivil.month, -Math.floor(monthCount / 2));
@@ -674,6 +756,7 @@ function renderCalendar(target, context) {
 }
 
 function renderWall(target, context) {
+  if (renderFixedCalendarMonths(target, context, true)) return;
   const focus = civilFromDays(context.session.currentFocus().floor());
   const count = context.session.wallMonths;
   const firstMonth = addMonths(focus.year, focus.month, -Math.floor(count / 2));

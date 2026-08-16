@@ -22,7 +22,7 @@ function positiveExact(value, label) {
  * coordinate representation.  The period is the exact duration of one
  * top-level unit in the selected base measure (normally Earth days).
  */
-export function buildFixedCalendarStructure({ units, smallestUnitDays = "1", periodFrame = "measure:human-time" }) {
+export function buildFixedCalendarStructure({ units, smallestUnitDays = "1", epochDays = "0", periodFrame = "measure:human-time" }) {
   if (!Array.isArray(units) || units.length < 2) {
     throw new TypeError("A fixed calendar needs at least a top-level unit and one smaller unit.");
   }
@@ -43,6 +43,7 @@ export function buildFixedCalendarStructure({ units, smallestUnitDays = "1", per
     throw new TypeError("Each calendar unit needs a distinct name.");
   }
   const baseDays = positiveExact(smallestUnitDays, "Smallest unit length");
+  const epoch = Rational.parse(epochDays);
   const total = normalized.slice(1).reduce((value, unit) => value.mul(unit.perParent), baseDays);
   return {
     coordinate: {
@@ -50,6 +51,7 @@ export function buildFixedCalendarStructure({ units, smallestUnitDays = "1", per
       fixed: {
         schema: FIXED_SCHEMA,
         smallestUnitDays: baseDays.toJSON(),
+        epochDays: epoch.toJSON(),
         units: normalized.map((unit) => ({
           name: unit.name,
           ...(unit.perParent ? { perParent: unit.perParent.toJSON() } : {}),
@@ -89,6 +91,7 @@ export function editableFixedCalendarStructure(frame = {}) {
         ...(Object.hasOwn(unit, "labels") ? { labels: unit.labels.join(", ") } : {})
       })),
       smallestUnitDays: rebuilt.coordinate.fixed.smallestUnitDays,
+      epochDays: rebuilt.coordinate.fixed.epochDays,
       periodFrame: frame.period?.frame || "measure:human-time",
       totalDays: rebuilt.totalDays
     };
