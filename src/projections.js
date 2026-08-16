@@ -9,7 +9,7 @@ import {
   formatCivil,
   levelValue
 } from "./exact.js";
-import { radialGuideSettings, radialRenderState } from "./radial.js";
+import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./radial.js";
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
@@ -1218,15 +1218,22 @@ function renderRadial(target, context) {
   const height = 720;
   const cx = 450;
   const cy = 360;
-  const cycle = session.radialCycle;
-  const start = session.radialMode === "spiral"
-    ? session.currentFocus().sub(cycle.mul(session.radialPast + 0.5))
-    : session.currentFocus().sub(cycle.div(2));
-  const end = session.radialMode === "spiral"
-    ? session.currentFocus().add(cycle.mul(session.radialFuture + 0.5))
-    : session.currentFocus().add(cycle.div(2));
-  const result = queryFacts(context, session.activeFrame, start, end, 350);
-  const renderState = radialRenderState(result.facts.length, result.truncated);
+  const resolution = session.radialResolution;
+  const unsupported = resolution?.unsupported;
+  const cycle = resolution?.period || session.radialCycle;
+  const dynamicWindow = resolution?.dynamic
+    ? radialCycleWindow(resolution, session.radialMode === "spiral" ? session.radialPast : 0, session.radialMode === "spiral" ? session.radialFuture : 0)
+    : null;
+  const start = dynamicWindow
+    ? dynamicWindow.start
+    : session.radialMode === "spiral"
+      ? session.currentFocus().sub(cycle.mul(session.radialPast + 0.5))
+      : session.currentFocus().sub(cycle.div(2));
+  const end = dynamicWindow
+    ? dynamicWindow.end
+    : session.radialMode === "spiral"
+      ? session.currentFocus().add(cycle.mul(session.radialFuture + 0.5))
+      : session.currentFocus().add(cycle.div(2));
   const radialLabels = [];
   const labelLayer = svgElement("g", { class: "radial-label-layer" });
   const svg = svgElement("svg", {
@@ -1239,7 +1246,7 @@ function renderRadial(target, context) {
   svg.dataset.dropEnd = end.toJSON();
   svg.dataset.dropKind = "radial";
   svg.dataset.radialMode = session.radialMode;
-  svg.dataset.radialState = renderState;
+  if (unsupported) svg.dataset.radialState = "unsupported";
   svg.append(svgElement("circle", {
     cx, cy, r: 54, fill: "#f5efe2", stroke: "#bdb19e", "stroke-width": 2
   }));
@@ -1248,6 +1255,18 @@ function renderRadial(target, context) {
   });
   centerLabel.textContent = formatCivil(daysToCivilCoordinate(session.currentFocus()));
   svg.append(centerLabel);
+  if (unsupported) {
+    const status = svgElement("text", {
+      x: cx, y: cy + 30, "text-anchor": "middle", class: "radial-state-label"
+    });
+    status.textContent = "Cycle boundaries are not defined by this document";
+    svg.append(status);
+    target.append(svg);
+    return;
+  }
+  const result = queryFacts(context, session.activeFrame, start, end, 350);
+  const renderState = radialRenderState(result.facts.length, result.truncated);
+  svg.dataset.radialState = renderState;
   const guide = radialGuideSettings(session);
   for (let tick = 0; tick < guide.divisions; tick += 1) {
     const angle = -Math.PI / 2 + tick / guide.divisions * Math.PI * 2;

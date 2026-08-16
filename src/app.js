@@ -149,12 +149,7 @@ function reconcileSession() {
     ? session.activeFrame
     : calendarFrames(chronolog)[0]?.id || "";
   session.setLeadingFrame(leadingFrame);
-  const cycles = radialCycleOptions();
-  const activeCycle = resolveRadialCycle(cycles, session.activeCycle);
-  if (activeCycle) {
-    session.activeCycle = activeCycle.id;
-    session.radialCycle = activeCycle.period;
-  }
+  reconcileRadialCycle();
   const open = session.inspector;
   if (!open?.id) return;
   const pool = open.type === "event"
@@ -180,6 +175,7 @@ function scheduleRender() {
 }
 
 function render() {
+  reconcileRadialCycle();
   const previousScroll = projection.querySelector("[data-scroll-key]");
   if (previousScroll && !(previousScroll.dataset.scrollKey === "intimate" && (pendingIntimateRebase || pendingIntimateZoom))) {
     viewScroll.set(previousScroll.dataset.scrollKey, {
@@ -691,24 +687,33 @@ function radialCycleOptions() {
       const period = cyclePeriodHint(frame.period);
       return {
         id: frame.id,
-        title: period ? frame.title : `${frame.title} (variable)` ,
-        days: (period || session.radialCycle).toJSON(),
+        title: period ? frame.title : `${frame.title} (variable)`,
+        ...(period ? { days: period.toJSON() } : {}),
+        period: frame.period,
         variable: !period
       };
     });
   return [...FIXED_RADIAL_CYCLES, ...documentCycles];
 }
 
+function reconcileRadialCycle() {
+  const resolved = resolveRadialCycle(radialCycleOptions(), session.activeCycle, session.currentFocus());
+  if (!resolved) return null;
+  session.activeCycle = resolved.id;
+  session.radialResolution = resolved;
+  // Never substitute a prior/mean cycle for an unresolved selection.
+  if (resolved.period) session.radialCycle = resolved.period;
+  return resolved;
+}
+
 function selectCycle(cycleId) {
-  const choice = radialCycleOptions().find((cycle) => cycle.id === cycleId);
-  if (!choice) return;
-  const period = Rational.parse(choice.days);
-  if (period.compare(0) <= 0) {
-    toast("A cycle period must be positive.", true);
+  if (!radialCycleOptions().some((cycle) => cycle.id === cycleId)) return;
+  session.activeCycle = cycleId;
+  const resolved = reconcileRadialCycle();
+  if (!resolved?.period) {
+    toast("This cycle has no resolvable boundaries yet.", true);
     return;
   }
-  session.activeCycle = cycleId;
-  session.radialCycle = period;
 }
 
 function temporalRelations(eventId) {

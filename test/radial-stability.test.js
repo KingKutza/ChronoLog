@@ -8,8 +8,10 @@ import {
   normalizeRadialGuideValues,
   radialGuideSettings,
   radialRenderState,
-  resolveRadialCycle
+  resolveRadialCycle,
+  radialCycleWindow
 } from "../src/radial.js";
+import { daysFromCivil } from "../src/exact.js";
 
 const fixture = JSON.parse(await readFile("fixtures/radial-stability.json", "utf8"));
 
@@ -67,6 +69,27 @@ test("a missing active cycle resolves together with the period used by navigatio
   const resolved = resolveRadialCycle(FIXED_RADIAL_CYCLES, fixture.missingSelection.activeCycle);
   assert.equal(resolved.id, fixture.missingSelection.expected);
   assert.equal(resolved.period.toJSON(), FIXED_RADIAL_CYCLES[0].days);
+});
+
+test("Gregorian month cycles resolve their actual bounded interval without a mean-day approximation", () => {
+  for (const reproduction of fixture.variableCycles) {
+    const resolved = resolveRadialCycle([reproduction.cycle], reproduction.cycle.id, daysFromCivil(...reproduction.focus));
+    assert.equal(resolved.dynamic, true, reproduction.title);
+    assert.equal(resolved.period.toJSON(), reproduction.days, reproduction.title);
+    assert.equal(resolved.start.toJSON(), daysFromCivil(reproduction.focus[0], reproduction.focus[1], 1n).toString(), reproduction.title);
+    const window = radialCycleWindow(resolved, 1, 1);
+    assert.equal(window.start.toJSON(), reproduction.windowStart, reproduction.title);
+    assert.equal(window.end.toJSON(), reproduction.windowEnd, reproduction.title);
+  }
+});
+
+test("unbounded formula, event-defined, and invalid cycle selections remain explicit instead of borrowing a fixed period", () => {
+  for (const reproduction of fixture.unsupportedCycles) {
+    const resolved = resolveRadialCycle([reproduction.cycle], reproduction.cycle.id, daysFromCivil(2026n, 8n, 16n));
+    assert.equal(resolved.id, reproduction.cycle.id, reproduction.title);
+    assert.equal(resolved.unsupported, true, reproduction.title);
+    assert.equal(resolved.period, null, reproduction.title);
+  }
 });
 
 test("empty, ordinary, and truncated Radial datasets have explicit deterministic states", () => {

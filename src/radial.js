@@ -1,4 +1,4 @@
-import { Rational } from "./exact.js";
+import { Rational, civilFromDays, daysFromCivil } from "./exact.js";
 
 const FIXED_LEVEL_DAYS = {
   week: "7",
@@ -30,9 +30,63 @@ export function cyclePeriodHint(magnitude) {
   return total.compare(0) > 0 ? total : null;
 }
 
-export function resolveRadialCycle(options, activeCycle) {
+function addGregorianMonths(civil, count) {
+  const index = civil.year * 12n + civil.month - 1n + BigInt(count);
+  return { year: index / 12n, month: index % 12n + 1n };
+}
+
+/**
+ * Resolve the interval that Radial is allowed to draw.  A period expressed in
+ * fixed day/week/hour levels is always safe.  A Gregorian month is variable,
+ * but its two adjacent boundaries are fully described by the current schema,
+ * so it can be resolved around the current focus without pretending that a
+ * month has a mean number of days.  Formula- and event-defined cycles remain
+ * intentionally unsupported until the schema exposes their boundaries.
+ */
+export function resolveRadialCycle(options, activeCycle, focus = null) {
   const choice = options.find((cycle) => cycle.id === activeCycle) || options[0] || null;
-  return choice ? { id: choice.id, period: positiveRadialCycle(choice.days) } : null;
+  if (!choice) return null;
+  const fixed = cyclePeriodHint(choice.period || { value: choice.value?.levels })
+    || (choice.days ? positiveRadialCycle(choice.days) : null);
+  if (fixed) return { id: choice.id, period: fixed, dynamic: false, unsupported: false };
+
+  const levels = choice.period?.value?.levels || choice.value?.levels;
+  const monthCount = Array.isArray(levels) && levels.length === 1 && levels[0]?.level === "month"
+    ? Number(levels[0].value)
+    : 0;
+  if (focus && Number.isInteger(monthCount) && monthCount > 0 && monthCount <= 24) {
+    try {
+      const civil = civilFromDays(Rational.parse(focus).floor());
+      const startMonth = { year: civil.year, month: civil.month };
+      const endMonth = addGregorianMonths(startMonth, monthCount);
+      const start = new Rational(daysFromCivil(startMonth.year, startMonth.month, 1n));
+      const end = new Rational(daysFromCivil(endMonth.year, endMonth.month, 1n));
+      return {
+        id: choice.id, period: end.sub(start), start, end,
+        anchor: startMonth, monthCount, dynamic: true, unsupported: false
+      };
+    } catch {
+      // Fall through to the explicit unsupported state.
+    }
+  }
+  return { id: choice.id, period: null, dynamic: false, unsupported: true };
+}
+
+/** Return exact calendar boundaries for the visible dynamic spiral window. */
+export function radialCycleWindow(resolution, past = 0, future = 0) {
+  if (!resolution?.dynamic || !resolution.anchor || !Number.isInteger(resolution.monthCount)) return null;
+  try {
+    const before = Math.max(0, Math.floor(Number(past)));
+    const after = Math.max(0, Math.floor(Number(future)));
+    const startMonth = addGregorianMonths(resolution.anchor, -resolution.monthCount * before);
+    const endMonth = addGregorianMonths(resolution.anchor, resolution.monthCount * (after + 1));
+    return {
+      start: new Rational(daysFromCivil(startMonth.year, startMonth.month, 1n)),
+      end: new Rational(daysFromCivil(endMonth.year, endMonth.month, 1n))
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function positiveRadialCycle(value, fallback = "29.530588853") {
