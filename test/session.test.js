@@ -4,6 +4,7 @@ import { Rational } from "../src/exact.js";
 import {
   INTIMATE_HOUR_PIXELS_MAX,
   INTIMATE_HOUR_PIXELS_MIN,
+  LENS_VIEW_DEFAULTS,
   ViewSession
 } from "../src/session.js";
 
@@ -63,6 +64,34 @@ test("seven explicit lenses retain their own useful window sizes", () => {
   assert.equal(session.currentLens(), "spiral");
   session.setLens("radial");
   assert.equal(session.currentLens(), "radial");
+});
+
+test("each lens can restore its canonical view without moving focus", () => {
+  const session = new ViewSession({
+    focusDays: "123",
+    intimateBack: 0,
+    intimateForward: 0,
+    intimateStartHour: 0,
+    intimateEndHour: 24,
+    tacticalRows: 1,
+    tacticalColumns: 1,
+    strategicMonths: 2
+  });
+  session.setLens("intimate");
+  assert.equal(session.resetLensView(), true);
+  assert.equal(session.intimateBack, 2);
+  assert.equal(session.intimateForward, 7);
+  assert.equal(session.intimateStartHour, 4);
+  assert.equal(session.intimateEndHour, 20);
+  assert.equal(session.currentFocus().toJSON(), "123");
+  session.setLens("tactical");
+  session.resetLensView();
+  assert.equal(session.tacticalRows, 5);
+  assert.equal(session.tacticalColumns, 7);
+  session.setLens("strategic");
+  session.resetLensView();
+  assert.equal(session.strategicMonths, 9);
+  assert.equal(LENS_VIEW_DEFAULTS.intimate.intimateHourPixels, 42);
 });
 
 test("radial guide settings survive a view-session round trip", () => {

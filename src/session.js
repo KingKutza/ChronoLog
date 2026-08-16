@@ -45,6 +45,35 @@ export const LENS_CATALOG = Object.freeze({
   radial: Object.freeze({ title: "Radial", projection: "radial", capabilities: ["cycle", "radial-guides", "labels"] })
 });
 export const DEFAULT_LENS_ORDER = Object.freeze(Object.keys(LENS_CATALOG));
+export const LENS_VIEW_DEFAULTS = Object.freeze({
+  intimate: Object.freeze({
+    intimateBack: 2,
+    intimateForward: 7,
+    intimateGrain: 15,
+    intimateHourPixels: 42,
+    intimateStartHour: 4,
+    intimateEndHour: 20,
+    intimateZoneFill: true
+  }),
+  tactical: Object.freeze({ tacticalRows: 5, tacticalColumns: 7, tacticalZoneFill: true }),
+  strategic: Object.freeze({
+    strategicMonths: 9,
+    strategicMode: "signal",
+    strategicZoneFill: true,
+    strategicRecordSlashes: false
+  }),
+  wall: Object.freeze({ wallMonths: 3, wallDetail: false, wallRecordSlashes: false, wallZoneFill: true }),
+  lines: Object.freeze({ linesDays: 14 }),
+  spiral: Object.freeze({
+    radialPast: 1,
+    radialFuture: 1,
+    radialLabels: true,
+    radialDivisions: 0,
+    radialMajorEvery: 0,
+    radialMarks: "auto"
+  }),
+  radial: Object.freeze({ radialLabels: true, radialDivisions: 0, radialMajorEvery: 0, radialMarks: "auto" })
+});
 const LENSES = DEFAULT_LENS_ORDER;
 const RADIAL_MODES = ["spiral", "concentric"];
 const INTIMATE_HOUR_PIXELS_MIN = 8;
@@ -125,46 +154,46 @@ export class ViewSession {
     this.activeFrame = input.activeFrame || "calendar:personal";
     this.activeCycle = input.activeCycle || "cycle:lunar";
     this.radialMode = input.radialMode || "spiral";
-    this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? 1)));
-    this.radialFuture = Math.max(0, Math.floor(Number(input.radialFuture ?? 1)));
+    this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? LENS_VIEW_DEFAULTS.spiral.radialPast)));
+    this.radialFuture = Math.max(0, Math.floor(Number(input.radialFuture ?? LENS_VIEW_DEFAULTS.spiral.radialFuture)));
     this.radialCycle = positiveRadialCycle(input.radialCycle || "29.530588853");
     const radialGuide = normalizeRadialGuideValues({
       radialCycle: this.radialCycle,
-      radialDivisions: input.radialDivisions ?? 0,
-      radialMajorEvery: input.radialMajorEvery ?? 0
+      radialDivisions: input.radialDivisions ?? LENS_VIEW_DEFAULTS.radial.radialDivisions,
+      radialMajorEvery: input.radialMajorEvery ?? LENS_VIEW_DEFAULTS.radial.radialMajorEvery
     });
     this.radialDivisions = radialGuide.radialDivisions;
     this.radialMajorEvery = radialGuide.radialMajorEvery;
-    this.radialMarks = ["auto", "plain", "day-night"].includes(input.radialMarks) ? input.radialMarks : "auto";
-    this.intimateBack = Math.max(0, Math.floor(Number(input.intimateBack ?? 1)));
-    this.intimateForward = Math.max(0, Math.floor(Number(input.intimateForward ?? 3)));
+    this.radialMarks = ["auto", "plain", "day-night"].includes(input.radialMarks) ? input.radialMarks : LENS_VIEW_DEFAULTS.radial.radialMarks;
+    this.intimateBack = Math.max(0, Math.floor(Number(input.intimateBack ?? LENS_VIEW_DEFAULTS.intimate.intimateBack)));
+    this.intimateForward = Math.max(0, Math.floor(Number(input.intimateForward ?? LENS_VIEW_DEFAULTS.intimate.intimateForward)));
     this.intimateGrain = [15, 30, 60].includes(Number(input.intimateGrain))
       ? Number(input.intimateGrain)
-      : 15;
+      : LENS_VIEW_DEFAULTS.intimate.intimateGrain;
     this.intimateHourPixels = Math.max(
       INTIMATE_HOUR_PIXELS_MIN,
-      Math.min(INTIMATE_HOUR_PIXELS_MAX, Number(input.intimateHourPixels) || 28)
+      Math.min(INTIMATE_HOUR_PIXELS_MAX, Number(input.intimateHourPixels) || LENS_VIEW_DEFAULTS.intimate.intimateHourPixels)
     );
-    this.intimateStartHour = Math.max(0, Math.min(23, Math.floor(Number(input.intimateStartHour ?? 0))));
-    this.intimateEndHour = Math.max(this.intimateStartHour + 1, Math.min(24, Math.floor(Number(input.intimateEndHour ?? 24))));
-    this.tacticalRows = Math.max(1, Math.floor(Number(input.tacticalRows ?? 3)));
-    this.tacticalColumns = Math.max(1, Math.floor(Number(input.tacticalColumns ?? 7)));
-    this.strategicMonths = Math.max(1, Math.floor(Number(input.strategicMonths ?? 9)));
+    this.intimateStartHour = Math.max(0, Math.min(23, Math.floor(Number(input.intimateStartHour ?? LENS_VIEW_DEFAULTS.intimate.intimateStartHour))));
+    this.intimateEndHour = Math.max(this.intimateStartHour + 1, Math.min(24, Math.floor(Number(input.intimateEndHour ?? LENS_VIEW_DEFAULTS.intimate.intimateEndHour))));
+    this.tacticalRows = Math.max(1, Math.floor(Number(input.tacticalRows ?? LENS_VIEW_DEFAULTS.tactical.tacticalRows)));
+    this.tacticalColumns = Math.max(1, Math.floor(Number(input.tacticalColumns ?? LENS_VIEW_DEFAULTS.tactical.tacticalColumns)));
+    this.strategicMonths = Math.max(1, Math.floor(Number(input.strategicMonths ?? LENS_VIEW_DEFAULTS.strategic.strategicMonths)));
     this.strategicMode = ["signal", "blocks", "all"].includes(input.strategicMode)
       ? input.strategicMode
-      : "signal";
-    this.intimateZoneFill = input.intimateZoneFill ?? input.zoneFill ?? true;
-    this.tacticalZoneFill = input.tacticalZoneFill ?? input.zoneFill ?? true;
-    this.strategicZoneFill = input.strategicZoneFill ?? input.zoneFill ?? true;
-    this.wallZoneFill = input.wallZoneFill ?? input.zoneFill ?? true;
-    this.wallMonths = Math.max(1, Math.floor(Number(input.wallMonths ?? 3)));
+      : LENS_VIEW_DEFAULTS.strategic.strategicMode;
+    this.intimateZoneFill = input.intimateZoneFill ?? input.zoneFill ?? LENS_VIEW_DEFAULTS.intimate.intimateZoneFill;
+    this.tacticalZoneFill = input.tacticalZoneFill ?? input.zoneFill ?? LENS_VIEW_DEFAULTS.tactical.tacticalZoneFill;
+    this.strategicZoneFill = input.strategicZoneFill ?? input.zoneFill ?? LENS_VIEW_DEFAULTS.strategic.strategicZoneFill;
+    this.wallZoneFill = input.wallZoneFill ?? input.zoneFill ?? LENS_VIEW_DEFAULTS.wall.wallZoneFill;
+    this.wallMonths = Math.max(1, Math.floor(Number(input.wallMonths ?? LENS_VIEW_DEFAULTS.wall.wallMonths)));
     this.linesMonths = Math.max(1, Math.floor(Number(input.linesMonths ?? 9)));
-    this.linesDays = Math.max(3, Math.floor(Number(input.linesDays ?? 14)));
+    this.linesDays = Math.max(3, Math.floor(Number(input.linesDays ?? LENS_VIEW_DEFAULTS.lines.linesDays)));
     this.strategicDetail = Boolean(input.strategicDetail ?? false);
-    this.wallDetail = Boolean(input.wallDetail ?? input.detail);
-    this.strategicRecordSlashes = Boolean(input.strategicRecordSlashes ?? input.recordSlashes);
-    this.wallRecordSlashes = Boolean(input.wallRecordSlashes ?? input.recordSlashes);
-    this.radialLabels = input.radialLabels !== false;
+    this.wallDetail = Boolean(input.wallDetail ?? input.detail ?? LENS_VIEW_DEFAULTS.wall.wallDetail);
+    this.strategicRecordSlashes = Boolean(input.strategicRecordSlashes ?? input.recordSlashes ?? LENS_VIEW_DEFAULTS.strategic.strategicRecordSlashes);
+    this.wallRecordSlashes = Boolean(input.wallRecordSlashes ?? input.recordSlashes ?? LENS_VIEW_DEFAULTS.wall.wallRecordSlashes);
+    this.radialLabels = input.radialLabels ?? LENS_VIEW_DEFAULTS.radial.radialLabels;
     this.selection = input.selection || null;
     this.inspector = input.inspector || null;
     this.minimapDrag = null;
@@ -253,6 +282,23 @@ export class ViewSession {
 
   restoreDefaultLenses() {
     this.configureLenses({ lensOrder: DEFAULT_LENS_ORDER, enabledLenses: DEFAULT_LENS_ORDER });
+  }
+
+  resetLensView(lens = this.currentLens()) {
+    const defaults = LENS_VIEW_DEFAULTS[lens];
+    if (!defaults) return false;
+    Object.assign(this, defaults);
+    if (lens === "spiral" || lens === "radial") {
+      const guide = normalizeRadialGuideValues({
+        radialCycle: this.radialCycle,
+        radialDivisions: this.radialDivisions,
+        radialMajorEvery: this.radialMajorEvery
+      });
+      this.radialDivisions = guide.radialDivisions;
+      this.radialMajorEvery = guide.radialMajorEvery;
+    }
+    this.minimapRange = null;
+    return true;
   }
 
   toggleShared(value) {
