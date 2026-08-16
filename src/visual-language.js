@@ -30,6 +30,7 @@ export const SIGIL_VOCABULARY = Object.freeze({
   milestone: Object.freeze({ glyph: "◆", label: "Milestone" }),
   repeat: Object.freeze({ glyph: "↻", label: "Recurring occurrence" }),
   task: Object.freeze({ glyph: "○", label: "Task or float" }),
+  note: Object.freeze({ glyph: "□", label: "Note" }),
   terminator: Object.freeze({ glyph: "⟐", label: "Timeline terminator" }),
   celestial: Object.freeze({ glyph: "✦", label: "Celestial event" }),
   span: Object.freeze({ glyph: "▬", label: "Time span or zone" })
@@ -132,6 +133,7 @@ export function sigilForFact(fact, durationMinutes = 0) {
   if (durationMinutes >= 1440) return "span";
   if (hasTrait(event, "terminator")) return "terminator";
   if (hasTrait(event, "task", "todo", "float")) return "task";
+  if (hasTrait(event, "note")) return "note";
   if (hasTrait(event, "celestial", "phase")) return "celestial";
   if (hasTrait(event, "landmark", "milestone", "deadline", "important")) return "milestone";
   if (fact?.virtualId || event?.provenance?.kind === "pattern") return "repeat";

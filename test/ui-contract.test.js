@@ -343,7 +343,10 @@ test("Intimate keeps included overlays out of base collision lanes and scrolls i
 });
 
 test("event creation and editing use scoped deltas and expose calendar-language fields", async () => {
-  const app = await readFile("src/app.js", "utf8");
+  const [app, html] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("pocket-instrument.html", "utf8")
+  ]);
   const editor = sourceSlice(app, "function openEventInspector", "function frameForm");
   assert.match(editor, /executeEventChange\("Edit event"/);
   assert.match(editor, /executeEventChange\("Delete event"/);
@@ -352,11 +355,18 @@ test("event creation and editing use scoped deltas and expose calendar-language 
     assert.match(editor, new RegExp(label));
   }
   assert.match(editor, /Create group/);
+  assert.match(editor, /name="objectKind"/);
+  assert.match(editor, /traitsForObjectKind/);
+  assert.match(editor, /data-completed-field/);
   assert.match(editor, /Weekdays \(Mon–Fri\)/);
   assert.match(editor, /const rrule = \{ \.\.\.\(existingPattern\?\.rrule \|\| \{\}\)/);
   assert.match(editor, /rrule\.BYDAY = "MO,TU,WE,TH,FR"/);
   const creator = sourceSlice(app, "function createEventAt", "let zoomWheel");
-  assert.match(creator, /executeEventChange\("Create event"/);
+  assert.match(creator, /executeEventChange\(`Create \$\{definition\.label\}`/);
+  assert.match(creator, /definition\.relationRole/);
+  assert.match(html, /id="create-menu"/);
+  assert.match(html, /id="new-todo"/);
+  assert.match(html, /id="new-note"/);
   assert.doesNotMatch(app, /history\.execute\(/);
 });
 

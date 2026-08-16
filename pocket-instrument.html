@@ -18,7 +18,14 @@
         <path class="chronolog-mark__staple" d="M12 16h8"></path>
         <circle class="chronolog-mark__join" cx="16" cy="16" r="2.1"></circle>
       </svg><span class="chronolog-wordmark">Chrono<span>Log</span></span></div>
-      <button class="instrument-button primary" id="new-event" type="button" aria-label="New event"><span class="responsive-label-long">New event</span><span class="responsive-label-short" aria-hidden="true">+</span></button>
+      <details id="create-menu">
+        <summary aria-label="Create an object"><span class="responsive-label-long">New</span><span class="responsive-label-short" aria-hidden="true">+</span></summary>
+        <div class="create-menu-panel">
+          <button class="instrument-button" id="new-event" type="button"><strong>Event</strong><small>A scheduled point or span</small></button>
+          <button class="instrument-button" id="new-todo" type="button"><strong>ToDo</strong><small>A zero-duration task</small></button>
+          <button class="instrument-button" id="new-note" type="button"><strong>Note</strong><small>A note pinned in time</small></button>
+        </div>
+      </details>
       <button class="instrument-button optional" id="new-frame" type="button" aria-controls="inspector" aria-expanded="false">Frames</button>
       <select class="select-control" id="active-calendar" aria-label="Active calendar"></select>
       <div class="history-controls" aria-label="Edit history">

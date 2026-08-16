@@ -13,6 +13,7 @@ the sole carrier of an event's structural role.
 | milestone, deadline, or important event | `◆` diamond | a marked commitment |
 | generated recurrence | `↻` repeat | a pattern occurrence |
 | task, todo, or float | `○` ring | a zero-duration or not-yet-stapled item |
+| note | `□` square | an annotation pinned to a temporal coordinate |
 | terminator | `⟐` split diamond | a line ending/fork boundary |
 | celestial/phase event | `✦` star | an astronomical fact |
 | all-day or multi-day event | `▬` span | a zone with duration |
