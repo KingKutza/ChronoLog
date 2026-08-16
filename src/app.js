@@ -1769,6 +1769,13 @@ function legacyObjectBrowser(kind) {
 }
 
 const objectBrowserScope = { frame: "all", pattern: "current" };
+// The Frames drawer can comfortably hold a handful of records, but the model
+// deliberately has no such limit. Keep the view controls separate from the
+// document so filtering and folded sections never mutate frame data.
+const framesPanelState = {
+  query: "",
+  sections: { leading: true, companions: true, groups: true }
+};
 
 function patternRelevantToLens(pattern) {
   const window = session.window();
@@ -1801,6 +1808,32 @@ function frameViewCard() {
   const display = active?.display || {};
   const viewCard = document.createElement("section");
   viewCard.className = "frame-view-card";
+  const normalizedQuery = framesPanelState.query.trim().toLocaleLowerCase();
+  const matches = (frame) => !normalizedQuery || `${frame.title || frame.id} ${frameKind(frame)}`
+    .toLocaleLowerCase().includes(normalizedQuery);
+  const section = (id, label, content) => {
+    const details = document.createElement("details");
+    details.className = "frame-view-section";
+    details.open = framesPanelState.sections[id];
+    const summary = document.createElement("summary");
+    summary.textContent = label;
+    details.append(summary, content);
+    details.addEventListener("toggle", () => { framesPanelState.sections[id] = details.open; });
+    return details;
+  };
+  const filter = document.createElement("input");
+  filter.id = "frame-view-filter";
+  filter.type = "search";
+  filter.placeholder = "Filter companions and groups";
+  filter.value = framesPanelState.query;
+  filter.setAttribute("aria-label", "Filter companion frames and groups");
+  filter.addEventListener("input", () => {
+    framesPanelState.query = filter.value;
+    refreshFramesPanel();
+  });
+  const toolbar = document.createElement("div");
+  toolbar.className = "frame-view-toolbar";
+  toolbar.append(filter);
   const leading = document.createElement("label");
   leading.className = "field";
   const leadingLabel = document.createElement("span");
@@ -1821,20 +1854,22 @@ function frameViewCard() {
   const note = document.createElement("p");
   note.className = "field-note";
   note.textContent = "Events on this calendar bring their groups automatically. Include another calendar or line, force a whole group into this view, or hide a group here.";
-  viewCard.append(leading, heading, note);
+  const leadingContent = document.createElement("div");
+  leadingContent.className = "frame-view-section-content";
+  leadingContent.append(leading);
+  viewCard.append(section("leading", "Leading frame", leadingContent), toolbar, heading, note);
   const included = new Set(display.overlays || []);
   const related = Object.values(chronolog.frames).filter((frame) => frame.id !== activeFrameId
     && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline")));
   if (related.length) {
-    const label = document.createElement("strong");
-    label.className = "fieldset-title";
-    label.textContent = "Include calendars and lines";
     const choices = document.createElement("div");
     choices.className = "frame-view-grid";
-    for (const frame of related.sort((left, right) => left.title.localeCompare(right.title))) {
+    const matchingRelated = related.filter(matches).sort((left, right) => left.title.localeCompare(right.title));
+    for (const frame of matchingRelated) {
       const choice = document.createElement("label");
       choice.className = "check-chip";
       const input = document.createElement("input");
+      input.id = `frame-companion-${frame.id}`;
       input.type = "checkbox";
       input.checked = included.has(frame.id);
       input.addEventListener("change", () => {
@@ -1846,25 +1881,37 @@ function frameViewCard() {
           target.display = { ...(target.display || {}), overlays: [...overlays] };
         }, { viewOnly: true });
       });
-      choice.append(input, document.createTextNode(`${frame.title} · ${frameKind(frame)}`));
+      const name = document.createElement("span");
+      name.className = "frame-choice-name";
+      name.title = `${frame.title} · ${frameKind(frame)}`;
+      name.textContent = `${frame.title} · ${frameKind(frame)}`;
+      choice.append(input, name);
       choices.append(choice);
     }
-    viewCard.append(label, choices);
+    if (!matchingRelated.length) {
+      const empty = document.createElement("p");
+      empty.className = "field-note";
+      empty.textContent = "No companion calendars or lines match this filter.";
+      choices.append(empty);
+    }
+    const content = document.createElement("div");
+    content.className = "frame-view-section-content";
+    content.append(choices);
+    viewCard.append(section("companions", `Include calendars and lines (${related.length})`, content));
   }
   const groups = groupFrames(chronolog);
   if (groups.length) {
-    const label = document.createElement("strong");
-    label.className = "fieldset-title";
-    label.textContent = "Groups in this view";
     const groupList = document.createElement("div");
     groupList.className = "frame-group-list";
-    for (const group of groups) {
+    const matchingGroups = groups.filter(matches);
+    for (const group of matchingGroups) {
       const row = document.createElement("div");
       row.className = "frame-group-row";
       const name = document.createElement("strong");
       name.textContent = group.title;
       name.style.setProperty("--group-color", group.color || "#2e8b57");
       const presence = document.createElement("select");
+      presence.id = `frame-group-mode-${group.id}`;
       presence.title = `${group.title} in ${active?.title || "this calendar"}`;
       for (const [value, text] of [["auto", "Automatic"], ["show", "Include all"], ["hide", "Hide here"]]) {
         const option = document.createElement("option");
@@ -1883,6 +1930,7 @@ function frameViewCard() {
         }, { viewOnly: true });
       });
       const strategic = document.createElement("select");
+      strategic.id = `frame-group-strategic-${group.id}`;
       strategic.title = `${group.title} in Strategic`;
       for (const [value, text] of [["auto", "Strategic: automatic"], ["show", "Strategic: promote"], ["hide", "Strategic: demote"]]) {
         const option = document.createElement("option");
@@ -1900,7 +1948,16 @@ function frameViewCard() {
       row.append(name, presence, strategic);
       groupList.append(row);
     }
-    viewCard.append(label, groupList);
+    if (!matchingGroups.length) {
+      const empty = document.createElement("p");
+      empty.className = "field-note";
+      empty.textContent = "No groups match this filter.";
+      groupList.append(empty);
+    }
+    const content = document.createElement("div");
+    content.className = "frame-view-section-content";
+    content.append(groupList);
+    viewCard.append(section("groups", `Groups in this view (${groups.length})`, content));
   }
   return viewCard;
 }
@@ -1999,7 +2056,21 @@ function openObjectBrowser(kind) {
 function refreshFramesPanel() {
   if (inspector.classList.contains("open") && inspector.dataset.panel === "frames-browser") {
     const current = inspectorBody.querySelector(".frame-view-card");
-    if (current) current.replaceWith(frameViewCard());
+    if (!current) return;
+    const scrollTop = inspectorBody.scrollTop;
+    const active = document.activeElement;
+    const focusId = current.contains(active) ? active.id : "";
+    const selection = focusId && typeof active.selectionStart === "number"
+      ? [active.selectionStart, active.selectionEnd] : null;
+    current.replaceWith(frameViewCard());
+    inspectorBody.scrollTop = scrollTop;
+    if (focusId) {
+      const next = document.getElementById(focusId);
+      if (next) {
+        next.focus({ preventScroll: true });
+        if (selection && typeof next.setSelectionRange === "function") next.setSelectionRange(...selection);
+      }
+    }
   }
 }
 
