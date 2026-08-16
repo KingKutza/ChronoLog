@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { additiveFrameTraits, preservedFrameSchema } from "../src/frame-edit.js";
+import { additiveFrameTraits, frameAuthoringCapabilities, preservedFrameSchema } from "../src/frame-edit.js";
 import { buildFixedCalendarStructure, editableFixedCalendarStructure } from "../src/calendar-structure.js";
 
 test("editing a leading frame preserves composable traits and untouched coordinate structure", () => {
@@ -56,4 +56,19 @@ test("fixed calendar editor does not offer to overwrite an advanced period", () 
     coordinate: fixed.coordinate,
     period: { frame: "calendar:moon", value: { eventSeries: "new-moon" } }
   }), null);
+});
+
+test("frame authoring exposes temporal controls only to temporal capabilities", () => {
+  assert.deepEqual(frameAuthoringCapabilities("group"), {
+    basis: false, fixedCalendar: false, observedBoundaries: false, coordinate: false, periodData: false
+  });
+  assert.deepEqual(frameAuthoringCapabilities("importance"), {
+    basis: false, fixedCalendar: false, observedBoundaries: false, coordinate: false, periodData: false
+  });
+  assert.deepEqual(frameAuthoringCapabilities("calendar"), {
+    basis: true, fixedCalendar: true, observedBoundaries: true, coordinate: true, periodData: true
+  });
+  assert.equal(frameAuthoringCapabilities("cycle").observedBoundaries, true);
+  assert.equal(frameAuthoringCapabilities("line").coordinate, true);
+  assert.equal(frameAuthoringCapabilities("group", ["set", "group", "cycle"]).observedBoundaries, true);
 });

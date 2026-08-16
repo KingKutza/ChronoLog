@@ -74,6 +74,11 @@ the Outlook time window, failure behavior, and privacy boundaries.
 
 ## Development
 
+The [general frame model](docs/frame-model.md) documents composable temporal
+capabilities, unit/boundary semantics, cross-frame mappings, and prototype-data
+migration. The [visual grammar](docs/visual-grammar.md) documents how those
+domain roles appear across lenses.
+
 ### Lens extension contract
 
 The workspace lens registry lives in `src/session.js` as `LENS_CATALOG`.

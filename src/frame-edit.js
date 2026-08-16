@@ -16,6 +16,18 @@ export function additiveFrameTraits(kind, enteredTraits = [], existingTraits = [
   ].filter(Boolean))];
 }
 
+export function frameAuthoringCapabilities(kind, traits = []) {
+  const values = new Set([kind, ...traits]);
+  const temporal = ["calendar", "cycle", "line", "timeline", "measure", "other"].some((value) => values.has(value));
+  return Object.freeze({
+    basis: temporal,
+    fixedCalendar: values.has("calendar"),
+    observedBoundaries: values.has("calendar") || values.has("cycle"),
+    coordinate: temporal,
+    periodData: values.has("calendar") || values.has("cycle") || values.has("other")
+  });
+}
+
 export function preservedFrameSchema(previous = {}, coordinateText = "", periodText = "") {
   return {
     coordinate: String(coordinateText).trim() ? JSON.parse(String(coordinateText)) : previous.coordinate,

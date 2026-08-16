@@ -12,7 +12,7 @@ import {
 } from "./exact.js";
 import { exportICS, importICS } from "./ics.js";
 import { applyICSSnapshot, calendarSyncConnections } from "./calendar-sync.js";
-import { additiveFrameTraits, preservedFrameSchema } from "./frame-edit.js";
+import { additiveFrameTraits, frameAuthoringCapabilities, preservedFrameSchema } from "./frame-edit.js";
 import { buildFixedCalendarStructure, editableFixedCalendarStructure } from "./calendar-structure.js";
 import {
   CommandHistory,
@@ -1699,6 +1699,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
   };
   const recordId = value.id || createId("frame");
   const kind = isNew ? presetKind : frameKind(value);
+  const capabilities = frameAuthoringCapabilities(kind, value.traits);
   const frameLenses = ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"];
   const visibleFrameLenses = new Set(value.display?.lenses || frameLenses);
   const fixedCalendar = editableFixedCalendarStructure(value);
@@ -1744,9 +1745,9 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
       ${frameLenses.map((lens) => `<label class="check-chip"><input type="checkbox" name="frameLenses" value="${lens}" ${visibleFrameLenses.has(lens) ? "checked" : ""}>${lens}</label>`).join("")}
     </div><small>Unchecked lenses hide events governed by this frame.</small></div>
     <p class="field-note">Choose what appears together from Frames while viewing a calendar. This editor changes the frame itself; group membership and cross-frame mappings are separate authored objects.</p>
-    <label class="field"><span>Basis frame</span><select name="basis"><option value="">None</option>${Object.values(chronolog.frames)
-      .filter((item) => item.id !== value.id).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === value.basis ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}</select></label>
-    <details class="calendar-structure" ${fixedCalendar ? "open" : ""}>
+    ${capabilities.basis ? `<label class="field"><span>Basis frame</span><select name="basis"><option value="">None</option>${Object.values(chronolog.frames)
+      .filter((item) => item.id !== value.id).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === value.basis ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}</select></label>` : `<p class="field-note capability-boundary-note">Groups and importance sets organize membership and display priority; they do not own coordinates, basis frames, or cycle periods.</p>`}
+    ${capabilities.fixedCalendar ? `<details class="calendar-structure" ${fixedCalendar ? "open" : ""}>
       <summary>Fixed calendar structure</summary>
       <label class="check-chip calendar-structure-toggle"><input type="checkbox" name="useFixedCalendar" ${fixedCalendar ? "checked" : ""}>Use a regular unit hierarchy</label>
       <small>For ordinary calendars with a constant number of units at every level. This writes exact values; leave it off to retain an unusual or rule-driven coordinate system.</small>
@@ -1757,8 +1758,8 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
         <label class="field"><span>Epoch in Earth days</span><input name="fixedCalendarEpoch" value="${escapeHTML(fixedCalendar?.epochDays || "0")}" placeholder="0"></label>
         <output class="calendar-period-preview">${fixedCalendar ? `One ${escapeHTML(fixedCalendar.units[0].name)} = ${escapeHTML(fixedCalendar.totalDays)} Earth days.` : "Turn this on to replace the coordinate JSON with a regular hierarchy."}</output>
       </div>
-    </details>
-    <details class="calendar-structure observed-calendar-structure" ${observedCalendar ? "open" : ""}>
+    </details>` : ""}
+    ${capabilities.observedBoundaries ? `<details class="calendar-structure observed-calendar-structure" ${observedCalendar ? "open" : ""}>
       <summary>Observed boundary series</summary>
       <label class="check-chip calendar-structure-toggle"><input type="checkbox" name="useObservedCalendar" ${observedCalendar ? "checked" : ""}>Use explicitly observed boundaries</label>
       <small>For irregular cycles such as lunar observations or story-time jumps. Each adjacent pair is one authored interval. ChronoLog never averages, fills gaps, or extrapolates this series.</small>
@@ -1772,12 +1773,12 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
         <label class="field observed-import"><span>Import text</span><textarea name="observedImport" placeholder="One boundary per line: coordinate, label (optional), event ID (optional)"></textarea></label>
         <output class="calendar-period-preview" data-observed-calendar-preview></output>
       </div>
-    </details>
-    <p class="field-note coordinate-definition-note">A coordinate definition names positions inside this frame. It does not establish a conversion to another frame; author those relationships as mappings.</p>
+    </details>` : ""}
+    ${capabilities.coordinate ? `<p class="field-note coordinate-definition-note">A coordinate definition names positions inside this frame. It does not establish a conversion to another frame; author those relationships as mappings.</p>` : ""}
     <details class="advanced-fields"><summary>Advanced frame data</summary>
-      <label class="field"><span>Cycle period data (JSON)</span><textarea name="period" class="code" placeholder="Leave blank to preserve existing period">${escapeHTML(value.period ? JSON.stringify(value.period, null, 2) : "")}</textarea></label>
+      ${capabilities.periodData ? `<label class="field"><span>Cycle period data (JSON)</span><textarea name="period" class="code" placeholder="Leave blank to preserve existing period">${escapeHTML(value.period ? JSON.stringify(value.period, null, 2) : "")}</textarea></label>` : ""}
       <label class="field"><span>Traits</span><input name="traits" value="${escapeHTML(value.traits.join(", "))}"></label>
-      <label class="field"><span>Coordinate nesting (JSON)</span><textarea name="coordinate" class="code">${escapeHTML(value.coordinate ? JSON.stringify(value.coordinate, null, 2) : "")}</textarea></label>
+      ${capabilities.coordinate ? `<label class="field"><span>Coordinate nesting (JSON)</span><textarea name="coordinate" class="code">${escapeHTML(value.coordinate ? JSON.stringify(value.coordinate, null, 2) : "")}</textarea></label>` : ""}
     </details>
     <div class="inspector-actions"><button class="instrument-button primary" type="submit">${isNew ? "Create" : "Apply"}</button>
       ${isNew ? "" : `<button class="instrument-button" id="duplicate-object" type="button">Duplicate</button><button class="instrument-button danger" id="delete-object" type="button">Remove</button>`}</div>`;
@@ -1800,6 +1801,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     };
   }
   function refreshFixedCalendarPreview() {
+    if (!fixedCalendarToggle || !fixedCalendarFields || !fixedCalendarPreview) return;
     const enabled = fixedCalendarToggle.checked;
     for (const input of fixedCalendarFields.querySelectorAll("input")) input.disabled = !enabled;
     if (!enabled) {
@@ -1813,14 +1815,15 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
       fixedCalendarPreview.textContent = error.message;
     }
   }
-  fixedCalendarToggle.addEventListener("change", refreshFixedCalendarPreview);
-  fixedCalendarFields.addEventListener("input", refreshFixedCalendarPreview);
+  fixedCalendarToggle?.addEventListener("change", refreshFixedCalendarPreview);
+  fixedCalendarFields?.addEventListener("input", refreshFixedCalendarPreview);
   refreshFixedCalendarPreview();
   const observedCalendarToggle = wrapper.elements.useObservedCalendar;
   const observedCalendarFields = wrapper.querySelector("[data-observed-calendar-fields]");
   const observedBoundaries = wrapper.querySelector("[data-observed-boundaries]");
   const observedPreview = wrapper.querySelector("[data-observed-calendar-preview]");
   function observedBoundaryDraft() {
+    if (!observedBoundaries) return [];
     return [...observedBoundaries.querySelectorAll("[data-observed-boundary]")].map((row, index) => ({
       label: String(row.querySelector('[name="observedBoundaryLabel"]')?.value || "").trim(),
       id: observedBoundaryId(String(row.querySelector('[name="observedBoundaryLabel"]')?.value || ""), index),
@@ -1829,6 +1832,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     }));
   }
   function refreshObservedCalendarPreview() {
+    if (!observedCalendarToggle || !observedCalendarFields || !observedPreview) return;
     const enabled = observedCalendarToggle.checked;
     for (const input of observedCalendarFields.querySelectorAll("input, select, textarea, button")) input.disabled = !enabled;
     if (!enabled) { observedPreview.textContent = "Leave this off to preserve existing period data or use a regular hierarchy."; return; }
@@ -1849,19 +1853,20 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     } catch (error) { observedPreview.textContent = error.message; }
   }
   function appendObservedBoundary(boundary = {}) {
+    if (!observedBoundaries) return;
     observedBoundaries.insertAdjacentHTML("beforeend", observedBoundaryRow(boundary, observedBoundaries.children.length));
     refreshObservedCalendarPreview();
   }
-  observedCalendarToggle.addEventListener("change", () => {
-    if (observedCalendarToggle.checked) fixedCalendarToggle.checked = false;
+  observedCalendarToggle?.addEventListener("change", () => {
+    if (observedCalendarToggle.checked && fixedCalendarToggle) fixedCalendarToggle.checked = false;
     refreshFixedCalendarPreview(); refreshObservedCalendarPreview();
   });
-  fixedCalendarToggle.addEventListener("change", () => {
-    if (fixedCalendarToggle.checked) observedCalendarToggle.checked = false;
+  fixedCalendarToggle?.addEventListener("change", () => {
+    if (fixedCalendarToggle.checked && observedCalendarToggle) observedCalendarToggle.checked = false;
     refreshObservedCalendarPreview();
   });
-  observedBoundaries.addEventListener("input", refreshObservedCalendarPreview);
-  observedBoundaries.addEventListener("click", (click) => {
+  observedBoundaries?.addEventListener("input", refreshObservedCalendarPreview);
+  observedBoundaries?.addEventListener("click", (click) => {
     const row = click.target.closest("[data-observed-boundary]");
     if (!row) return;
     if (click.target.matches("[data-remove-observed-boundary]")) row.remove();
@@ -1869,8 +1874,8 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
     if (click.target.matches("[data-move-observed-down]") && row.nextElementSibling) observedBoundaries.insertBefore(row.nextElementSibling, row);
     refreshObservedCalendarPreview();
   });
-  wrapper.querySelector("[data-add-observed-boundary]").addEventListener("click", () => appendObservedBoundary());
-  wrapper.querySelector("[data-import-observed-boundaries]").addEventListener("click", () => {
+  wrapper.querySelector("[data-add-observed-boundary]")?.addEventListener("click", () => appendObservedBoundary());
+  wrapper.querySelector("[data-import-observed-boundaries]")?.addEventListener("click", () => {
     const lines = String(wrapper.elements.observedImport.value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (!lines.length) { toast("Enter one timestamp per line to import.", true); return; }
     observedBoundaries.innerHTML = "";
@@ -1900,7 +1905,9 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
           else delete display.radialMaxDays;
         }
         const existing = documentValue.frames[recordId] || {};
-        const schema = data.has("useObservedCalendar")
+        const schema = !capabilities.coordinate
+          ? { coordinate: undefined, period: undefined }
+          : data.has("useObservedCalendar")
           ? (() => {
               const boundaries = observedBoundaryDraft().map((boundary) => ({
                 id: boundary.id, at: boundary.at, ...(boundary.label ? { label: boundary.label } : {}),
@@ -1926,7 +1933,7 @@ function frameForm(frame = null, presetKind = "group", embedded = false) {
             String(data.get("traits") || "").split(",").map((item) => item.trim()).filter(Boolean),
             existing.traits || []
           ),
-          basis: String(data.get("basis") || "") || undefined,
+          basis: capabilities.basis ? String(data.get("basis") || "") || undefined : undefined,
           color: String(data.get("color") || "#2e8b57"),
           display,
           ...schema
@@ -2176,6 +2183,7 @@ function frameRelevantToLens(frame) {
 function frameViewCard() {
   const activeFrameId = session.activeFrame;
   const active = chronolog.frames[activeFrameId];
+  const leadingFrames = calendarFrames(chronolog);
   const display = active?.display || {};
   const viewCard = document.createElement("section");
   viewCard.className = "frame-view-card";
@@ -2211,32 +2219,50 @@ function frameViewCard() {
   leadingLabel.textContent = "Leading frame — primary coordinates";
   const leadingSelect = document.createElement("select");
   leadingSelect.id = "frame-leading-select";
-  for (const frame of calendarFrames(chronolog)) {
+  for (const frame of leadingFrames) {
     const option = document.createElement("option");
     option.value = frame.id;
     option.textContent = frame.title;
     option.selected = frame.id === activeFrameId;
     leadingSelect.append(option);
   }
+  if (!leadingFrames.length) {
+    const option = document.createElement("option");
+    option.textContent = "No calendar frames yet";
+    leadingSelect.append(option);
+    leadingSelect.disabled = true;
+  }
   leadingSelect.addEventListener("change", () => selectLeadingFrame(leadingSelect.value));
   leading.append(leadingLabel, leadingSelect);
   const heading = document.createElement("h3");
-  heading.textContent = `Workspace for ${active?.title || "active calendar"}`;
-  heading.title = `Shown with ${active?.title || "active calendar"}`;
+  heading.textContent = active ? `Workspace for ${active.title}` : "No leading frame";
+  heading.title = active ? `Shown with ${active.title}` : "Create a calendar to establish primary coordinates";
   const note = document.createElement("p");
   note.className = "field-note";
-  note.textContent = "The leading frame supplies the primary coordinates. Companions are projected with it; groups organise event membership and never become temporal coordinates.";
+  note.textContent = active
+    ? "The leading frame supplies the primary coordinates. Companions are projected with it; groups organise event membership and never become temporal coordinates."
+    : "This document has no calendar frame. Create one to establish primary coordinates; groups remain available as non-temporal organization.";
   const leadingHint = document.createElement("p");
   leadingHint.className = "field-note";
-  leadingHint.textContent = "Changing this selection updates the toolbar and every open projection immediately.";
+  leadingHint.textContent = active
+    ? "Changing this selection updates the toolbar and every open projection immediately."
+    : "Calendar creation is the only step required to make this workspace projectable.";
   const leadingContent = document.createElement("div");
   leadingContent.className = "frame-view-section-content";
   leadingContent.append(leading, leadingHint);
+  if (!active) {
+    const create = document.createElement("button");
+    create.type = "button";
+    create.className = "instrument-button primary";
+    create.textContent = "Create first calendar";
+    create.addEventListener("click", () => openFrameInspector(null, "calendar"));
+    leadingContent.append(create);
+  }
   viewCard.append(toolbar, heading, note, section("leading", "Leading frame", leadingContent));
   const included = new Set(display.overlays || []);
-  const related = Object.values(chronolog.frames).filter((frame) => frame.id !== activeFrameId
-    && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline")));
-  if (related.length) {
+  const related = active ? Object.values(chronolog.frames).filter((frame) => frame.id !== activeFrameId
+    && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline"))) : [];
+  {
     const choices = document.createElement("div");
     choices.className = "frame-view-grid";
     const matchingRelated = related.filter(matches).sort((left, right) => left.title.localeCompare(right.title));
@@ -2266,7 +2292,10 @@ function frameViewCard() {
     if (!matchingRelated.length) {
       const empty = document.createElement("p");
       empty.className = "field-note";
-      empty.textContent = "No companion calendars or lines match this filter.";
+      empty.textContent = related.length
+        ? "No companion calendars or lines match this filter."
+        : active ? "This is the only calendar or line; there are no companion frames to include yet."
+          : "Create a leading calendar before adding companion frames.";
       choices.append(empty);
     }
     const content = document.createElement("div");
@@ -2281,7 +2310,7 @@ function frameViewCard() {
     viewCard.append(section("companions", `Companions projected with ${active?.title || "leading frame"} (${selectedCount}/${related.length}) — ${companionLabel}`, content));
   }
   const groups = groupFrames(chronolog);
-  if (groups.length) {
+  {
     const groupList = document.createElement("div");
     groupList.className = "frame-group-list";
     const matchingGroups = groups.filter(matches);
@@ -2294,6 +2323,7 @@ function frameViewCard() {
       const presence = document.createElement("select");
       presence.id = `frame-group-mode-${group.id}`;
       presence.title = `${group.title} in ${active?.title || "this calendar"}`;
+      presence.disabled = !active;
       for (const [value, text] of [["auto", "Automatic"], ["show", "Include all"], ["hide", "Hide here"]]) {
         const option = document.createElement("option");
         option.value = value;
@@ -2332,7 +2362,9 @@ function frameViewCard() {
     if (!matchingGroups.length) {
       const empty = document.createElement("p");
       empty.className = "field-note";
-      empty.textContent = "No groups match this filter.";
+      empty.textContent = groups.length
+        ? "No groups match this filter."
+        : "No groups exist yet. Create one below when the workspace needs membership or priority organization.";
       groupList.append(empty);
     }
     const content = document.createElement("div");

@@ -27,6 +27,12 @@ test("Frames workspace UI makes the hierarchy and advanced boundary explicit", a
   assert.match(app, /coordinate definition names positions inside this frame/i);
   assert.match(app, /This adds a capability; it never removes/);
   assert.match(app, /Frame definitions and organisational objects/);
+  assert.match(app, /No calendar frames yet/);
+  assert.match(app, /Create first calendar/);
+  assert.match(app, /This is the only calendar or line/);
+  assert.match(app, /No groups exist yet/);
+  assert.match(app, /frameAuthoringCapabilities\(kind, value\.traits\)/);
+  assert.match(app, /Groups and importance sets organize membership and display priority/);
   assert.match(css, /\.frame-object-guide/);
   assert.match(css, /\.coordinate-definition-note/);
 });
