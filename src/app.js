@@ -328,6 +328,17 @@ function shiftFocusMonths(offset) {
   session.setFocus(new Rational(daysFromCivil(year, month, day)).add(focus.sub(focus.floor())));
 }
 
+function resetCurrentLensView() {
+  const lens = session.currentLens();
+  if (!session.resetLensView(lens)) return;
+  viewScroll.delete(lens);
+  if (lens === "intimate") {
+    pendingIntimateRebase = null;
+    pendingIntimateZoom = null;
+  }
+  toast(`${LENS_CATALOG[lens].title} view reset to defaults.`);
+}
+
 function updateLensControls() {
   const lens = session.currentLens();
   const previousLens = lensControls.dataset.lens;
@@ -455,6 +466,9 @@ function updateLensControls() {
   const todayControl = button("◎", goToToday, "Center this lens on today");
   todayControl.id = "today";
   todayControl.classList.add("today-target");
+  const resetControl = button("↺", resetCurrentLensView, `Reset ${LENS_CATALOG[lens].title} view to defaults`);
+  resetControl.id = "reset-view";
+  resetControl.setAttribute("aria-label", `Reset ${LENS_CATALOG[lens].title} view to defaults`);
   if (lens === "intimate") {
     const visibleHours = Math.max(1, (projection.clientHeight - 70) / session.intimateHourPixels);
     const zoomOut = button("−", () => adjustWindow(1), "Zoom Intimate out (keyboard: −)");
@@ -586,7 +600,7 @@ function updateLensControls() {
   optionPanel.className = "lens-control-overflow-panel";
   optionPanel.append(...optionControls);
   options.append(summary, optionPanel);
-  lensControls.append(...primaryControls, options, todayControl);
+  lensControls.append(...primaryControls, options, todayControl, resetControl);
 }
 
 function toast(message, error = false) {

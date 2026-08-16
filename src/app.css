@@ -549,7 +549,8 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   text-transform: uppercase;
 }
 
-#today {
+#today,
+#reset-view {
   min-width: 32px;
   min-height: 32px;
   display: inline-grid;
@@ -563,7 +564,8 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   font: 900 18px/1 var(--data);
   letter-spacing: 0;
 }
-#today:hover { background: var(--ink); color: var(--paper); }
+#today:hover,
+#reset-view:hover { background: var(--ink); color: var(--paper); }
 
 .field > small,
 .field-note {
