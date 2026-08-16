@@ -74,6 +74,23 @@ test("Intimate programmatic scrolling is guarded through the next animation fram
   assert.match(app, /\|\| intimateScrollGuard\s*\|\| pendingIntimateRebase/);
 });
 
+test("Intimate rebases its finite rail synchronously and preserves one exact day of scroll", async () => {
+  const [app, projections] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/projections.js", "utf8")
+  ]);
+  const rebase = sourceSlice(app, "function rebaseIntimateScroll", 'projection.addEventListener("scroll"');
+  assert.match(rebase, /const dayPixels = hourPixels \* 24/);
+  assert.match(rebase, /scroll\.scrollTop - direction \* dayPixels/);
+  assert.match(rebase, /session\.move\(direction\)/);
+  assert.match(rebase, /render\(\)/);
+  assert.doesNotMatch(rebase, /scheduleRender\(\)/);
+  assert.match(app, /rebaseIntimateScroll\(scroll, -1\)/);
+  assert.match(app, /rebaseIntimateScroll\(scroll, 1\)/);
+  assert.match(projections, /Math\.max\(3, Math\.ceil\(visibleHours \/ 24\) \+ 1\)/);
+  assert.match(projections, /boundary \* 24 \* hourPixels/);
+});
+
 test("lens Options remains open when an option rerenders its controls", async () => {
   const app = await readFile("src/app.js", "utf8");
   assert.match(app, /const optionsWasOpen = previousLens === lens/);
@@ -412,7 +429,7 @@ test("Intimate zoom is anchored, accessible, persistent, and keeps multi-day hit
   assert.match(session, /intimateHourPixels: this\.intimateHourPixels/);
   assert.match(session, /INTIMATE_HOUR_PIXELS_MIN = 8/);
   assert.match(session, /INTIMATE_HOUR_PIXELS_MAX = 144/);
-  assert.match(projections, /Math\.ceil\(visibleHours \/ 48\)/);
+  assert.match(projections, /Math\.ceil\(visibleHours \/ 24\)/);
   assert.match(projections, /for \(let boundary = 1; boundary < railDays; boundary \+= 1\)/);
   assert.match(projections, /dataset\.timelineStart = \(day - bufferDays\)\.toString\(\)/);
   const zoom = sourceSlice(app, "function prepareIntimateZoom", "function adjustWindow");
