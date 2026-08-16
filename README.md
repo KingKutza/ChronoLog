@@ -4,6 +4,18 @@ ChronoLog is a local-first timeline instrument. Its first supported end-user pac
 
 ## Install and launch
 
+Release pages provide two self-contained desktop-style bundles:
+
+- `chronolog-linux-x64.tar.gz`: extract it and run `./chronolog`.
+- `chronolog-windows-x64.zip`: extract it and double-click `ChronoLog.cmd`.
+
+Both bundles include their own Node runtime, start the localhost-only app, and
+open it in the system browser. Keep the `runtime` and `app` folders beside the
+launcher. User data remains in the platform data directory, outside the bundle,
+so replacing or removing an extracted bundle does not delete a workspace.
+
+The npm archive remains available for users who already have Node.js:
+
 Install a release archive with the supported Node.js LTS runtime (Node 20 or newer):
 
 ```sh
@@ -67,5 +79,10 @@ For a source checkout, use the separate development command:
 ```sh
 npm run dev
 ```
+
+`npm run build:portable` builds a bundle for the current Linux or Windows host
+with its current Node executable. Tagged pushes and manual runs of the Portable
+builds workflow verify the application, produce both platform archives, retain
+them as workflow artifacts, and attach them to tagged GitHub releases.
 
 It serves the checkout at `http://127.0.0.1:4173` and retains the historic behavior of storing its workspace document in the checkout. Its startup line identifies the mode as `development`; the installed launcher identifies the mode as `installed`. Run `npm test`, `npm run check`, and `npm run package:check` before making a release archive.
