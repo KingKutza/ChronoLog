@@ -347,12 +347,19 @@ test("frame manager exposes contextual calendar inclusion, group visibility, str
   assert.doesNotMatch(viewCard, /Layer mode/);
 });
 
-test("empty drag creates an interval, shift-drag pans, and untouched drafts are discarded", async () => {
+test("empty drag creates an interval, shift-drag pans, and provisional drafts resolve transactionally", async () => {
   const app = await readFile("src/app.js", "utf8");
   assert.match(app, /pan: event\.shiftKey/);
   assert.match(app, /createEventAt\(drag\.start, end\)/);
-  assert.match(app, /Discard empty draft/);
-  assert.match(app, /provisionalEvent\.form\?\.requestSubmit/);
+  assert.match(app, /Discard provisional draft/);
+  assert.match(app, /id="cancel-draft"/);
+  assert.match(app, /function discardProvisionalDraft/);
+  assert.match(app, /function commitProvisionalDraft/);
+  const close = sourceSlice(app, "function closeInspector", "function dismissInspector");
+  assert.match(close, /discardProvisionalDraft\(\)/);
+  assert.doesNotMatch(close, /requestSubmit/);
+  assert.match(app, /document\.addEventListener\("pointerdown"/);
+  assert.match(app, /focusInspectorEditor\(eventId\)/);
   assert.match(app, /store\.beginDeferred/);
   assert.match(app, /store\.endDeferred/);
   assert.match(app, /calendar-panning/);
