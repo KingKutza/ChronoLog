@@ -66,6 +66,28 @@ test("save status remains a legible, accessible status badge", async () => {
   assert.match(statusUpdate, /node\.textContent = status\.message/);
 });
 
+test("primary toolbar exposes reversible history while document actions live in a named menu", async () => {
+  const [html, css, app] = await Promise.all([
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("src/app.css", "utf8"),
+    readFile("src/app.js", "utf8")
+  ]);
+  const toolbar = sourceSlice(html, '<header id="hud"', '</header>');
+  const documentMenu = sourceSlice(html, '<details id="document-menu">', '</details>');
+  assert.match(toolbar, /class="history-controls" aria-label="Edit history"/);
+  assert.match(toolbar, /id="undo"[^>]*title="Undo \(Ctrl\+Z\)"/);
+  assert.match(toolbar, /id="redo"[^>]*title="Redo \(Ctrl\+Shift\+Z\)"/);
+  assert.match(documentMenu, /<summary[^>]*>Document<\/summary>/);
+  for (const id of ["open-document", "save-document", "save-as-document", "import-ics", "export-ics"]) {
+    assert.match(documentMenu, new RegExp(`id="${id}"`));
+  }
+  assert.doesNotMatch(documentMenu, /id="undo"|id="redo"/);
+  assert.match(css, /\.history-controls \{ display: inline-flex/);
+  assert.match(app, /function confirmDocumentReplacement\(\)/);
+  assert.match(app, /Unsaved changes in the current document are already recoverable/);
+  assert.match(app, /function closeDocumentMenu\(\)/);
+});
+
 test("Intimate programmatic scrolling is guarded through the next animation frame", async () => {
   const app = await readFile("src/app.js", "utf8");
   assert.match(app, /let intimateScrollGuard = 0/);
