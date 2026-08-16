@@ -1,0 +1,70 @@
+{
+  "schema": "chronolog/1",
+  "meta": {
+    "title": "Skyland discontinuous coordinate mapping",
+    "created": "2026-08-16T00:00:00.000Z",
+    "modified": "2026-08-16T00:00:00.000Z"
+  },
+  "frames": {
+    "measure:human-time": {
+      "id": "measure:human-time",
+      "title": "Human time magnitude",
+      "traits": ["line", "measure", "duration"],
+      "coordinate": { "kind": "nested", "levels": [{ "name": "hour" }] }
+    },
+    "line:earth": {
+      "id": "line:earth",
+      "title": "Earth wall time",
+      "traits": ["line", "timeline", "gregorian"],
+      "coordinate": { "kind": "gregorian", "levels": [{ "name": "year" }, { "name": "day", "within": "year" }, { "name": "hour", "within": "day", "radix": "24" }] }
+    },
+    "line:skyland": {
+      "id": "line:skyland",
+      "title": "Skyland Archipelago chronology",
+      "traits": ["line", "timeline", "calendar"],
+      "coordinate": {
+        "kind": "nested",
+        "levels": [
+          { "name": "age" },
+          { "name": "archipelago", "within": "age", "radix": "12" },
+          { "name": "sky-day", "within": "archipelago", "radix": "30" }
+        ],
+        "units": { "boundary": "authored", "note": "Skyland days are not terrestrial days." }
+      }
+    }
+  },
+  "events": {},
+  "patterns": {},
+  "relations": {
+    "mapping:earth-to-skyland-storm": {
+      "id": "mapping:earth-to-skyland-storm",
+      "type": "coordinate-mapping",
+      "title": "Storm crossing",
+      "from": "line:earth",
+      "to": "line:skyland",
+      "direction": "forward",
+      "anchors": [
+        {
+          "continuity": "discontinuous",
+          "from": {
+            "frame": "line:earth",
+            "interval": {
+              "start": { "levels": [{ "level": "year", "value": "2026" }, { "level": "day", "value": "200" }, { "level": "hour", "value": "12" }] },
+              "end": { "levels": [{ "level": "year", "value": "2026" }, { "level": "day", "value": "200" }, { "level": "hour", "value": "17" }] }
+            }
+          },
+          "to": {
+            "frame": "line:skyland",
+            "interval": {
+              "start": { "levels": [{ "level": "age", "value": "31" }, { "level": "archipelago", "value": "4" }, { "level": "sky-day", "value": "72" }] },
+              "end": { "levels": [{ "level": "age", "value": "31" }, { "level": "archipelago", "value": "4" }, { "level": "sky-day", "value": "81" }] }
+            }
+          },
+          "note": "Five Earth hours correspond to nine Skyland days; no implied interpolation exists."
+        }
+      ]
+    }
+  },
+  "overrides": {},
+  "foreign": {}
+}

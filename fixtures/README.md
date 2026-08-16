@@ -15,3 +15,8 @@ exact to its stored model; it is intentionally not a physical ephemeris.
 
 Personal `*.ics` exports remain untracked. The legacy generated
 `fixtures/celestial.ics` is no longer used.
+
+`skyland-coordinate-mapping.chronolog.json` is the frame/mapping acceptance
+fixture. It records a discontinuous, forward mapping in which five Earth hours
+correspond to nine Skyland days, using authored Skyland units rather than
+terrestrial weekday assumptions.
