@@ -560,6 +560,27 @@ test("continuous-time chrome and recurrence exceptions retain their governing co
   assert.match(html, /id="theme-settings"/);
 });
 
+test("Frames can author finite observed boundary calendars without raw JSON", async () => {
+  const [app, css, fixture] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/app.css", "utf8"),
+    readFile("fixtures/observed-boundary-calendar.json", "utf8")
+  ]);
+  const boundary = JSON.parse(fixture);
+  assert.equal(boundary.boundaries.length, 3);
+  assert.match(app, /Observed boundary series/);
+  assert.match(app, /name="useObservedCalendar"/);
+  assert.match(app, /data-add-observed-boundary/);
+  assert.match(app, /data-import-observed-boundaries/);
+  assert.match(app, /data-move-observed-up/);
+  assert.match(app, /data-remove-observed-boundary/);
+  assert.match(app, /validateEventDefinedBoundaryDraft/);
+  assert.match(app, /strictly increasing order/);
+  assert.match(app, /never averages, fills gaps, or extrapolates/);
+  assert.match(app, /kind: "event-defined"/);
+  assert.match(css, /\.observed-boundary-row/);
+});
+
 test("ChronoLog identity is an original, accessible topology mark rather than a clock glyph", async () => {
   const [html, css, svg, identity] = await Promise.all([
     readFile("pocket-instrument.html", "utf8"),
