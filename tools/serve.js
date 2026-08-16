@@ -2,11 +2,14 @@
 
 import { createServer } from "node:http";
 import { readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { extname, join, normalize, resolve, sep } from "node:path";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(process.cwd());
+const toolRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const root = resolve(process.env.CHRONOLOG_APP_ROOT || toolRoot);
 const realRoot = await realpath(root);
 const port = Number(process.env.CHRONOLOG_PORT || 4173);
+const mode = process.env.CHRONOLOG_APP_ROOT ? "installed" : "development";
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -20,9 +23,10 @@ const types = {
   ".webp": "image/webp"
 };
 
-const documentFile = join(root, "chronolog.chronolog");
-const legacyDocumentFile = join(root, "chronolog.json");
-const temporaryDocumentFile = join(root, ".chronolog-save.tmp");
+const dataRoot = resolve(process.env.CHRONOLOG_DATA_DIR || root);
+const documentFile = join(dataRoot, "chronolog.chronolog");
+const legacyDocumentFile = join(dataRoot, "chronolog.json");
+const temporaryDocumentFile = join(dataRoot, ".chronolog-save.tmp");
 const MAX_DOCUMENT_BYTES = 512 * 1024 * 1024;
 
 function requestBody(request) {
@@ -55,7 +59,7 @@ async function workspaceDocument() {
   return null;
 }
 
-createServer(async (request, response) => {
+const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", "http://localhost");
     if (url.pathname === "/api/document" && ["GET", "HEAD"].includes(request.method)) {
@@ -114,6 +118,16 @@ createServer(async (request, response) => {
   } catch (error) {
     response.writeHead(error?.code === "ENOENT" ? 404 : 500).end(error?.message || "Request failed");
   }
-}).listen(port, "127.0.0.1", () => {
-  process.stdout.write(`Chronolog: http://127.0.0.1:${port}/\n`);
+});
+
+server.on("error", (error) => {
+  process.stderr.write(`Chronolog could not start: ${error.message}\n`);
+  process.stderr.write(`App files: ${root}\nUser data: ${dataRoot}\n`);
+  process.exitCode = 1;
+});
+
+server.listen(port, "127.0.0.1", () => {
+  const address = server.address();
+  const activePort = typeof address === "object" && address ? address.port : port;
+  process.stdout.write(`Chronolog (${mode}): http://127.0.0.1:${activePort}/\nUser data: ${dataRoot}\n`);
 });
