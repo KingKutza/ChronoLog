@@ -73,6 +73,22 @@ test("radial guide settings survive a view-session round trip", () => {
   assert.equal(restored.radialMarks, "day-night");
 });
 
+test("radial automatic values persist as auto and explicit major marks normalize only when ticks make them invalid", () => {
+  const automatic = new ViewSession({ radialDivisions: 0, radialMajorEvery: 0 });
+  const restoredAutomatic = new ViewSession(automatic.toJSON());
+  assert.equal(restoredAutomatic.radialDivisions, 0);
+  assert.equal(restoredAutomatic.radialMajorEvery, 0);
+
+  const explicit = new ViewSession({ radialDivisions: 64, radialMajorEvery: 32 });
+  const restoredExplicit = new ViewSession(explicit.toJSON());
+  assert.equal(restoredExplicit.radialDivisions, 64);
+  assert.equal(restoredExplicit.radialMajorEvery, 32);
+
+  const constrained = new ViewSession({ radialDivisions: 4, radialMajorEvery: 32 });
+  assert.equal(constrained.radialDivisions, 4);
+  assert.equal(constrained.radialMajorEvery, 4);
+});
+
 test("the leading frame is canonical and survives a view-session round trip", () => {
   const session = new ViewSession({ activeFrame: "calendar:first", primeFrame: "calendar:legacy" });
   session.setLeadingFrame("calendar:second");

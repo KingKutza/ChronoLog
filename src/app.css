@@ -342,6 +342,18 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 .lens-control-overflow-panel .lens-control,
 .lens-control-overflow-panel .lens-readout { min-width: 0; }
 
+.lens-control-overflow-panel .radial-guide-control {
+  max-width: 100%;
+  justify-content: space-between;
+  white-space: normal;
+}
+
+.lens-control-overflow-panel .radial-guide-control select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 54px;
+}
+
 #minimap {
   position: absolute;
   z-index: 17;

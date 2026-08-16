@@ -5,6 +5,7 @@ import { ViewSession } from "../src/session.js";
 import {
   FIXED_RADIAL_CYCLES,
   cyclePeriodHint,
+  normalizeRadialGuideValues,
   radialGuideSettings,
   radialRenderState,
   resolveRadialCycle
@@ -32,6 +33,25 @@ test("Radial guide geometry stays finite and bounded for corrupted view values",
   assert.ok(guide.cycleDays > 0);
   assert.ok(guide.divisions >= 1 && guide.divisions <= 64);
   assert.ok(guide.majorEvery >= 1 && guide.majorEvery <= guide.divisions);
+});
+
+test("Radial guide values retain Auto and explicit major marks until a changed tick count invalidates them", () => {
+  assert.deepEqual(
+    normalizeRadialGuideValues({ radialCycle: "7", radialDivisions: 0, radialMajorEvery: 0 }),
+    { radialDivisions: 0, radialMajorEvery: 0 }
+  );
+  assert.deepEqual(
+    normalizeRadialGuideValues({ radialCycle: "7", radialDivisions: 64, radialMajorEvery: 32 }),
+    { radialDivisions: 64, radialMajorEvery: 32 }
+  );
+  assert.deepEqual(
+    normalizeRadialGuideValues({ radialCycle: "7", radialDivisions: 4, radialMajorEvery: 32 }),
+    { radialDivisions: 4, radialMajorEvery: 4 }
+  );
+  assert.deepEqual(
+    normalizeRadialGuideValues({ radialCycle: "7", radialDivisions: 999, radialMajorEvery: 999 }),
+    { radialDivisions: 64, radialMajorEvery: 64 }
+  );
 });
 
 test("document cycles preserve positive period hints without defining variable cycles as fixed", () => {
