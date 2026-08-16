@@ -135,6 +135,12 @@ export function validateDocument(document) {
       if (relation.include === false || relation.mode === "exclude") {
         errors.push(`Membership ${id} uses negative group membership, which is not defined`);
       }
+    } else if (relation.type === "shared-segment") {
+      validateSharedSegment(document, relation, errors);
+    } else if (relation.type === "termination") {
+      validateTermination(document, relation, errors);
+    } else if (relation.type === "displacement") {
+      validateDisplacement(document, relation, errors);
     } else {
       errors.push(`Relation ${id} has an unknown type`);
     }
@@ -157,6 +163,80 @@ export function validateDocument(document) {
     }
   }
   return { valid: errors.length === 0, errors };
+}
+
+function attachmentFor(document, id) {
+  const relation = document.relations?.[id];
+  return relation?.type === "attachment" ? relation : null;
+}
+
+function validateSharedSegment(document, relation, errors) {
+  const lines = Array.isArray(relation.lines) ? [...new Set(relation.lines)] : [];
+  if (lines.length < 2) {
+    errors.push(`Shared segment ${relation.id} requires at least two distinct lines`);
+    return;
+  }
+  const anchors = relation.anchors || {};
+  const starts = [];
+  const ends = [];
+  for (const line of lines) {
+    if (!document.frames?.[line]) errors.push(`Shared segment ${relation.id} references a missing line ${line}`);
+    const anchor = anchors[line];
+    const start = attachmentFor(document, anchor?.start);
+    const end = attachmentFor(document, anchor?.end);
+    if (!start || start.frame !== line) errors.push(`Shared segment ${relation.id} has no start anchor on ${line}`);
+    if (!end || end.frame !== line) errors.push(`Shared segment ${relation.id} has no end anchor on ${line}`);
+    if (start) starts.push(start.event);
+    if (end) ends.push(end.event);
+  }
+  if (starts.length === lines.length && new Set(starts).size !== 1) {
+    errors.push(`Shared segment ${relation.id} start anchors must staple at one event`);
+  }
+  if (ends.length === lines.length && new Set(ends).size !== 1) {
+    errors.push(`Shared segment ${relation.id} end anchors must staple at one event`);
+  }
+}
+
+function validateTermination(document, relation, errors) {
+  const attachment = attachmentFor(document, relation.terminator);
+  const event = attachment && document.events?.[attachment.event];
+  if (!document.frames?.[relation.line]) errors.push(`Termination ${relation.id} references a missing line`);
+  if (!attachment || attachment.frame !== relation.line) {
+    errors.push(`Termination ${relation.id} must reference an attachment on its line`);
+  }
+  if (!event?.traits?.includes("terminator")) {
+    errors.push(`Termination ${relation.id} must reference a terminator event`);
+  }
+  if (!["sealed", "stapled"].includes(relation.state)) {
+    errors.push(`Termination ${relation.id} state must be sealed or stapled; open is a rendering state`);
+  }
+  if (relation.state === "stapled" && attachment) {
+    const incidence = eventRelations(document, attachment.event);
+    if (incidence.length < 2) errors.push(`Stapled termination ${relation.id} must attach to another line`);
+  }
+}
+
+function validateDisplacement(document, relation, errors) {
+  const directions = new Set(["forward", "reverse", "stationary"]);
+  if (!document.frames?.[relation.traveler]) errors.push(`Displacement ${relation.id} references a missing traveler line`);
+  if (!document.frames?.[relation.world]) errors.push(`Displacement ${relation.id} references a missing world line`);
+  if (relation.properDirection !== "forward") {
+    errors.push(`Displacement ${relation.id} must advance traveler proper time forward`);
+  }
+  if (!directions.has(relation.worldDirection)) {
+    errors.push(`Displacement ${relation.id} has an invalid world direction`);
+  }
+  for (const endpoint of ["origin", "destination"]) {
+    const values = relation[endpoint] || {};
+    const traveler = attachmentFor(document, values.traveler);
+    const world = attachmentFor(document, values.world);
+    if (!traveler || traveler.frame !== relation.traveler) {
+      errors.push(`Displacement ${relation.id} ${endpoint} lacks a traveler attachment`);
+    }
+    if (!world || world.frame !== relation.world) {
+      errors.push(`Displacement ${relation.id} ${endpoint} lacks a world attachment`);
+    }
+  }
 }
 
 export function addFrame(document, input) {
@@ -237,6 +317,18 @@ export function frameRelations(document, frameId) {
   return Object.values(document.relations).filter(
     (relation) => relation.type === "attachment" && relation.frame === frameId
   );
+}
+
+// An open end is deliberately not stored on a line. It means this particular
+// projection stopped before reaching a persisted terminator, not that the line
+// itself has died. Callers pass the attachment visible at the rendered edge.
+export function renderTerminatorState(document, lineId, boundaryAttachmentId) {
+  const termination = Object.values(document.relations || {}).find((relation) =>
+    relation.type === "termination"
+      && relation.line === lineId
+      && relation.terminator === boundaryAttachmentId
+  );
+  return termination?.state || "open";
 }
 
 export function frameChildren(document, frameId) {

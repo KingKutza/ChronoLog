@@ -1,0 +1,69 @@
+{
+  "schema": "chronolog/1",
+  "meta": {
+    "title": "Time-travel topology acceptance fixture",
+    "created": "2026-08-16T00:00:00.000Z",
+    "modified": "2026-08-16T00:00:00.000Z"
+  },
+  "frames": {
+    "measure:proper-time": { "id": "measure:proper-time", "title": "Proper time", "traits": ["line", "measure", "duration"] },
+    "line:earth": { "id": "line:earth", "title": "Earth", "traits": ["line", "timeline"] },
+    "line:traveler": { "id": "line:traveler", "title": "Traveler proper time", "traits": ["line", "timeline"] },
+    "line:fork": { "id": "line:fork", "title": "Forked future", "traits": ["line", "timeline"] },
+    "line:loop": { "id": "line:loop", "title": "Closed loop", "traits": ["line", "timeline"] },
+    "line:phil": { "id": "line:phil", "title": "Phil continuous", "traits": ["line", "timeline"] },
+    "line:loop-day-1": { "id": "line:loop-day-1", "title": "Loop day 1", "traits": ["line", "timeline"] },
+    "line:loop-day-2": { "id": "line:loop-day-2", "title": "Loop day 2", "traits": ["line", "timeline"] }
+  },
+  "events": {
+    "event:shared-start": { "id": "event:shared-start", "traits": ["event"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Shared history begins" } },
+    "event:shared-end": { "id": "event:shared-end", "traits": ["event"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Shared history ends" } },
+    "event:fork": { "id": "event:fork", "traits": ["event", "terminator"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Fork point" } },
+    "event:repeated-incidence": { "id": "event:repeated-incidence", "traits": ["event"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "One event, twice on Earth" } },
+    "event:departure": { "id": "event:departure", "traits": ["event"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Departure" } },
+    "event:arrival": { "id": "event:arrival", "traits": ["event"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Arrival in the past" } },
+    "event:loop-start": { "id": "event:loop-start", "traits": ["event", "terminator"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Loop start" } },
+    "event:loop-end": { "id": "event:loop-end", "traits": ["event", "terminator"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Loop end" } },
+    "event:groundhog-start": { "id": "event:groundhog-start", "traits": ["event", "terminator"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Feb 2, 06:00" } },
+    "event:groundhog-end": { "id": "event:groundhog-end", "traits": ["event", "terminator"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Loop-day end" } },
+    "event:sealed-end": { "id": "event:sealed-end", "traits": ["event", "terminator"], "magnitudes": { "duration": { "frame": "measure:proper-time", "value": { "levels": [{ "level": "second", "value": "0" }] } } }, "payload": { "title": "Sealed end" } }
+  },
+  "patterns": {
+    "pattern:groundhog-loop-days": { "id": "pattern:groundhog-loop-days", "language": "chronolog-topology/1", "kind": "topology-replication", "templateFrame": "line:loop-day-1", "copies": ["line:loop-day-1", "line:loop-day-2"], "deltas": { "line:loop-day-2": { "ordinal": "2" } } }
+  },
+  "relations": {
+    "attachment:shared-start-earth": { "id": "attachment:shared-start-earth", "type": "attachment", "event": "event:shared-start", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "1985" }] } },
+    "attachment:shared-start-traveler": { "id": "attachment:shared-start-traveler", "type": "attachment", "event": "event:shared-start", "frame": "line:traveler", "coordinate": { "levels": [{ "level": "hour", "value": "0" }] } },
+    "attachment:shared-end-earth": { "id": "attachment:shared-end-earth", "type": "attachment", "event": "event:shared-end", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "2015" }] } },
+    "attachment:shared-end-traveler": { "id": "attachment:shared-end-traveler", "type": "attachment", "event": "event:shared-end", "frame": "line:traveler", "coordinate": { "levels": [{ "level": "hour", "value": "30" }] } },
+    "segment:earth-traveler-shared": { "id": "segment:earth-traveler-shared", "type": "shared-segment", "lines": ["line:earth", "line:traveler"], "anchors": { "line:earth": { "start": "attachment:shared-start-earth", "end": "attachment:shared-end-earth" }, "line:traveler": { "start": "attachment:shared-start-traveler", "end": "attachment:shared-end-traveler" } } },
+    "attachment:fork-earth": { "id": "attachment:fork-earth", "type": "attachment", "event": "event:fork", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "2020" }] } },
+    "attachment:fork-branch": { "id": "attachment:fork-branch", "type": "attachment", "event": "event:fork", "frame": "line:fork", "coordinate": { "levels": [{ "level": "year", "value": "0" }] } },
+    "termination:fork-start": { "id": "termination:fork-start", "type": "termination", "line": "line:fork", "terminator": "attachment:fork-branch", "state": "stapled" },
+    "attachment:repeat-earth-a": { "id": "attachment:repeat-earth-a", "type": "attachment", "event": "event:repeated-incidence", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "2021" }] } },
+    "attachment:repeat-earth-b": { "id": "attachment:repeat-earth-b", "type": "attachment", "event": "event:repeated-incidence", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "2023" }] } },
+    "attachment:departure-earth": { "id": "attachment:departure-earth", "type": "attachment", "event": "event:departure", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "1985" }] } },
+    "attachment:departure-traveler": { "id": "attachment:departure-traveler", "type": "attachment", "event": "event:departure", "frame": "line:traveler", "coordinate": { "levels": [{ "level": "hour", "value": "30" }] } },
+    "attachment:arrival-earth": { "id": "attachment:arrival-earth", "type": "attachment", "event": "event:arrival", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "1955" }] } },
+    "attachment:arrival-traveler": { "id": "attachment:arrival-traveler", "type": "attachment", "event": "event:arrival", "frame": "line:traveler", "coordinate": { "levels": [{ "level": "hour", "value": "31" }] } },
+    "displacement:backward-earth": { "id": "displacement:backward-earth", "type": "displacement", "traveler": "line:traveler", "world": "line:earth", "origin": { "traveler": "attachment:departure-traveler", "world": "attachment:departure-earth" }, "destination": { "traveler": "attachment:arrival-traveler", "world": "attachment:arrival-earth" }, "properDirection": "forward", "worldDirection": "reverse" },
+    "attachment:loop-start": { "id": "attachment:loop-start", "type": "attachment", "event": "event:loop-start", "frame": "line:loop", "coordinate": { "levels": [{ "level": "tick", "value": "0" }] } },
+    "attachment:loop-end": { "id": "attachment:loop-end", "type": "attachment", "event": "event:loop-end", "frame": "line:loop", "coordinate": { "levels": [{ "level": "tick", "value": "1" }] } },
+    "termination:loop-start": { "id": "termination:loop-start", "type": "termination", "line": "line:loop", "terminator": "attachment:loop-start", "state": "stapled" },
+    "termination:loop-end": { "id": "termination:loop-end", "type": "termination", "line": "line:loop", "terminator": "attachment:loop-end", "state": "stapled" },
+    "attachment:loop-start-again": { "id": "attachment:loop-start-again", "type": "attachment", "event": "event:loop-start", "frame": "line:loop", "coordinate": { "levels": [{ "level": "tick", "value": "1" }] } },
+    "attachment:loop-end-again": { "id": "attachment:loop-end-again", "type": "attachment", "event": "event:loop-end", "frame": "line:loop", "coordinate": { "levels": [{ "level": "tick", "value": "0" }] } },
+    "attachment:groundhog-earth": { "id": "attachment:groundhog-earth", "type": "attachment", "event": "event:groundhog-start", "frame": "line:earth", "coordinate": { "levels": [{ "level": "year", "value": "2030" }] } },
+    "attachment:groundhog-phil": { "id": "attachment:groundhog-phil", "type": "attachment", "event": "event:groundhog-start", "frame": "line:phil", "coordinate": { "levels": [{ "level": "hour", "value": "0" }] } },
+    "attachment:groundhog-day-1": { "id": "attachment:groundhog-day-1", "type": "attachment", "event": "event:groundhog-start", "frame": "line:loop-day-1", "coordinate": { "levels": [{ "level": "hour", "value": "0" }] } },
+    "attachment:groundhog-day-2": { "id": "attachment:groundhog-day-2", "type": "attachment", "event": "event:groundhog-start", "frame": "line:loop-day-2", "coordinate": { "levels": [{ "level": "hour", "value": "0" }] } },
+    "termination:groundhog-day-1-start": { "id": "termination:groundhog-day-1-start", "type": "termination", "line": "line:loop-day-1", "terminator": "attachment:groundhog-day-1", "state": "stapled" },
+    "termination:groundhog-day-2-start": { "id": "termination:groundhog-day-2-start", "type": "termination", "line": "line:loop-day-2", "terminator": "attachment:groundhog-day-2", "state": "stapled" },
+    "attachment:groundhog-end-day-1": { "id": "attachment:groundhog-end-day-1", "type": "attachment", "event": "event:groundhog-end", "frame": "line:loop-day-1", "coordinate": { "levels": [{ "level": "hour", "value": "24" }] } },
+    "attachment:groundhog-end-day-2": { "id": "attachment:groundhog-end-day-2", "type": "attachment", "event": "event:groundhog-end", "frame": "line:loop-day-2", "coordinate": { "levels": [{ "level": "hour", "value": "24" }] } },
+    "attachment:sealed-fork": { "id": "attachment:sealed-fork", "type": "attachment", "event": "event:sealed-end", "frame": "line:fork", "coordinate": { "levels": [{ "level": "year", "value": "2099" }] } },
+    "termination:sealed-fork": { "id": "termination:sealed-fork", "type": "termination", "line": "line:fork", "terminator": "attachment:sealed-fork", "state": "sealed" }
+  },
+  "overrides": {},
+  "foreign": {}
+}
