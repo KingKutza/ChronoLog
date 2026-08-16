@@ -401,11 +401,25 @@ test("radial uses whole-cycle scrolling, populated calendar-group bands, collisi
   assert.match(projections, /radialEventLabel/);
   assert.match(projections, /radialGuideSettings/);
   assert.match(projections, /radial-noon-tick/);
-  assert.match(app, /ticks \(0 auto\)/);
-  assert.match(app, /bold every \(0 auto\)/);
+  assert.match(app, /radialGuideSelect\(\n        "ticks"/);
+  assert.match(app, /radialGuideSelect\(\n        "major marks"/);
   assert.match(projections, /dataset\.radialState/);
   assert.match(projections, /radial-empty-ring/);
   assert.match(projections, /Dense window · showing the first 350 events/);
+});
+
+test("Radial guide controls expose Auto, document the tick cap, and keep major marks independent until invalid", async () => {
+  const [app, css] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("src/app.css", "utf8")
+  ]);
+  assert.match(app, /const radialGuideSelect =/);
+  assert.match(app, /\["0", "Auto"\]/);
+  assert.match(app, /Manual tick counts are limited to 64/);
+  assert.match(app, /normalizeRadialGuideValues\(\{ \.\.\.session, radialDivisions: value \}\)/);
+  assert.doesNotMatch(app, /Number\(input\.value\) \|\| value/);
+  assert.match(css, /\.radial-guide-control/);
+  assert.match(css, /max-width: 100%/);
 });
 
 test("interaction refinements expose continuous intimate scroll, tactical shift scroll, delete, and frame-owned importance", async () => {

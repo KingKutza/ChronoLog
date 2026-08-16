@@ -61,6 +61,22 @@ export function radialGuideSettings(session) {
   return { cycleDays, divisions, majorEvery, dayNight };
 }
 
+// Persist the user's choice where possible. Only reduce an explicit major
+// interval when its tick count makes that interval impossible to render.
+export function normalizeRadialGuideValues(settings) {
+  const requestedDivisions = Math.floor(Number(settings.radialDivisions));
+  const radialDivisions = Number.isFinite(requestedDivisions)
+    ? Math.max(0, Math.min(64, requestedDivisions))
+    : 0;
+  const requestedMajor = Math.floor(Number(settings.radialMajorEvery));
+  let radialMajorEvery = Number.isFinite(requestedMajor)
+    ? Math.max(0, Math.min(64, requestedMajor))
+    : 0;
+  const guide = radialGuideSettings({ ...settings, radialDivisions, radialMajorEvery });
+  if (radialMajorEvery > guide.divisions) radialMajorEvery = guide.divisions;
+  return { radialDivisions, radialMajorEvery };
+}
+
 export function radialRenderState(factCount, truncated) {
   if (truncated) return "dense";
   return factCount > 0 ? "ordinary" : "empty";

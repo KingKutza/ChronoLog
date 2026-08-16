@@ -4,7 +4,7 @@ import {
   daysFromCivil,
   daysToCivilCoordinate
 } from "./exact.js";
-import { positiveRadialCycle } from "./radial.js";
+import { normalizeRadialGuideValues, positiveRadialCycle } from "./radial.js";
 
 const DETENTS = [
   { name: "Intimate", scale: 0, span: 5 },
@@ -98,8 +98,13 @@ export class ViewSession {
     this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? 1)));
     this.radialFuture = Math.max(0, Math.floor(Number(input.radialFuture ?? 1)));
     this.radialCycle = positiveRadialCycle(input.radialCycle || "29.530588853");
-    this.radialDivisions = Math.max(0, Math.min(64, Math.floor(Number(input.radialDivisions ?? 0))));
-    this.radialMajorEvery = Math.max(0, Math.min(16, Math.floor(Number(input.radialMajorEvery ?? 0))));
+    const radialGuide = normalizeRadialGuideValues({
+      radialCycle: this.radialCycle,
+      radialDivisions: input.radialDivisions ?? 0,
+      radialMajorEvery: input.radialMajorEvery ?? 0
+    });
+    this.radialDivisions = radialGuide.radialDivisions;
+    this.radialMajorEvery = radialGuide.radialMajorEvery;
     this.radialMarks = ["auto", "plain", "day-night"].includes(input.radialMarks) ? input.radialMarks : "auto";
     this.intimateBack = Math.max(0, Math.floor(Number(input.intimateBack ?? 1)));
     this.intimateForward = Math.max(0, Math.floor(Number(input.intimateForward ?? 3)));
