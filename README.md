@@ -61,6 +61,17 @@ The installed application is separate from user data. By default data lives in:
 
 `chronolog.chronolog` is saved through a temporary file and rename, retaining ChronoLog's existing atomic-save behavior where the filesystem supports it. Upgrades replace only the installed package; they preserve this data. To roll back, install the previous `.tgz` archive—the same data directory is retained. Uninstalling the package also leaves data untouched. Remove the data directory yourself only after exporting or backing up the document you intend to discard.
 
+## Calendar and task sync
+
+Use **Document → Sync web calendars** for explicit read-only refreshes from a
+published HTTPS ICS address or from Microsoft Outlook and Microsoft To Do.
+Remote credentials and secret feed addresses stay in owner-only files in the
+local user-data directory; only source provenance and the acknowledged snapshot
+revision enter the portable document. Microsoft connection uses device sign-in
+and a public Entra Application (client) ID, never a client secret. See
+[the calendar sync guide](docs/calendar-sync.md) for provider setup, permissions,
+the Outlook time window, failure behavior, and privacy boundaries.
+
 ## Development
 
 ### Lens extension contract

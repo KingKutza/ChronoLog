@@ -432,6 +432,28 @@ test("workspace documents use a custom extension with autoload and attached auto
   assert.match(server, /request\.method === "PUT"/);
 });
 
+test("web calendar sync is explicit, read-only, and keeps provider secrets outside the document", async () => {
+  const [app, html, server, microsoft] = await Promise.all([
+    readFile("src/app.js", "utf8"),
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("tools/calendar-feed-service.js", "utf8"),
+    readFile("tools/microsoft-sync-service.js", "utf8")
+  ]);
+  assert.match(html, /id="sync-calendars"/);
+  assert.match(app, /applyICSSnapshot/);
+  assert.match(app, /Refresh is explicit and read-only/);
+  assert.match(app, /Sync failed · local changes safe/);
+  assert.match(server, /\.chronolog-calendar-connections\.json/);
+  assert.match(server, /open\(temporary, "wx", 0o600\)/);
+  assert.match(server, /Calendar feeds cannot target a private or reserved address/);
+  assert.match(app, /Connect Microsoft/);
+  assert.match(app, /Sync Outlook calendars/);
+  assert.match(app, /Sync Microsoft To Do/);
+  assert.match(microsoft, /offline_access Calendars\.Read Tasks\.ReadWrite/);
+  assert.match(microsoft, /\.chronolog-microsoft-credentials\.json/);
+  assert.match(await readFile("tools/serve.js", "utf8"), /basename\(target\)\.startsWith\("\.chronolog-"\)/);
+});
+
 test("frame manager exposes contextual calendar inclusion, group visibility, strategic priority, and frame editing", async () => {
   const app = await readFile("src/app.js", "utf8");
   const manager = sourceSlice(app, "function frameForm(frame", "function openFrameInspector");

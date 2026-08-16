@@ -11,6 +11,7 @@ import {
   levelValue
 } from "./exact.js";
 import { exportICS, importICS } from "./ics.js";
+import { applyICSSnapshot, calendarSyncConnections } from "./calendar-sync.js";
 import { additiveFrameTraits, preservedFrameSchema } from "./frame-edit.js";
 import { buildFixedCalendarStructure, editableFixedCalendarStructure } from "./calendar-structure.js";
 import {
@@ -3322,6 +3323,281 @@ function importCalendar(text, label) {
   );
   return result;
 }
+
+async function calendarSyncRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      ...(options.body ? { "content-type": "application/json" } : {}),
+      ...(WORKSPACE_TARGET.remoteHeaders || {}),
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  let value = null;
+  try { value = text ? JSON.parse(text) : null; } catch {}
+  if (!response.ok) throw new Error(value?.error || text || `Calendar sync returned ${response.status}`);
+  return value;
+}
+
+function executeCalendarSync(label, options) {
+  const before = clone(chronolog);
+  let after = null;
+  let result = null;
+  const restore = (documentValue, snapshot) => {
+    for (const key of Object.keys(documentValue)) delete documentValue[key];
+    Object.assign(documentValue, clone(snapshot));
+  };
+  history.executeDelta(label, (documentValue) => {
+    if (after) restore(documentValue, after);
+    else {
+      result = applyICSSnapshot(documentValue, options);
+      after = clone(documentValue);
+    }
+  }, (documentValue) => restore(documentValue, before));
+  return result;
+}
+
+async function pullCalendarConnection(connection, status) {
+  const current = calendarSyncConnections(chronolog).find((item) => item.id === connection.id);
+  status.textContent = `Syncing ${connection.label}…`;
+  const pulled = await calendarSyncRequest(`/api/sync/feeds/${encodeURIComponent(connection.id)}/pull`, {
+    method: "POST",
+    body: JSON.stringify({ revision: current?.revision || null })
+  });
+  if (pulled.notModified) {
+    status.textContent = `${connection.label} is already current.`;
+    return null;
+  }
+  const result = executeCalendarSync(`Sync ${connection.label}`, {
+    connectionId: connection.id,
+    text: pulled.text,
+    label: connection.label,
+    provider: connection.provider,
+    revision: pulled.revision
+  });
+  status.textContent = `Synced ${result.events} item${result.events === 1 ? "" : "s"} from ${connection.label}.`;
+  toast(status.textContent);
+  return result;
+}
+
+async function openCalendarSyncInspector() {
+  const wrapper = document.createElement("section");
+  wrapper.className = "calendar-sync-panel";
+  wrapper.innerHTML = `
+    <p class="field-note">Subscribe to an HTTPS ICS address published by Outlook, Google Calendar, Apple Calendar, or another calendar service. Refresh is explicit and read-only: ChronoLog never writes back or stores the secret feed URL in your document.</p>
+    <form class="calendar-feed-form">
+      <label class="field"><span>Name</span><input name="label" placeholder="Work calendar" required></label>
+      <label class="field"><span>Secret HTTPS ICS address</span><input name="url" type="url" inputmode="url" autocomplete="off" placeholder="https://…/calendar.ics" required><small>Stored only by this local launcher with owner-only file permissions.</small></label>
+      <button class="instrument-button primary" type="submit">Add and sync</button>
+    </form>
+    <section class="microsoft-sync-card">
+      <h3>Microsoft Outlook + To Do</h3>
+      <p class="field-note">Connect with Microsoft's device sign-in. ChronoLog requests delegated calendar read and To Do access, stores refresh credentials only in the local launcher data directory, and imports a read-only snapshot. Outlook covers two past years through six future years per sync.</p>
+      <div class="microsoft-sync-controls">Checking Microsoft connection…</div>
+    </section>
+    <p class="calendar-sync-status" role="status" aria-live="polite">Loading connections…</p>
+    <div class="calendar-sync-list"></div>`;
+  openInspector("Web calendar sync", wrapper);
+  const form = wrapper.querySelector(".calendar-feed-form");
+  const list = wrapper.querySelector(".calendar-sync-list");
+  const status = wrapper.querySelector(".calendar-sync-status");
+  const microsoftControls = wrapper.querySelector(".microsoft-sync-controls");
+
+  async function pullMicrosoft(kind, label) {
+    status.textContent = `Syncing ${label}…`;
+    const pulled = await calendarSyncRequest(`/api/sync/microsoft/${kind}/pull`, {
+      method: "POST", body: "{}"
+    });
+    const connectionId = `microsoft:${kind}`;
+    const current = calendarSyncConnections(chronolog).find((item) => item.id === connectionId);
+    if (current?.revision?.digest && current.revision.digest === pulled.revision?.digest) {
+      status.textContent = `${label} is already current.`;
+      return;
+    }
+    const result = executeCalendarSync(`Sync ${label}`, {
+      connectionId,
+      text: pulled.text,
+      label,
+      provider: `microsoft-${kind}`,
+      revision: pulled.revision
+    });
+    status.textContent = `Synced ${result.events} item${result.events === 1 ? "" : "s"} from ${label}.`;
+    toast(status.textContent);
+  }
+
+  async function paintMicrosoft() {
+    try {
+      const microsoft = await calendarSyncRequest("/api/sync/microsoft/status");
+      microsoftControls.replaceChildren();
+      if (!microsoft.configured) {
+        const configure = document.createElement("form");
+        configure.className = "microsoft-client-form";
+        configure.innerHTML = `<label class="field"><span>Microsoft Application (client) ID</span><input name="clientId" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000" required><small>Create a public-client app registration with device authorization and delegated Calendars.Read + Tasks.ReadWrite. The client ID is public; never enter a client secret.</small></label><button class="instrument-button primary" type="submit">Use this app registration</button>`;
+        configure.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const submit = configure.querySelector('[type="submit"]');
+          submit.disabled = true;
+          try {
+            await calendarSyncRequest("/api/sync/microsoft/config", {
+              method: "POST",
+              body: JSON.stringify({ clientId: String(new FormData(configure).get("clientId")) })
+            });
+            status.textContent = "Microsoft application configured. Connect your account next.";
+            await paintMicrosoft();
+          } catch (error) {
+            status.textContent = `Microsoft setup failed: ${error.message}`;
+            submit.disabled = false;
+          }
+        });
+        microsoftControls.append(configure);
+        return;
+      }
+      if (!microsoft.connected) {
+        const connect = document.createElement("button");
+        connect.type = "button";
+        connect.className = "instrument-button primary";
+        connect.textContent = "Connect Microsoft";
+        connect.addEventListener("click", async () => {
+          connect.disabled = true;
+          try {
+            const signIn = await calendarSyncRequest("/api/sync/microsoft/connect", { method: "POST", body: "{}" });
+            microsoftControls.innerHTML = `<p class="field-note">Open <a href="${escapeHTML(signIn.verificationUriComplete || signIn.verificationUri)}" target="_blank" rel="noreferrer">Microsoft device sign-in</a> and enter:</p><output class="microsoft-device-code">${escapeHTML(signIn.userCode)}</output><p class="field-note">Waiting for authorization…</p>`;
+            const poll = async () => {
+              if (!wrapper.isConnected) return;
+              try {
+                const result = await calendarSyncRequest(`/api/sync/microsoft/connect/${encodeURIComponent(signIn.session)}/poll`, { method: "POST", body: "{}" });
+                if (result.connected) {
+                  status.textContent = "Microsoft connected. Choose which sources to sync.";
+                  await paintMicrosoft();
+                  return;
+                }
+                setTimeout(poll, Number(result.interval || signIn.interval || 5) * 1000);
+              } catch (error) {
+                status.textContent = `Microsoft sign-in failed: ${error.message}`;
+                await paintMicrosoft();
+              }
+            };
+            setTimeout(poll, Number(signIn.interval || 5) * 1000);
+          } catch (error) {
+            status.textContent = `Microsoft sign-in failed: ${error.message}`;
+            connect.disabled = false;
+          }
+        });
+        microsoftControls.append(connect);
+        return;
+      }
+      const outlook = document.createElement("button");
+      outlook.type = "button";
+      outlook.className = "instrument-button primary";
+      outlook.textContent = "Sync Outlook calendars";
+      const todo = document.createElement("button");
+      todo.type = "button";
+      todo.className = "instrument-button primary";
+      todo.textContent = "Sync Microsoft To Do";
+      const disconnect = document.createElement("button");
+      disconnect.type = "button";
+      disconnect.className = "instrument-button";
+      disconnect.textContent = "Disconnect";
+      for (const [button, kind, label] of [[outlook, "calendar", "Outlook"], [todo, "todo", "Microsoft To Do"]]) {
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          try { await pullMicrosoft(kind, label); }
+          catch (error) { status.textContent = `Sync failed · local changes safe: ${error.message}`; toast(error.message, true); }
+          finally { button.disabled = false; }
+        });
+      }
+      disconnect.addEventListener("click", async () => {
+        try {
+          await calendarSyncRequest("/api/sync/microsoft/disconnect", { method: "POST", body: "{}" });
+          status.textContent = "Microsoft credentials removed. Imported snapshots remain in this document.";
+          await paintMicrosoft();
+        } catch (error) { status.textContent = error.message; }
+      });
+      microsoftControls.append(outlook, todo, disconnect);
+    } catch (error) {
+      microsoftControls.textContent = `Microsoft sync unavailable: ${error.message}`;
+    }
+  }
+
+  async function paint() {
+    try {
+      const remote = await calendarSyncRequest("/api/sync/connections");
+      const local = new Map(calendarSyncConnections(chronolog).map((item) => [item.id, item]));
+      list.replaceChildren();
+      for (const connection of remote.feeds || []) {
+        const synced = local.get(connection.id);
+        const row = document.createElement("article");
+        row.className = "calendar-sync-row";
+        const details = document.createElement("div");
+        details.innerHTML = `<strong>${escapeHTML(connection.label)}</strong><small>${escapeHTML(connection.urlHint)}</small><small>${synced?.fetchedAt ? `Last synced ${escapeHTML(new Date(synced.fetchedAt).toLocaleString())}` : "Not synced yet"}</small>`;
+        const actions = document.createElement("div");
+        actions.className = "calendar-sync-actions";
+        const sync = document.createElement("button");
+        sync.type = "button";
+        sync.className = "instrument-button primary";
+        sync.textContent = "Sync now";
+        sync.addEventListener("click", async () => {
+          sync.disabled = true;
+          try { await pullCalendarConnection(connection, status); await paint(); }
+          catch (error) { status.textContent = `Sync failed · local changes safe: ${error.message}`; toast(error.message, true); }
+          finally { sync.disabled = false; }
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "instrument-button";
+        remove.textContent = "Forget";
+        remove.title = "Forget the remote address; keep the last imported snapshot";
+        remove.addEventListener("click", async () => {
+          try {
+            await calendarSyncRequest(`/api/sync/feeds/${encodeURIComponent(connection.id)}`, { method: "DELETE" });
+            status.textContent = `Forgot ${connection.label}. Its last imported snapshot remains in this document.`;
+            await paint();
+          } catch (error) { status.textContent = error.message; toast(error.message, true); }
+        });
+        actions.append(sync, remove);
+        row.append(details, actions);
+        list.append(row);
+      }
+      if (!remote.feeds?.length) {
+        const empty = document.createElement("p");
+        empty.className = "field-note calendar-sync-empty";
+        empty.textContent = "No web calendar is connected yet.";
+        list.append(empty);
+      }
+      if (status.textContent === "Loading connections…") status.textContent = "Ready.";
+    } catch (error) {
+      status.textContent = `Sync unavailable: ${error.message}`;
+    }
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = form.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      const data = new FormData(form);
+      const connection = await calendarSyncRequest("/api/sync/feeds", {
+        method: "POST",
+        body: JSON.stringify({ label: String(data.get("label")), url: String(data.get("url")) })
+      });
+      await pullCalendarConnection(connection, status);
+      form.reset();
+      await paint();
+    } catch (error) {
+      status.textContent = `Sync failed · local changes safe: ${error.message}`;
+      toast(error.message, true);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  await Promise.all([paint(), paintMicrosoft()]);
+}
+
+byId("sync-calendars").addEventListener("click", () => {
+  closeDocumentMenu();
+  openCalendarSyncInspector();
+});
 
 byId("import-ics").addEventListener("click", () => {
   closeDocumentMenu();
