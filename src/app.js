@@ -50,6 +50,7 @@ import {
   downloadText,
   parseDocument
 } from "./store.js";
+import { THEME_FIELDS, THEME_PRESETS, normalizeTheme } from "./visual-language.js";
 
 const byId = (id) => document.getElementById(id);
 const projection = byId("projection");
@@ -63,10 +64,6 @@ const WORKSPACE_TARGET = { remoteUrl: "/api/document", filename: "chronolog.chro
 const LOCAL_WORKSPACE_TARGET = /^https?:$/.test(location.protocol) ? WORKSPACE_TARGET : {};
 const SESSION_STORAGE_KEY = "chronolog:view-session:1";
 const THEME_STORAGE_KEY = "chronolog:color-theme:1";
-const THEME_FIELDS = {
-  ground: "Ground", surface: "Surface", paper: "Paper", ink: "Ink",
-  muted: "Muted", now: "Now", green: "Positive", blue: "Accent"
-};
 
 function storedSession() {
   try {
@@ -81,14 +78,14 @@ function storedTheme() {
 }
 
 function applyTheme(theme) {
+  const palette = normalizeTheme(theme);
   for (const name of Object.keys(THEME_FIELDS)) {
-    const value = theme[name];
-    if (/^#[0-9a-f]{6}$/i.test(value || "")) document.documentElement.style.setProperty(`--${name}`, value);
-    else document.documentElement.style.removeProperty(`--${name}`);
+    document.documentElement.style.setProperty(`--${name}`, palette[name]);
   }
+  document.documentElement.dataset.theme = theme?.preset || "custom";
 }
 
-applyTheme(storedTheme());
+applyTheme({ ...THEME_PRESETS.paper, ...storedTheme() });
 
 let chronolog = createCelestialDocument();
 let engine = new ChronologEngine(chronolog);
@@ -674,13 +671,14 @@ function openThemeEditor() {
   const current = getComputedStyle(document.documentElement);
   const form = document.createElement("form");
   form.className = "theme-form";
-  form.innerHTML = `<p class="field-note">Edit the application palette. Frame and event colors remain independent.</p>
+  form.innerHTML = `<p class="field-note">Theme controls the instrument chrome and semantic states. Frame and event colors remain authored data; sigils retain meaning without color.</p>
+    <div class="theme-presets" role="group" aria-label="Theme preset"><button class="instrument-button small" type="button" data-theme-preset="paper">Warm paper</button><button class="instrument-button small" type="button" data-theme-preset="night">Night cockpit</button></div>
     <div class="theme-grid">${Object.entries(THEME_FIELDS).map(([name, label]) => `<label class="field"><span>${label}</span><input type="color" name="${name}" value="${escapeHTML(current.getPropertyValue(`--${name}`).trim())}"></label>`).join("")}</div>
     <div class="inspector-actions"><button class="instrument-button primary" type="submit">Save theme</button><button class="instrument-button" id="reset-theme" type="button">Use default</button></div>`;
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(form);
-    const theme = Object.fromEntries(Object.keys(THEME_FIELDS).map((name) => [name, String(data.get(name))]));
+    const theme = { ...Object.fromEntries(Object.keys(THEME_FIELDS).map((name) => [name, String(data.get(name))])), preset: form.dataset.themePreset || "custom" };
     localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
     applyTheme(theme);
     dismissInspector();
@@ -690,6 +688,17 @@ function openThemeEditor() {
     applyTheme({});
     dismissInspector();
   });
+  for (const button of form.querySelectorAll("[data-theme-preset]")) {
+    button.addEventListener("click", () => {
+      const preset = THEME_PRESETS[button.dataset.themePreset];
+      for (const [name, value] of Object.entries(preset)) form.elements[name].value = value;
+      form.dataset.themePreset = button.dataset.themePreset;
+      applyTheme({ ...preset, preset: button.dataset.themePreset });
+    });
+  }
+  for (const input of form.querySelectorAll('input[type="color"]')) {
+    input.addEventListener("input", () => { form.dataset.themePreset = "custom"; });
+  }
   openInspector("Color theme", form);
 }
 

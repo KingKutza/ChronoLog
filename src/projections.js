@@ -13,6 +13,7 @@ import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./rad
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
+import { SIGIL_VOCABULARY, sigilDescription, sigilForFact } from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -271,6 +272,15 @@ function bindFact(node, fact) {
   return node;
 }
 
+function applySigil(node, fact) {
+  const sigil = sigilForFact(fact, durationMinutes(fact.event));
+  const vocabulary = SIGIL_VOCABULARY[sigil];
+  node.dataset.sigil = sigil;
+  node.dataset.sigilGlyph = vocabulary.glyph;
+  node.setAttribute("aria-label", `${vocabulary.label}: ${fact.event.payload?.title || "untitled"}`);
+  return sigil;
+}
+
 function eventChip(context, fact, compact = false) {
   const spanning = durationMinutes(fact.event) >= 1440;
   const lens = context.session.currentLens();
@@ -281,6 +291,7 @@ function eventChip(context, fact, compact = false) {
   const chip = element("button", `event-chip${compact ? " compact" : ""}${zoneClass}`);
   chip.type = "button";
   bindFact(chip, fact);
+  applySigil(chip, fact);
   chip.style.setProperty("--event-color", factColor(context, fact));
   chip.textContent = fact.event.payload?.title || "(untitled)";
   const frame = context.document.frames[fact.displayFrame || fact.relation?.frame || context.session.activeFrame];
@@ -436,6 +447,7 @@ function renderIntimate(target, context) {
       const button = element("button", `intimate-event${included ? " included-event" : ""}${important ? " important-event" : ""}${continuation ? " continuation-event" : ""}`);
       button.type = "button";
       bindFact(button, item.fact);
+      applySigil(button, item.fact);
       button.style.setProperty("--event-color", factColor(context, item.fact));
       button.style.top = `${item.start / 60 * hourPixels}px`;
       button.style.height = `${Math.max(13, (item.end - item.start) / 60 * hourPixels)}px`;
@@ -582,6 +594,7 @@ function monthCard(context, year, month, facts, detailed = false) {
         const pip = element("button", "event-pip");
         pip.type = "button";
         bindFact(pip, fact);
+        applySigil(pip, fact);
         pip.style.background = factColor(context, fact);
         pip.title = fact.event.payload?.title || "(untitled)";
         pips.append(pip);
@@ -638,6 +651,7 @@ function fixedMonthCard(context, frame, start, span, facts, detailed = false) {
         const pip = element("button", "event-pip");
         pip.type = "button";
         bindFact(pip, fact);
+        applySigil(pip, fact);
         pip.style.background = factColor(context, fact);
         pip.title = fact.event.payload?.title || "(untitled)";
         pips.append(pip);
@@ -734,6 +748,7 @@ function renderStrategic(target, context) {
           const pip = element("button", "event-pip");
           pip.type = "button";
           bindFact(pip, fact);
+          applySigil(pip, fact);
           pip.style.background = factColor(context, fact);
           pip.title = fact.event.payload?.title || "(untitled)";
           pips.append(pip);
@@ -840,6 +855,7 @@ function renderLines(target, context) {
         tabindex: 0
       });
       bindFact(dot, fact);
+      applySigil(dot, fact);
       const title = svgElement("title");
       title.textContent = fact.event.payload?.title || "(untitled)";
       dot.append(title);
@@ -1057,6 +1073,7 @@ function renderSimpleLines(target, context) {
     const y = primeY + point.offset;
     const dot = svgElement("circle", { cx: x, cy: y, r: point.clusterSize > 1 ? 5 : 4.5, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
     bindFact(dot, fact);
+    applySigil(dot, fact);
     const title = svgElement("title");
     title.textContent = `${fact.event.payload?.title || "(untitled)"}${point.clusterSize > 1 ? ` · ${point.clusterSize} nearby events` : ""}`;
     dot.append(title);
@@ -1087,6 +1104,7 @@ function renderSimpleLines(target, context) {
       if (shared) svg.append(svgElement("line", { x1: x, y1: primeY, x2: x, y2: y, stroke: "#51483d", "stroke-width": 1.5, "stroke-dasharray": "3 3" }));
       const dot = svgElement("circle", { cx: x, cy: y, r: shared ? 7 : 4.5, fill: frame.color || "#497bc1", stroke: shared ? "#2a2620" : "none", "stroke-width": 2, class: "line-event", tabindex: 0 });
       bindFact(dot, fact);
+      applySigil(dot, fact);
       const title = svgElement("title");
       title.textContent = `${fact.event.payload?.title || "(untitled)"}${shared ? " · staple" : ""}${point.clusterSize > 1 ? ` · ${point.clusterSize} nearby events` : ""}`;
       dot.append(title);
@@ -1160,7 +1178,7 @@ function renderTopologyLines(target, context, topology) {
     for (const point of positions) {
       const fact = { event: context.document.events[eventId], relation: point.attachment, coordinate: point.attachment.coordinate };
       const dot = svgElement("circle", { cx: xForEvent.get(eventId), cy: lane.get(point.attachment.frame) + point.offset, r: 6, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
-      bindFact(dot, fact); const title = svgElement("title"); title.textContent = `${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
+      bindFact(dot, fact); applySigil(dot, fact); const title = svgElement("title"); title.textContent = `${sigilDescription(fact, durationMinutes(fact.event))} · ${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
     }
   }
   const status = svgElement("text", { x: width / 2, y: height - 18, "text-anchor": "middle", class: "lines-state" });
@@ -1182,8 +1200,10 @@ function arcPath(cx, cy, radius, startAngle, endAngle) {
 function radialEventPath(fact, attributes) {
   const path = svgElement("path", { class: "radial-event-arc", tabindex: 0, pathLength: 1, ...attributes });
   bindFact(path, fact);
+  const sigil = applySigil(path, fact);
+  path.classList.add(`sigil-${sigil}`);
   const title = svgElement("title");
-  title.textContent = fact.event.payload?.title || "(untitled)";
+  title.textContent = `${sigilDescription(fact, durationMinutes(fact.event))} · ${fact.event.payload?.title || "(untitled)"}`;
   path.append(title);
   return path;
 }
