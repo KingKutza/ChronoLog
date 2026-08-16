@@ -436,6 +436,16 @@ export class ChronologEngine {
     return this.calendarFrameByEvent.get(eventId) || null;
   }
 
+  eventCalendarFrames(eventId) {
+    return this.eventFrames(eventId).filter((frameId) => this.document.frames[frameId]?.traits.includes("calendar"));
+  }
+
+  groupEventMembers(groupId) {
+    return this.groupMembers(groupId)
+      .map(({ member }) => member)
+      .filter((member) => Boolean(this.document.events[member]));
+  }
+
   eventFrames(eventId) {
     return [...(this.framesByEvent.get(eventId) || [])];
   }

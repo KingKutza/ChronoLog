@@ -27,6 +27,17 @@ The installed application is separate from user data. By default data lives in:
 
 ## Development
 
+### Lens extension contract
+
+The workspace lens registry lives in `src/session.js` as `LENS_CATALOG`.
+To add a lens, add one registry entry (title, backing projection, and declared
+capabilities), provide a renderer in `src/projections.js`, and make its
+settings serializable through `ViewSession.toJSON()`.  The workspace editor
+will place a newly registered lens after a user's persisted ordering without
+resetting that ordering. A renderer that cannot support the current document
+must use the projection's explicit visible error state; it must not break the
+other lenses or invent a coordinate conversion.
+
 For a source checkout, use the separate development command:
 
 ```sh

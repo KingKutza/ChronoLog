@@ -48,6 +48,19 @@ test("application shell exposes seven explicit lenses with contextual window con
   assert.match(app, /localStorage\.setItem/);
 });
 
+test("lens workspace uses a registry, persisted order, and a visible configuration entry point", async () => {
+  const [html, app, session] = await Promise.all([
+    readFile("pocket-instrument.html", "utf8"),
+    readFile("src/app.js", "utf8"),
+    readFile("src/session.js", "utf8")
+  ]);
+  assert.match(html, /id="lens-settings"/);
+  assert.match(app, /function openLensWorkspace/);
+  assert.match(app, /session\.configureLenses/);
+  assert.match(session, /LENS_CATALOG/);
+  assert.match(session, /availableLenses\(\)/);
+});
+
 test("save status remains a legible, accessible status badge", async () => {
   const [html, css, app] = await Promise.all([
     readFile("pocket-instrument.html", "utf8"),

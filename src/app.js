@@ -35,9 +35,11 @@ import {
 } from "./projections.js";
 import { FIXED_RADIAL_CYCLES, cyclePeriodHint, normalizeRadialGuideValues, radialGuideSettings, resolveRadialCycle } from "./radial.js";
 import {
+  DEFAULT_LENS_ORDER,
   DETENTS,
   INTIMATE_HOUR_PIXELS_MAX,
   INTIMATE_HOUR_PIXELS_MIN,
+  LENS_CATALOG,
   ViewSession,
   minimapDragFocus,
   minimapDragState,
@@ -269,7 +271,15 @@ function updateChrome() {
   byId("focus-readout").textContent = formatCivil(daysToCivilCoordinate(session.currentFocus()), true);
   byId("undo").disabled = history.undoStack.length === 0;
   byId("redo").disabled = history.redoStack.length === 0;
+  const lensBar = byId("lens-bar");
+  for (const lens of session.lensOrder) {
+    const button = lensBar.querySelector(`[data-lens="${lens}"]`);
+    if (button) lensBar.append(button);
+  }
   document.querySelectorAll("[data-lens]").forEach((button) => {
+    const available = session.enabledLenses.includes(button.dataset.lens);
+    button.hidden = !available;
+    button.disabled = !available;
     button.classList.toggle("active", button.dataset.lens === session.currentLens());
   });
 }
@@ -681,6 +691,75 @@ function openThemeEditor() {
     dismissInspector();
   });
   openInspector("Color theme", form);
+}
+
+function openLensWorkspace() {
+  let draftOrder = [...session.lensOrder];
+  let draftEnabled = new Set(session.enabledLenses);
+  const wrapper = document.createElement("form");
+  wrapper.className = "event-form";
+  const note = document.createElement("p");
+  note.className = "field-note";
+  note.textContent = "Choose the lenses that belong in this workspace and arrange their toolbar order. Each lens keeps only the controls it declares; this does not delete its settings.";
+  const list = document.createElement("div");
+  list.className = "frame-group-list";
+  const render = () => {
+    list.replaceChildren();
+    for (const lens of draftOrder) {
+      const spec = LENS_CATALOG[lens];
+      const row = document.createElement("div");
+      row.className = "frame-group-row";
+      const enabled = document.createElement("label");
+      enabled.className = "check-chip";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = "enabled-lens";
+      input.value = lens;
+      input.checked = draftEnabled.has(lens);
+      input.addEventListener("change", () => {
+        if (input.checked) draftEnabled.add(lens);
+        else draftEnabled.delete(lens);
+      });
+      enabled.append(input, document.createTextNode(spec.title));
+      const capabilities = document.createElement("small");
+      capabilities.textContent = spec.capabilities.join(" · ");
+      const previous = document.createElement("button");
+      previous.type = "button"; previous.className = "instrument-button"; previous.textContent = "↑";
+      previous.title = `Move ${spec.title} earlier`;
+      previous.addEventListener("click", () => {
+        const index = draftOrder.indexOf(lens);
+        if (index > 0) [draftOrder[index - 1], draftOrder[index]] = [draftOrder[index], draftOrder[index - 1]];
+        render();
+      });
+      const next = document.createElement("button");
+      next.type = "button"; next.className = "instrument-button"; next.textContent = "↓";
+      next.title = `Move ${spec.title} later`;
+      next.addEventListener("click", () => {
+        const index = draftOrder.indexOf(lens);
+        if (index >= 0 && index < draftOrder.length - 1) [draftOrder[index + 1], draftOrder[index]] = [draftOrder[index], draftOrder[index + 1]];
+        render();
+      });
+      row.append(enabled, capabilities, previous, next);
+      list.append(row);
+    }
+  };
+  render();
+  const actions = document.createElement("div");
+  actions.className = "inspector-actions";
+  const restore = document.createElement("button");
+  restore.type = "button"; restore.className = "instrument-button"; restore.textContent = "Restore defaults";
+  restore.addEventListener("click", () => { draftOrder = [...DEFAULT_LENS_ORDER]; draftEnabled = new Set(DEFAULT_LENS_ORDER); render(); });
+  const save = document.createElement("button");
+  save.type = "submit"; save.className = "instrument-button primary"; save.textContent = "Save workspace lenses";
+  actions.append(restore, save);
+  wrapper.append(note, list, actions);
+  wrapper.addEventListener("submit", (event) => {
+    event.preventDefault();
+    session.configureLenses({ lensOrder: draftOrder, enabledLenses: [...draftEnabled] });
+    dismissInspector();
+    scheduleRender();
+  });
+  openInspector("Workspace lenses", wrapper);
 }
 
 function radialCycleOptions() {
@@ -2426,6 +2505,10 @@ byId("new-pattern").addEventListener("click", () => openObjectBrowser("pattern")
 byId("theme-settings").addEventListener("click", () => {
   closeDocumentMenu();
   openThemeEditor();
+});
+byId("lens-settings").addEventListener("click", () => {
+  closeDocumentMenu();
+  openLensWorkspace();
 });
 
 document.addEventListener("pointerdown", (event) => {
