@@ -99,8 +99,8 @@ test("active and rendered temporal frames provide ordered fallbacks", () => {
   }), "#222222");
 });
 
-test("visual grammar documents all shipping lenses and contrast rule", async () => {
-  const document = await readFile(new URL("../docs/visual-grammar.md", import.meta.url), "utf8");
+test("AGENTS.md documents all shipping lenses and the contrast rule", async () => {
+  const document = await readFile(new URL("../AGENTS.md", import.meta.url), "utf8");
   for (const lens of ["Intimate", "Tactical", "Strategic", "Wall", "Lines", "Spiral", "Radial"]) assert.match(document, new RegExp(lens));
   assert.match(document, /sole carrier/i);
   assert.match(document, /Object color inheritance/);

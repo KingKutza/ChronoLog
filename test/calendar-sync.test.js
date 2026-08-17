@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyICSSnapshot, calendarSyncConnections } from "../src/calendar-sync.js";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createSampleDocument } from "./helpers/sample-document.js";
 import { addEvent, addRelation, stapleEvents, validateDocument } from "../src/model.js";
 
 function calendar(...components) {
@@ -25,7 +25,7 @@ function sourceCalendar(sourceId, title, component) {
 }
 
 test("an ICS snapshot refresh updates stable source records and removes remote deletions", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   const first = applyICSSnapshot(document, {
     connectionId: "feed:work", text: calendar(event("one", "First"), event("two", "Second")), revision: "v1"
   });
@@ -46,7 +46,7 @@ test("an ICS snapshot refresh updates stable source records and removes remote d
 });
 
 test("refreshing a stapled remote event updates its source copy without replacing the authored event", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   const synced = applyICSSnapshot(document, {
     connectionId: "feed:shared", text: calendar(event("shared", "Remote title"))
   });
@@ -71,16 +71,16 @@ test("refreshing a stapled remote event updates its source copy without replacin
 });
 
 test("provider calendar IDs keep frames stable when a multi-calendar response changes order", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   applyICSSnapshot(document, {
-    connectionId: "microsoft:calendar",
+    connectionId: "feed:multi-calendar",
     text: `${sourceCalendar("calendar-a", "A", event("a", "A event"))}\r\n${sourceCalendar("calendar-b", "B", event("b", "B event"))}\r\n`
   });
   const sourceA = Object.values(document.foreign.ics.sources).find((source) => source.sync.calendarKey === "calendar-a");
   const frameA = Object.values(document.frames).find((frame) => frame.foreign?.ics?.source === sourceA.id);
   const eventA = Object.values(document.events).find((item) => item.payload?.uid === "a");
   applyICSSnapshot(document, {
-    connectionId: "microsoft:calendar",
+    connectionId: "feed:multi-calendar",
     text: `${sourceCalendar("calendar-b", "B", event("b", "B event"))}\r\n${sourceCalendar("calendar-a", "A", event("a", "A event updated"))}\r\n`
   });
   assert.equal(Object.values(document.frames).find((frame) => frame.foreign?.ics?.source === sourceA.id).id, frameA.id);

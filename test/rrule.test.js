@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
 import { coordinate, formatCivil } from "../src/exact.js";
 import { importICS } from "../src/ics.js";
@@ -27,7 +27,7 @@ function query(rrule, dtstart, { start = date(2026), end = date(2028) } = {}) {
     "END:VCALENDAR",
     ""
   ].join("\r\n");
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const result = importICS(source, document, { label: "Rules" });
   const engine = new ChronologEngine(document);
   const output = engine.queryFacts({ frame: result.frames[0], start, end });

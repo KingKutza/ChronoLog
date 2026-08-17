@@ -22,14 +22,6 @@ export function spanForScale(scale) {
   return interpolateLog(DETENTS[1].span, DETENTS[2].span, value - 1);
 }
 
-export function scaleForSpan(span) {
-  const value = Math.max(1, Number(span));
-  if (value <= DETENTS[1].span) {
-    return Math.log(value / DETENTS[0].span) / Math.log(DETENTS[1].span / DETENTS[0].span);
-  }
-  return 1 + Math.log(value / DETENTS[1].span) / Math.log(DETENTS[2].span / DETENTS[1].span);
-}
-
 const PROJECTIONS = ["calendar", "wall", "lines", "radial"];
 // This is deliberately a small registry rather than a collection of special
 // cases in the toolbar.  A future lens needs one entry here plus a renderer;

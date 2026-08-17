@@ -677,10 +677,3 @@ export class FormulaRuntime {
   }
 }
 
-export function parseFormula(source) {
-  return new Parser(source).module();
-}
-
-export function executeFormula(source, exportName, context, options) {
-  return new FormulaRuntime(options).compile(source).call(exportName, [context]);
-}

@@ -1,104 +1,59 @@
 # ChronoLog
 
-ChronoLog is a local-first timeline instrument. Its first supported end-user packaging target is a **locally served web application**: the application runs only on `127.0.0.1` and opens in the system browser. No cloud service, account, or network connection is required.
+ChronoLog is a local-first timeline instrument. Timelines are first-class
+objects — events staple onto them, sometimes onto more than one at once — and
+one `chronolog/1` document is the whole workspace. Seven lenses (Intimate,
+Tactical, Strategic, Wall, Lines, Spiral, Radial) look at that same document
+from different scales and shapes; none of them owns the data.
 
-## Install and launch
+ChronoLog is pre-alpha and exploratory: requirements are deliberately
+unlocked and rulings can change. See [ROADMAP.md](ROADMAP.md) for direction
+and open issues, and [CHRONOLOG_LEXICON.md](CHRONOLOG_LEXICON.md) for the
+project's vocabulary and founding ideas in the owner's own words.
 
-Release pages provide two self-contained desktop-style bundles:
-
-- `chronolog-linux-x64.tar.gz`: extract it and run `./chronolog`.
-- `chronolog-windows-x64.zip`: extract it and double-click `ChronoLog.cmd`.
-
-Both bundles include their own Node runtime, start the localhost-only app, and
-open it in the system browser. Keep the `runtime` and `app` folders beside the
-launcher. User data remains in the platform data directory, outside the bundle,
-so replacing or removing an extracted bundle does not delete a workspace.
-
-The npm archive remains available for users who already have Node.js:
-
-Install a release archive with the supported Node.js LTS runtime (Node 20 or newer):
+## Quick start
 
 ```sh
-npm install --global ./chronolog-pocket-instrument-0.1.0.tgz
-chronolog
+npm start        # run the installed/portable launcher
+npm run dev       # run a source checkout at http://127.0.0.1:4173
+npm test          # run the test suite
+npm run check     # syntax-check every source file
 ```
 
-Create the archive from the exact tagged source checkout with `npm pack`; the package contains the launcher and runtime files only. The checked-in `package.json` contains no runtime dependencies or install scripts, so repeating `npm pack` for that same commit produces the same application contents. `chronolog --help` lists options, including `--data-dir` and `--no-open`.
+`npm run build:portable` builds a self-contained bundle (embedded Node
+runtime, no install step) for the current platform: `chronolog-linux-x64` or
+`chronolog-windows-x64`.
 
-The launcher uses an available local port by default, opens the browser, and writes startup diagnostics to the `logs/launch.log` file in the data directory. A failed startup prints that diagnostic path in the terminal.
+`chronolog --help` lists launcher options, including `--data-dir` and
+`--no-open`.
 
-## Optional LAN workspace
+## Where data lives
 
-ChronoLog is deliberately **localhost-only** by default. To share one local
-workspace with another device you must opt in at launch:
+ChronoLog is dependency-free ES modules served locally on `127.0.0.1` only;
+no cloud service, account, or network connection is required. By default the
+data directory *is* the application's own directory — dev mode and an
+installed/portable bundle behave identically. `--data-dir` (or the
+`CHRONOLOG_DATA_DIR` environment variable) relocates it. Deleting a portable
+bundle deletes its data with it; keep the folder, or move data out with
+`--data-dir` first.
 
-```sh
-chronolog --lan --no-open
-```
-
-The terminal prints one URL per local IPv4 address. Each includes a generated
-bearer token in its `#chronolog-token=...` fragment. Open that exact URL on a
-trusted device; the fragment is not sent as an HTTP request and is retained
-only for that browser session. Treat the whole URL as a password: anyone with
-it can read and change that workspace. You may provide your own sufficiently
-long token with `--lan-token TOKEN`, preferably from a password manager.
-
-LAN mode exposes only the app and revision-guarded workspace API. API requests
-require the bearer token and, for browsers, must be same-origin; the server
-intentionally sends no permissive CORS headers. There is no cloud service,
-account, telemetry, or background upload. It is not an internet-facing
-deployment and it is not encrypted in transit. Use a trusted private LAN only;
-VPN/TLS/provider encryption is future work rather than something this launcher
-pretends to supply.
-
-## Data, upgrades, and removal
-
-The installed application is separate from user data. By default data lives in:
-
-- Linux: `$XDG_DATA_HOME/chronolog` (or `~/.local/share/chronolog`)
-- macOS: `~/Library/Application Support/ChronoLog`
-- Windows: `%APPDATA%\\ChronoLog`
-
-`chronolog.chronolog` is saved through a temporary file and rename, retaining ChronoLog's existing atomic-save behavior where the filesystem supports it. Upgrades replace only the installed package; they preserve this data. To roll back, install the previous `.tgz` archive—the same data directory is retained. Uninstalling the package also leaves data untouched. Remove the data directory yourself only after exporting or backing up the document you intend to discard.
+The workspace document is `chronolog.chronolog`, saved by atomic temp file
+and rename. A first run starts from an empty document — structural frames
+only, nothing pre-populated.
 
 ## Calendar and task sync
 
-Use **Document → Sync web calendars** for explicit read-only refreshes from a
-published HTTPS ICS address or from Microsoft Outlook and Microsoft To Do.
-Remote credentials and secret feed addresses stay in owner-only files in the
-local user-data directory; only source provenance and the acknowledged snapshot
-revision enter the portable document. Microsoft connection uses device sign-in
-and a public Entra Application (client) ID, never a client secret. See
-[the calendar sync guide](docs/calendar-sync.md) for provider setup, permissions,
-the Outlook time window, failure behavior, and privacy boundaries.
+Use **Document → Sync web calendars** for explicit, read-only refreshes from
+a published HTTPS ICS address (the private feed URL that Outlook, Google
+Calendar, Apple Calendar, and most other calendar services can publish).
+Write-back is disabled: a sync only ever pulls. ICS file import/export is
+also supported for one-off transfers. Feed addresses are stored in an
+owner-only dot-file in the data directory — never inside the portable
+document — protected by owner-only file permissions on POSIX and by NTFS
+ACLs on Windows.
 
-## Development
+## Further reading
 
-The [general frame model](docs/frame-model.md) documents composable temporal
-capabilities, unit/boundary semantics, cross-frame mappings, and prototype-data
-migration. The [visual grammar](docs/visual-grammar.md) documents how those
-domain roles appear across lenses.
-
-### Lens extension contract
-
-The workspace lens registry lives in `src/session.js` as `LENS_CATALOG`.
-To add a lens, add one registry entry (title, backing projection, and declared
-capabilities), provide a renderer in `src/projections.js`, and make its
-settings serializable through `ViewSession.toJSON()`.  The workspace editor
-will place a newly registered lens after a user's persisted ordering without
-resetting that ordering. A renderer that cannot support the current document
-must use the projection's explicit visible error state; it must not break the
-other lenses or invent a coordinate conversion.
-
-For a source checkout, use the separate development command:
-
-```sh
-npm run dev
-```
-
-`npm run build:portable` builds a bundle for the current Linux or Windows host
-with its current Node executable. Tagged pushes and manual runs of the Portable
-builds workflow verify the application, produce both platform archives, retain
-them as workflow artifacts, and attach them to tagged GitHub releases.
-
-It serves the checkout at `http://127.0.0.1:4173` and retains the historic behavior of storing its workspace document in the checkout. Its startup line identifies the mode as `development`; the installed launcher identifies the mode as `installed`. Run `npm test`, `npm run check`, and `npm run package:check` before making a release archive.
+- [ROADMAP.md](ROADMAP.md) — direction, ratified next steps, open issues
+- [AGENTS.md](AGENTS.md) — architecture map and engineering contracts for agents working in this repo
+- [CHRONOLOG_LEXICON.md](CHRONOLOG_LEXICON.md) — vocabulary and founding ideas, in the owner's own words

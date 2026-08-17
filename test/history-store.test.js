@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createSampleDocument } from "./helpers/sample-document.js";
 import {
   CommandHistory,
   addEvent,
@@ -47,7 +47,7 @@ function fakeHandle(name, log) {
 }
 
 test("loading repairs recurrence selectors stripped by the legacy event form", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   const frame = document.frames["calendar:personal"];
   const event = addEvent(document, { payload: { title: "Lunch" } });
   const pattern = addPattern(document, {
@@ -66,7 +66,7 @@ test("loading repairs recurrence selectors stripped by the legacy event form", (
 });
 
 test("loading preserves a suppressed occurrence while pruning a deleted replacement", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   const frame = document.frames["calendar:personal"];
   const event = addEvent(document, { payload: { title: "Series" } });
   const pattern = addPattern(document, {

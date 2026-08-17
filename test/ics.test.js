@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
 import { coordinate } from "../src/exact.js";
 import { exportICS, importICS, parseICSTree } from "../src/ics.js";
@@ -48,7 +48,7 @@ function date(day) {
 }
 
 test("ICS import keeps recurrence structural and task times distinct", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const result = importICS(source, document, { label: "Test" });
   const validation = validateDocument(document);
   assert.equal(validation.valid, true, validation.errors.join("\n"));
@@ -80,7 +80,7 @@ test("ICS import keeps recurrence structural and task times distinct", () => {
 });
 
 test("ICS export preserves unknown data, timezone, alarm, attendee, and RRULE", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const result = importICS(source, document, { label: "Test" });
   const engine = new ChronologEngine(document);
   const output = exportICS(document, {
@@ -101,7 +101,7 @@ test("ICS export preserves unknown data, timezone, alarm, attendee, and RRULE", 
 });
 
 test("matching UIDs across imports only produce staple suggestions", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const first = importICS(source, document, { label: "First" });
   const second = importICS(source, document, { label: "Second" });
   assert.ok(second.suggestions.some((item) => item.uid === "recurring@example.test"));

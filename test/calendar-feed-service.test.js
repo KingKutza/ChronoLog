@@ -63,7 +63,9 @@ test("calendar feed connections keep secret URLs server-side and pull with docum
 
     const config = join(root, ".chronolog-calendar-connections.json");
     assert.match(await readFile(config, "utf8"), /top-secret/);
-    assert.equal((await stat(config)).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(config)).mode & 0o777, 0o600);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
