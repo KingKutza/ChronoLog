@@ -3,7 +3,7 @@
 ChronoLog is a local-first timeline instrument, pre-alpha and exploratory:
 timelines are first-class objects, events staple onto them (sometimes onto
 more than one), and seven lenses project one shared `chronolog/1` document.
-Read [CHRONOLOG_LEXICON.md](CHRONOLOG_LEXICON.md) for vocabulary and the
+Read [LEXICON.md](LEXICON.md) for vocabulary and the
 founding ideas before naming anything new — it is the owner's own voice and
 brainstorm space. Meaning is authored by the user: color and semantics come
 from the user's own grouping and frame choices, never inferred (not from
@@ -14,7 +14,28 @@ character when you touch adjacent code or docs.
 
 ### `src/`
 
-- `app.js` — the UI shell: DOM wiring, toolbars, dialogs, drag/drop.
+- `app.js` — the bootstrap: constructs the document/session/store/history,
+  wires every `src/ui/` module onto the shared `app` object, and kicks the
+  first render.
+- `ui/` — the UI modules `app.js` wires together, each receiving `app`
+  explicitly and reading its current fields at call time:
+  - `inspector.js` — the Inspector panel: open/close chrome, the
+    provisional-draft lifecycle, the event/object-kind form, and
+    generated-fact materialization.
+  - `frames-panel.js` — the Frames workspace: frame/group/pattern authoring
+    forms and the Frames/pattern browsers that share an "object browser"
+    shell.
+  - `toolbar.js` — the lens bar, document menu, history controls, create
+    menu, theme editor, and lens-workspace configuration dialog.
+  - `drag.js` — pointer/wheel/drag mapping onto the lens surfaces: pan/zoom,
+    drag-to-move, drag-to-create, Intimate rail rebasing, minimap scrubbing.
+  - `calendar-sync-panel.js` — the ICS feed UI: file import/export, staple
+    suggestions, and the read-only HTTPS calendar-feed subscription panel.
+  - `workspace.js` — the render loop and minimap wiring.
+  - `transactions.js` — document-mutation-with-undo helpers shared by the
+    inspector and Frames panel.
+  - `dom-helpers.js` — `byId`/`escapeHTML`, the two DOM utilities shared
+    across the `ui/` modules.
 - `model.js` — the `chronolog/1` document shape, validation, and mutation
   helpers.
 - `engine.js` — queries over the document (facts, occurrences, indices).
@@ -40,8 +61,11 @@ character when you touch adjacent code or docs.
   reference rewrites).
 - `exact.js` — exact rational/BigInt math; no `Date` arithmetic in domain
   code.
-- `formula.js` — the sandboxed `chronolog-formula/1` pattern language (no
-  `eval`/`Function`, no ambient host access).
+- `formula.js` — a thin barrel re-exporting the sandboxed
+  `chronolog-formula/1` pattern language (no `eval`/`Function`, no ambient
+  host access) from `formula/`: `tokenizer.js` (lexer), `parser.js` (AST),
+  `runtime.js` (sandboxed evaluator + builtins). Preserves the historical
+  import path for callers (`src/engine.js`, tests).
 - `frame-edit.js` — frame-kind trait rules and authoring-capability flags
   used by the Frames editor.
 
@@ -57,7 +81,8 @@ character when you touch adjacent code or docs.
 - `build-portable.js` — builds the self-contained Linux/Windows bundles
   (embedded runtime + app tree + launcher script).
 - `test.js` — the test runner (imports every `test/*.test.js`).
-- `check.js` — syntax-checks every source file with `node --check`.
+- `check.js` — recursively syntax-checks every `.js` file under `bin/`,
+  `src/`, `tools/`, `fixtures/`, and `test/` with `node --check`.
 
 ### Other entry points
 
@@ -71,7 +96,7 @@ character when you touch adjacent code or docs.
 Fixtures are acceptance anchors, not scratch data:
 
 - `time-travel-taxonomy.chronolog.json` is the structural counterpart to
-  `GUI_Mockup/bak.png` (issue #23) — a deliberately small graph that makes
+  `GUI_Mockup/bak.png` — a deliberately small graph that makes
   the model's unusual claims executable rather than tracing every film in
   the image. It asserts: a fork is a terminator stapled to an interior point
   of another line (lines never branch internally); one event can attach
@@ -207,9 +232,10 @@ conversion.
   ROADMAP.md). There is no LAN tier; don't reintroduce one.
 - Pure Node, zero external dependencies. Keep it that way.
 - Pre-alpha: break compatibility rather than accrete legacy shims.
-- `CHRONOLOG_LEXICON.md` is the owner's voice — agents never edit it, even
+- `LEXICON.md` is the owner's voice — agents never edit it, even
   when it references something that has since moved or been deleted.
 - `GUI_Mockup/` images are live design references — never delete them.
 - The doc set is exactly four files: this file, `README.md`,
-  `ROADMAP.md`, and `CHRONOLOG_LEXICON.md`. Don't create new `.md` files.
+  `ROADMAP.md`, and `LEXICON.md`. Don't create new `.md` files.
+- Prefer behavioral tests over source-text string assertions.
 - Run `npm test` and `npm run check` before finishing work.

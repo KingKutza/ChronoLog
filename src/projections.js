@@ -1,13 +1,11 @@
 import {
   Rational,
   civilFromDays,
-  coordinate,
   daysFromCivil,
   daysInMonth,
   daysToCivilCoordinate,
   floorMod,
-  formatCivil,
-  levelValue
+  formatCivil
 } from "./exact.js";
 import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./radial.js";
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
@@ -73,23 +71,24 @@ function factGroupFrame(context, fact) {
 }
 
 function factVisibleInLens(context, fact) {
+  const lens = context.session.currentLens();
   const pattern = context.document.patterns[fact.event.provenance?.pattern];
   const source = pattern?.templateEvent ? context.document.events[pattern.templateEvent] : fact.event;
   const lenses = source?.display?.lenses || fact.event.display?.lenses;
-  if (Array.isArray(lenses) && !lenses.includes(context.session.currentLens())) return false;
+  if (Array.isArray(lenses) && !lenses.includes(lens)) return false;
   const sourceId = pattern?.templateEvent || fact.event.id;
   const governingFrames = new Set(context.engine.eventFrames(sourceId));
-  if (fact.displayFrame || fact.relation?.frame) governingFrames.add(fact.displayFrame || fact.relation.frame);
+  const governingFrameId = fact.displayFrame || fact.relation?.frame;
+  if (governingFrameId) governingFrames.add(governingFrameId);
   for (const frameId of governingFrames) {
     const frame = context.document.frames[frameId];
     if (!frame || frame.traits?.includes("importance")) continue;
-    if (Array.isArray(frame.display?.lenses) && !frame.display.lenses.includes(context.session.currentLens())) return false;
+    if (Array.isArray(frame.display?.lenses) && !frame.display.lenses.includes(lens)) return false;
   }
   const importanceFrames = context.engine.eventFrames(sourceId)
     .map((id) => context.document.frames[id])
     .filter((frame) => frame?.traits?.includes("importance"));
   if (!importanceFrames.length) return true;
-  const lens = context.session.currentLens();
   const cycleDays = context.session.radialCycle.toNumber();
   return importanceFrames.some((frame) => {
     if (Array.isArray(frame.display?.lenses) && !frame.display.lenses.includes(lens)) return false;
@@ -796,206 +795,6 @@ function renderWall(target, context) {
     grid.append(monthCard(context, current.year, current.month, byDay, context.session.wallDetail));
   }
   target.append(grid);
-  renderErrors(target, result);
-}
-
-function renderLines(target, context) {
-  const frames = calendarFrames(context.document);
-  const prime = context.document.frames[context.session.activeFrame] || frames[0];
-  const ordered = [prime, ...frames.filter((frame) => frame.id !== prime?.id)].filter(Boolean);
-  const window = context.session.window();
-  const width = 1200;
-  const height = 620;
-  const rowY = (index) => ordered.length <= 1
-    ? height / 2
-    : 70 + index * ((height - 140) / (ordered.length - 1));
-  const svg = svgElement("svg", {
-    class: "lines-svg",
-    viewBox: `0 0 ${width} ${height}`,
-    role: "img",
-    "aria-label": "Calendar and timeline topology"
-  });
-  svg.dataset.dropStart = window.start.toJSON();
-  svg.dataset.dropEnd = window.end.toJSON();
-  svg.dataset.dropKind = "linear";
-  const span = window.end.sub(window.start);
-  const positions = new Map();
-  const errors = [];
-
-  ordered.forEach((frame, index) => {
-    const y = rowY(index);
-    const color = index === 0 ? "#d4552d" : frame.color || ["#2e8b57", "#497bc1", "#8a63c9"][index % 3];
-    const line = svgElement("path", {
-      d: index === 0
-        ? `M 145 ${y} L 1140 ${y}`
-        : `M 145 ${y} C 340 ${y}, 360 ${y - 12}, 480 ${y - 12} S 760 ${y + 10}, 1140 ${y}`,
-      fill: "none",
-      stroke: color,
-      "stroke-width": index === 0 ? 5 : 3,
-      "stroke-linecap": "round"
-    });
-    svg.append(line);
-    const label = svgElement("text", { x: 24, y: y + 5, fill: color, class: "line-label" });
-    label.textContent = `${index === 0 ? "PRIME · " : ""}${frame.title}`;
-    svg.append(label);
-
-    const result = queryFacts(context, frame.id, window.start, window.end, 300);
-    errors.push(...(result.errors || []));
-    for (const fact of result.facts) {
-      const x = fact.day
-        ? 145 + Rational.parse(fact.day).sub(window.start).div(span).toNumber() * 995
-        : 145;
-      if (x < 140 || x > 1145) continue;
-      const stem = svgElement("line", {
-        x1: x, y1: y, x2: x, y2: y - 22,
-        stroke: factColor(context, fact),
-        "stroke-width": 1.5
-      });
-      const dot = svgElement("circle", {
-        cx: x, cy: y, r: 6,
-        fill: factColor(context, fact),
-        class: "line-event",
-        tabindex: 0
-      });
-      bindFact(dot, fact);
-      applySigil(dot, fact);
-      const title = svgElement("title");
-      title.textContent = fact.event.payload?.title || "(untitled)";
-      dot.append(title);
-      svg.append(stem, dot);
-      const prior = positions.get(fact.event.id);
-      if (prior) {
-        svg.append(svgElement("path", {
-          d: `M ${prior.x} ${prior.y} C ${prior.x} ${(prior.y + y) / 2}, ${x} ${(prior.y + y) / 2}, ${x} ${y}`,
-          fill: "none",
-          stroke: "#51483d",
-          "stroke-width": 1.5,
-          "stroke-dasharray": "4 4"
-        }));
-      } else {
-        positions.set(fact.event.id, { x, y });
-      }
-    }
-  });
-
-  for (const relation of Object.values(context.document.relations).filter(
-    (item) => item.type === "composition"
-  )) {
-    const parentIndex = ordered.findIndex((frame) => frame.id === relation.parent);
-    const childIndex = ordered.findIndex((frame) => frame.id === relation.child);
-    if (parentIndex < 0 || childIndex < 0) continue;
-    const y1 = rowY(parentIndex);
-    const y2 = rowY(childIndex);
-    svg.append(svgElement("path", {
-      d: `M 430 ${y1} C 455 ${y1}, 455 ${y2}, 480 ${y2}`,
-      fill: "none",
-      stroke: "#51483d",
-      "stroke-width": 2
-    }));
-  }
-  target.append(svg);
-  renderErrors(target, { errors });
-}
-
-function legacyRenderSimpleLines(target, context) {
-  const window = context.session.window();
-  const width = 1200;
-  const height = 620;
-  const primeY = height / 2;
-  const calendar = context.document.frames[context.session.activeFrame];
-  const groups = groupFrames(context.document).slice(0, 8);
-  const lanes = [
-    { id: null, title: `Prime Â· ${calendar?.title || "Calendar"}`, color: "#d4552d", y: primeY },
-    ...groups.map((group, index) => ({
-      id: group.id,
-      title: group.title,
-      color: group.color || ["#2e8b57", "#497bc1", "#8a63c9"][index % 3],
-      y: groups.length === 1 ? 130 : 70 + index * (180 / Math.max(1, groups.length - 1))
-    }))
-  ];
-  const svg = svgElement("svg", {
-    class: "lines-svg",
-    viewBox: `0 0 ${width} ${height}`,
-    role: "img",
-    "aria-label": "Prime timeline with group side lines"
-  });
-  svg.dataset.dropStart = window.start.toJSON();
-  svg.dataset.dropEnd = window.end.toJSON();
-  svg.dataset.dropKind = "linear";
-  const span = window.end.sub(window.start);
-  const result = queryFacts(context, context.session.activeFrame, window.start, window.end, 450);
-  const byLane = new Map(lanes.map((lane) => [lane.id, []]));
-  for (const fact of result.facts) {
-    const groupId = factGroupFrame(context, fact);
-    (byLane.get(byLane.has(groupId) ? groupId : null) || byLane.get(null)).push(fact);
-  }
-
-  for (let index = 0; index < 5; index += 1) {
-    const progress = index / 4;
-    const x = 145 + progress * 995;
-    const day = window.start.add(span.mul(String(progress)));
-    svg.append(svgElement("line", { x1: x, y1: 42, x2: x, y2: 572, class: "line-tick" }));
-    const label = svgElement("text", {
-      x, y: 596,
-      "text-anchor": index === 0 ? "start" : index === 4 ? "end" : "middle",
-      class: "minimap-label"
-    });
-    label.textContent = formatCivil(daysToCivilCoordinate(day)).replace(/ 00:00:00$/, "");
-    svg.append(label);
-  }
-
-  lanes.forEach((lane, index) => {
-    const line = svgElement("path", {
-      d: index === 0
-        ? `M 145 ${lane.y} L 1140 ${lane.y}`
-        : `M 145 ${primeY} C 220 ${primeY}, 245 ${lane.y}, 330 ${lane.y} C 560 ${lane.y}, 760 ${lane.y}, 940 ${lane.y} C 1040 ${lane.y}, 1070 ${primeY}, 1140 ${primeY}`,
-      fill: "none",
-      stroke: lane.color,
-      "stroke-width": index === 0 ? 5 : 3,
-      "stroke-linecap": "round"
-    });
-    svg.append(line);
-    const label = svgElement("text", {
-      x: index === 0 ? 24 : 345,
-      y: index === 0 ? lane.y + 5 : lane.y - 10,
-      fill: lane.color,
-      class: "line-label"
-    });
-    label.textContent = lane.title;
-    svg.append(label);
-
-    const buckets = new Map();
-    for (const fact of byLane.get(lane.id) || []) {
-      const progress = Rational.parse(fact.day).sub(window.start).div(span).toNumber();
-      if (progress < 0 || progress > 1) continue;
-      const key = Math.min(179, Math.max(0, Math.floor(progress * 180)));
-      const bucket = buckets.get(key) || { facts: [], progress };
-      bucket.facts.push(fact);
-      buckets.set(key, bucket);
-    }
-    for (const bucket of buckets.values()) {
-      const fact = bucket.facts[0];
-      const x = 145 + bucket.progress * 995;
-      const count = bucket.facts.length;
-      const dot = svgElement("circle", {
-        cx: x, cy: lane.y, r: Math.min(10, 5 + Math.log2(count)),
-        fill: lane.color,
-        class: "line-event",
-        tabindex: 0
-      });
-      bindFact(dot, fact);
-      const title = svgElement("title");
-      title.textContent = count === 1
-        ? fact.event.payload?.title || "(untitled)"
-        : `${count} events near ${formatCivil(fact.coordinate)}`;
-      dot.append(title);
-      svg.append(svgElement("line", {
-        x1: x, y1: lane.y, x2: x, y2: lane.y - Math.min(28, 16 + count),
-        stroke: lane.color, "stroke-width": 1.5
-      }), dot);
-    }
-  });
-  target.append(svg);
   renderErrors(target, result);
 }
 

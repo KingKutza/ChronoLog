@@ -1,15 +1,11 @@
 # ChronoLog
 
-ChronoLog is a local-first timeline instrument. Timelines are first-class
-objects — events staple onto them, sometimes onto more than one at once — and
-one `chronolog/1` document is the whole workspace. Seven lenses (Intimate,
-Tactical, Strategic, Wall, Lines, Spiral, Radial) look at that same document
-from different scales and shapes; none of them owns the data.
-
-ChronoLog is pre-alpha and exploratory: requirements are deliberately
-unlocked and rulings can change. See [ROADMAP.md](ROADMAP.md) for direction
-and open issues, and [CHRONOLOG_LEXICON.md](CHRONOLOG_LEXICON.md) for the
-project's vocabulary and founding ideas in the owner's own words.
+ChronoLog is a local-first, pre-alpha timeline instrument. Timelines are
+first-class objects — events staple onto them, sometimes onto more than one
+at once — and one `chronolog/1` document is the whole workspace. Seven
+lenses (Intimate, Tactical, Strategic, Wall, Lines, Spiral, Radial) look at
+that same document from different scales and shapes; none of them owns the
+data.
 
 ## Quick start
 
@@ -54,6 +50,6 @@ ACLs on Windows.
 
 ## Further reading
 
-- [ROADMAP.md](ROADMAP.md) — direction, ratified next steps, open issues
-- [AGENTS.md](AGENTS.md) — architecture map and engineering contracts for agents working in this repo
-- [CHRONOLOG_LEXICON.md](CHRONOLOG_LEXICON.md) — vocabulary and founding ideas, in the owner's own words
+- [ROADMAP.md](ROADMAP.md) — the work list, in priority order
+- [AGENTS.md](AGENTS.md) — architecture map and engineering contracts
+- [LEXICON.md](LEXICON.md) — vocabulary and founding ideas

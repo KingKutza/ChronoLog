@@ -148,7 +148,7 @@ export class ViewSession {
     this.radialMode = input.radialMode || "spiral";
     this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? LENS_VIEW_DEFAULTS.spiral.radialPast)));
     this.radialFuture = Math.max(0, Math.floor(Number(input.radialFuture ?? LENS_VIEW_DEFAULTS.spiral.radialFuture)));
-    this.radialCycle = positiveRadialCycle(input.radialCycle || "29.530588853");
+    this.radialCycle = positiveRadialCycle(input.radialCycle);
     const radialGuide = normalizeRadialGuideValues({
       radialCycle: this.radialCycle,
       radialDivisions: input.radialDivisions ?? LENS_VIEW_DEFAULTS.radial.radialDivisions,

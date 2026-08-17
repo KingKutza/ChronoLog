@@ -32,21 +32,21 @@ function attachmentDay(engine, relation) {
 
 function eventDurationDays(event) {
   const factors = {
-    week: Rational.parse(7),
-    day: Rational.parse(1),
-    hour: Rational.parse("1/24"),
-    minute: Rational.parse("1/1440"),
-    second: Rational.parse("1/86400")
+    week: rational(7),
+    day: rational(1),
+    hour: rational("1/24"),
+    minute: rational("1/1440"),
+    second: rational("1/86400")
   };
-  let duration = Rational.parse(0);
+  let duration = rational(0);
   try {
     for (const part of event?.magnitudes?.duration?.value?.levels || []) {
       if (factors[part.level]) duration = duration.add(rational(part.value).mul(factors[part.level]));
     }
   } catch {
-    return Rational.parse(0);
+    return rational(0);
   }
-  return duration.compare(0) > 0 ? duration : Rational.parse(0);
+  return duration.compare(0) > 0 ? duration : rational(0);
 }
 
 const WEEKDAYS = { SU: 0n, MO: 1n, TU: 2n, WE: 3n, TH: 4n, FR: 5n, SA: 6n };
@@ -309,7 +309,7 @@ export class ChronologEngine {
 
   isOrdinaryGroup(frameId) {
     const frame = this.document.frames[frameId];
-    return Boolean(frame?.traits?.includes("group") && !frame.traits.includes("importance"));
+    return Boolean(frame?.traits?.includes("group") && !frame.traits?.includes("importance"));
   }
 
   queryGroupMembers(group) {
@@ -658,8 +658,9 @@ export class ChronologEngine {
   queryFacts({ frame, start, end, selection = null, limit = Infinity, includeOverlaps = false }) {
     const fromDays = this.coordinateDays(frame, start);
     const toDays = this.coordinateDays(frame, end);
-    const lower = fromDays.compare(toDays) <= 0 ? fromDays : toDays;
-    const upper = fromDays.compare(toDays) <= 0 ? toDays : fromDays;
+    const ascending = fromDays.compare(toDays) <= 0;
+    const lower = ascending ? fromDays : toDays;
+    const upper = ascending ? toDays : fromDays;
     const maxFacts = Number.isFinite(Number(limit))
       ? Math.max(1, Math.floor(Number(limit)))
       : Infinity;

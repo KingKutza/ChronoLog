@@ -697,9 +697,6 @@ export function exportICS(document, {
     }
   }
 
-  // The set is used above to make the preservation intent explicit and prevents
-  // future code from accidentally expanding native templates twice.
-  void templateRelations;
   return serializeComponent(calendar) + "\r\n";
 }
 
