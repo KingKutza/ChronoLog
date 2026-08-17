@@ -11,9 +11,11 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const targets = [];
 for (const folder of ["bin", "src", "tools", "fixtures", "test"]) {
-  const entries = await readdir(join(root, folder));
-  for (const entry of entries.sort()) {
-    if (entry.endsWith(".js")) targets.push(join(root, folder, entry));
+  const entries = await readdir(join(root, folder), { withFileTypes: true, recursive: true });
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isFile() && entry.name.endsWith(".js")) {
+      targets.push(join(entry.parentPath ?? entry.path, entry.name));
+    }
   }
 }
 

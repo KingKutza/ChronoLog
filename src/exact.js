@@ -1,3 +1,5 @@
+// --- BigInt helpers -------------------------------------------------------
+
 const TEN = 10n;
 
 function absBigInt(value) {
@@ -22,6 +24,8 @@ export function floorDiv(a, b) {
 export function floorMod(a, b) {
   return a - floorDiv(a, b) * b;
 }
+
+// --- Rational: arbitrary-precision exact fractions -------------------------
 
 export class Rational {
   constructor(numerator, denominator = 1n) {
@@ -154,6 +158,8 @@ export const PI = Rational.parse(
 );
 export const TAU = PI.mul(2);
 
+// --- Transcendental functions (fixed-point series, no host Math) ----------
+
 function roundRational(value, decimalPlaces) {
   const rational = Rational.parse(value);
   const scale = TEN ** BigInt(decimalPlaces);
@@ -208,6 +214,7 @@ export function sqrtExact(value, decimalPlaces = 30) {
   return roundRational(guess, decimalPlaces);
 }
 
+// --- Gregorian calendar conversion -----------------------------------------
 // Proleptic Gregorian conversion using arbitrary-size integers.
 // Day zero is 1970-01-01, but callers never need to expose that implementation origin.
 export function daysFromCivil(yearValue, monthValue, dayValue) {
@@ -255,6 +262,8 @@ export function daysInMonth(yearValue, monthValue) {
   if (month === 2) return isLeapYear(yearValue) ? 29 : 28;
   return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
+
+// --- Nested-coordinate helpers ----------------------------------------------
 
 export function coordinate(levels) {
   return {
