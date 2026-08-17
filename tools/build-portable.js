@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const sourceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const APP_DIRECTORIES = Object.freeze(["assets", "bin", "docs", "src", "tools"]);
+const APP_DIRECTORIES = Object.freeze(["bin", "src", "tools"]);
 const APP_FILES = Object.freeze(["package.json", "pocket-instrument.html", "README.md"]);
 
 export function portableArguments(argv) {
@@ -69,14 +69,16 @@ export async function buildPortable({
     "",
     platform === "win32" ? "Double-click ChronoLog.cmd." : "Run ./chronolog from this directory.",
     "The embedded runtime and app directory must remain beside the launcher.",
-    "User data is stored outside this folder in the platform data directory.",
+    "User data is stored inside this folder, in the app directory, by default.",
+    "Deleting this bundle deletes your data too; keep the folder to keep your data,",
+    "or pass --data-dir to relocate it elsewhere.",
     "See app/README.md for options, data locations, upgrades, and removal.",
     ""
   ].join("\n"), "utf8");
   return { output, launcher: launcherPath, runtime: runtimeTarget };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const options = portableArguments(process.argv.slice(2));
   buildPortable({ root: sourceRoot, ...options }).then(({ output }) => {
     process.stdout.write(`Built portable ChronoLog at ${output}\n`);

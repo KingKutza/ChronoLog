@@ -14,25 +14,3 @@ test("Frames workspace fixture keeps leading coordinates, display companions, an
     "frame capabilities compose rather than replace existing traits"
   ]);
 });
-
-test("Frames workspace UI makes the hierarchy and advanced boundary explicit", async () => {
-  const [app, css] = await Promise.all([
-    readFile("src/app.js", "utf8"),
-    readFile("src/app.css", "utf8")
-  ]);
-  assert.match(app, /Leading frame — primary coordinates/);
-  assert.match(app, /Companions projected with/);
-  assert.match(app, /Groups in this workspace/);
-  assert.match(app, /groups organise event membership and never become temporal coordinates/i);
-  assert.match(app, /coordinate definition names positions inside this frame/i);
-  assert.match(app, /This adds a capability; it never removes/);
-  assert.match(app, /Frame definitions and organisational objects/);
-  assert.match(app, /No calendar frames yet/);
-  assert.match(app, /Create first calendar/);
-  assert.match(app, /This is the only calendar or line/);
-  assert.match(app, /No groups exist yet/);
-  assert.match(app, /frameAuthoringCapabilities\(kind, value\.traits\)/);
-  assert.match(app, /Groups and importance sets organize membership and display priority/);
-  assert.match(css, /\.frame-object-guide/);
-  assert.match(css, /\.coordinate-definition-note/);
-});

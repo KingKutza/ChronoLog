@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createSampleDocument, createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
 import { coordinate } from "../src/exact.js";
 import {
@@ -36,30 +36,30 @@ test("duration magnitudes convert human units to exact days", () => {
   assert.equal(durationMagnitudeDays(null).toJSON(), "0");
 });
 
-test("celestial state and cycle facts exist at remote dates", () => {
-  const engine = new ChronologEngine(createCelestialDocument());
+test("generated pattern state and cycle facts exist at remote dates", () => {
+  const engine = new ChronologEngine(createSampleDocument({ includeEvents: false }));
   for (const year of ["1026", "3026", "100002026", "-99997974"]) {
     const state = engine.queryState({
-      frame: "calendar:celestial",
+      frame: "calendar:generated",
       coordinate: date(year)
     });
     const facts = engine.queryFacts({
-      frame: "calendar:celestial",
+      frame: "calendar:generated",
       start: date(year),
       end: date(year, "2", "1")
     });
     assert.equal(state.errors.length, 0);
-    assert.ok(state.values["pattern:celestial"]);
+    assert.ok(state.values["pattern:marker"]);
     assert.ok(facts.facts.length >= 3);
     assert.equal(facts.errors.length, 0);
   }
 });
 
 test("virtual facts are suppressed and replaced without materializing a series", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   const engine = new ChronologEngine(document);
   const query = {
-    frame: "calendar:celestial",
+    frame: "calendar:generated",
     start: date("3026"),
     end: date("3026", "2", "1")
   };
@@ -71,7 +71,7 @@ test("virtual facts are suppressed and replaced without materializing a series",
 });
 
 test("one event may attach repeatedly and shared frames compose by reference", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const branchA = addFrame(document, { title: "Branch A", traits: ["line", "timeline"], basis: "frame:wall-time" });
   const branchB = addFrame(document, { title: "Branch B", traits: ["line", "timeline"], basis: "frame:wall-time" });
   const shared = addFrame(document, { title: "Shared history", traits: ["line", "segment"], basis: "frame:wall-time" });
@@ -88,7 +88,7 @@ test("one event may attach repeatedly and shared frames compose by reference", (
 });
 
 test("overlap queries retain a multi-day event after its start day", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false, includePattern: false });
   const event = addEvent(document, {
     traits: ["event"],
     magnitudes: { duration: durationMagnitude("9", "day") },
@@ -121,7 +121,7 @@ test("overlap queries retain a multi-day event after its start day", () => {
 });
 
 test("task and terminator traits enforce zero duration and retrospective calendar roles", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false, includePattern: false });
   const task = addEvent(document, {
     traits: ["event", "task"],
     magnitudes: { duration: durationMagnitude("1", "hour") },
@@ -140,7 +140,7 @@ test("task and terminator traits enforce zero duration and retrospective calenda
 });
 
 test("frame coordinate laws execute in the same formula runtime", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const law = addPattern(document, {
     title: "Hooperbun conversion",
     source: `

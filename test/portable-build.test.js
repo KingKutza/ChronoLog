@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,7 +19,9 @@ test("portable build embeds a runtime, launcher, and release-only app tree", asy
   const temporary = await mkdtemp(join(tmpdir(), "chronolog-portable-test-"));
   const output = join(temporary, "bundle");
   try {
-    const result = await buildPortable({ output, runtime: process.execPath, platform: "linux" });
+    const runtime = join(temporary, "stub-runtime");
+    await writeFile(runtime, "#!/bin/sh\nexit 0\n", "utf8");
+    const result = await buildPortable({ output, runtime, platform: "linux" });
     assert.equal(result.output, output);
     await Promise.all([
       access(join(output, "chronolog")),
@@ -32,7 +34,9 @@ test("portable build embeds a runtime, launcher, and release-only app tree", asy
     await assert.rejects(access(join(output, "app", "test")));
     await assert.rejects(access(join(output, "app", "chronolog.chronolog")));
   } finally {
-    await rm(temporary, { recursive: true, force: true });
+    // Best-effort: endpoint protection briefly holds fresh files, and fs.rm's
+    // retry loop can wedge on them; a leftover temp dir must not fail the test.
+    await rm(temporary, { recursive: true, force: true }).catch(() => {});
   }
 });
 

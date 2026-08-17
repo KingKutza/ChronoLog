@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { clone, createDocument, migrateDocument, validateDocument } from "../src/model.js";
-import { parseDocument } from "../src/store.js";
+import { clone, validateDocument } from "../src/model.js";
 
 const fixture = JSON.parse(await readFile(new URL("../fixtures/skyland-coordinate-mapping.chronolog.json", import.meta.url), "utf8"));
 
@@ -33,34 +32,14 @@ test("coordinate mappings require real frames, anchors, nested coordinates, and 
   assert.match(errors, /interval start must use nested levels/);
 });
 
-test("prototype frame descriptors migrate loss-minimizingly on parse", () => {
-  const legacy = createDocument("Legacy frame");
-  legacy.frames["measure:human-time"] = { id: "measure:human-time", title: "Time", traits: ["measure"] };
-  legacy.frames["frame:old"] = {
-    id: "frame:old",
-    title: "Old Skyland",
-    traits: ["calendar"],
-    basisFrame: "measure:human-time",
-    coordinate: [{ name: "sky-day" }],
-    cyclePeriodDays: "512"
-  };
-  const migrated = migrateDocument(legacy);
-  assert.equal(migrated.frames["frame:old"].basis, "measure:human-time");
-  assert.deepEqual(migrated.frames["frame:old"].coordinate, { kind: "nested", levels: [{ name: "sky-day" }] });
-  assert.equal(migrated.frames["frame:old"].period.provenance.kind, "approximation");
-  assert.equal(parseDocument(JSON.stringify(legacy)).frames["frame:old"].period.value.levels[0].value, "512");
-});
-
-test("the general frame model documents semantic separation and legacy migration", async () => {
-  const guide = await readFile(new URL("../docs/frame-model.md", import.meta.url), "utf8");
+test("AGENTS.md documents the frame model's semantic separation", async () => {
+  const guide = await readFile(new URL("../AGENTS.md", import.meta.url), "utf8");
   for (const phrase of [
-    "open, composable record shape",
-    "Groups and importance sets organize membership",
-    "period.kind: \"event-defined\"",
-    "coordinate-mapping",
-    "basisFrame",
-    "cyclePeriodDays",
-    "five Earth hours corresponding",
-    "to nine Skyland days"
+    "open trait records",
+    "unit system",
+    "coordinate mapping",
+    "period\\.kind: \"event-defined\"",
+    "no averaging",
+    "no extrapolation"
   ]) assert.match(guide, new RegExp(phrase));
 });

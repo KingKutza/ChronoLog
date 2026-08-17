@@ -2,20 +2,21 @@
 
 import { createServer } from "node:http";
 import { copyFile, open, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { networkInterfaces } from "node:os";
+import { createHash } from "node:crypto";
 import { basename, dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCalendarFeedService } from "./calendar-feed-service.js";
-import { createMicrosoftSyncService } from "./microsoft-sync-service.js";
 
 const toolRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+// tools/serve.js always lives at <app root>/tools/serve.js, in every
+// deployment shape including the portable bundle (app/tools/serve.js), so the
+// app root is simply toolRoot's parent. CHRONOLOG_APP_ROOT remains as a test
+// hook: it lets tests point the static-file root at an isolated temp
+// directory (distinct from the real checkout) while still exercising the
+// "data lives beside the app root" default via CHRONOLOG_DATA_DIR.
 const root = resolve(process.env.CHRONOLOG_APP_ROOT || toolRoot);
 const realRoot = await realpath(root);
 const port = Number(process.env.CHRONOLOG_PORT || 4173);
-const mode = process.env.CHRONOLOG_APP_ROOT ? "installed" : "development";
-const lanEnabled = process.env.CHRONOLOG_LAN === "1";
-const lanToken = lanEnabled ? (process.env.CHRONOLOG_LAN_TOKEN || randomBytes(24).toString("base64url")) : null;
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -35,32 +36,6 @@ const legacyDocumentFile = join(dataRoot, "chronolog.json");
 const recoveryDocumentFile = join(dataRoot, ".chronolog-recovery.chronolog");
 const MAX_DOCUMENT_BYTES = 512 * 1024 * 1024;
 const handleCalendarFeed = createCalendarFeedService({ dataRoot });
-const handleMicrosoftSync = createMicrosoftSyncService({ dataRoot });
-
-function tokenMatches(value) {
-  const supplied = String(value || "").replace(/^Bearer\s+/i, "");
-  if (!lanToken || !supplied) return false;
-  const left = Buffer.from(supplied);
-  const right = Buffer.from(lanToken);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-function permittedApiRequest(request) {
-  if (!lanEnabled) return true;
-  if (!tokenMatches(request.headers.authorization)) return false;
-  // We intentionally emit no CORS headers. A browser page served by this
-  // instance is same-origin; a different web origin cannot read or write this
-  // workspace just because it knows a LAN address and token.
-  const origin = request.headers.origin;
-  if (!origin) return true; // CLI/diagnostic client with the bearer token.
-  return origin === `http://${request.headers.host}`;
-}
-
-function localLanAddresses() {
-  return Object.values(networkInterfaces()).flat()
-    .filter((entry) => entry && entry.family === "IPv4" && !entry.internal)
-    .map((entry) => entry.address);
-}
 
 function requestBody(request) {
   return new Promise((resolveBody, rejectBody) => {
@@ -115,11 +90,6 @@ async function atomicWrite(file, body) {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", "http://localhost");
-    if (url.pathname.startsWith("/api/") && !permittedApiRequest(request)) {
-      response.writeHead(403, { "cache-control": "no-store" }).end("LAN workspace access requires its launch token from the same Chronolog origin");
-      return;
-    }
-    if (url.pathname.startsWith("/api/sync/microsoft") && await handleMicrosoftSync(request, response, url)) return;
     if (url.pathname.startsWith("/api/sync/") && await handleCalendarFeed(request, response, url)) return;
     if (url.pathname === "/api/document" && ["GET", "HEAD"].includes(request.method)) {
       const file = await workspaceDocument();
@@ -184,10 +154,11 @@ const server = createServer(async (request, response) => {
       return;
     }
     // Development mode can deliberately keep data beside the checkout. Never
-    // let its ordinary static-file route bypass LAN API authentication.
+    // let its ordinary static-file route bypass the document API's atomic
+    // writes and revision guards.
     if (target === documentFile || target === legacyDocumentFile || target === recoveryDocumentFile
       || (dirname(target) === dataRoot && basename(target).startsWith(".chronolog-"))) {
-      response.writeHead(403).end("Workspace files are available only through the authenticated API");
+      response.writeHead(403).end("Workspace files are available only through the document API");
       return;
     }
     const info = await stat(target);
@@ -213,17 +184,8 @@ server.on("error", (error) => {
   process.exitCode = 1;
 });
 
-server.listen(port, lanEnabled ? "0.0.0.0" : "127.0.0.1", () => {
+server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   const activePort = typeof address === "object" && address ? address.port : port;
-  process.stdout.write(`Chronolog (${mode}): http://127.0.0.1:${activePort}/\nUser data: ${dataRoot}\n`);
-  if (lanEnabled) {
-    const addresses = localLanAddresses();
-    const targets = addresses.length
-      ? addresses.map((host) => `http://${host}:${activePort}/#chronolog-token=${lanToken}`)
-      : [`http://<LAN-address>:${activePort}/#chronolog-token=${lanToken}`];
-    process.stdout.write("LAN mode is enabled. Anyone with this link can edit this workspace:\n");
-    for (const target of targets) process.stdout.write(`${target}\n`);
-    process.stdout.write("The token is a bearer secret; do not paste this URL into chat, email, or issue trackers.\n");
-  }
+  process.stdout.write(`Chronolog: http://127.0.0.1:${activePort}/\nUser data: ${dataRoot}\n`);
 });

@@ -3,7 +3,6 @@ import {
   civilCoordinateToDays,
   coordinate,
   daysToCivilCoordinate,
-  formatCivil,
   levelValue
 } from "./exact.js";
 import {
@@ -704,6 +703,3 @@ export function exportICS(document, {
   return serializeComponent(calendar) + "\r\n";
 }
 
-export function describeICSCoordinate(value) {
-  return formatCivil(value, true);
-}

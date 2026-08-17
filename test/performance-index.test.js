@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
 import { daysFromCivil, daysToCivilCoordinate, Rational } from "../src/exact.js";
 import { importICS } from "../src/ics.js";
@@ -29,7 +29,7 @@ function date(year, month, day) {
 }
 
 test("fact queries use frame and event indexes and honor a UI result bound", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const imported = importICS(calendar(1000), document);
   const engine = new ChronologEngine(document);
   const frame = imported.frames[0];
@@ -47,7 +47,7 @@ test("fact queries use frame and event indexes and honor a UI result bound", () 
 });
 
 test("dense recurrence expansion stops at the render limit", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const imported = importICS(calendar(80, true), document);
   const engine = new ChronologEngine(document);
   const result = engine.queryFacts({
@@ -61,7 +61,7 @@ test("dense recurrence expansion stops at the render limit", () => {
 });
 
 test("open-ended recurrence windows are cached for adjacent UI queries", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const imported = importICS(calendar(20, "open"), document);
   const engine = new ChronologEngine(document);
   engine.queryFacts({
@@ -83,7 +83,7 @@ test("open-ended recurrence windows are cached for adjacent UI queries", () => {
 });
 
 test("lightweight explicit edits can rebuild indexes without discarding recurrence caches", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const imported = importICS(calendar(20, "open"), document);
   const engine = new ChronologEngine(document);
   engine.queryFacts({
@@ -101,7 +101,7 @@ test("lightweight explicit edits can rebuild indexes without discarding recurren
 });
 
 test("sustained navigation keeps generated recurrence caches within hard bounds", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const imported = importICS(calendar(200, "open"), document);
   const engine = new ChronologEngine(document);
   for (let offset = 0; offset < 180 * 31; offset += 31) {

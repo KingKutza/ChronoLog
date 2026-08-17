@@ -33,6 +33,50 @@ export function createDocument(title = "Untitled Chronolog") {
   };
 }
 
+// The structural frames a workspace cannot function without: a nested
+// human-time magnitude frame (used for durations and other measures) and a
+// gregorian wall-time frame (the basis every calendar and event attachment
+// hangs off of). This is the default first-run document -- deliberately
+// empty of calendars, groups, events, and patterns; those are authored by
+// the user, never seeded.
+export function createEmptyWorkspaceDocument(title = "Untitled Chronolog") {
+  const document = createDocument(title);
+  document.frames["measure:human-time"] = {
+    id: "measure:human-time",
+    title: "Human time magnitude",
+    traits: ["line", "measure", "duration"],
+    coordinate: {
+      kind: "nested",
+      levels: [
+        { name: "year" },
+        { name: "day", within: "year", transition: "gregorian.daysInYear" },
+        { name: "hour", within: "day", radix: "24" },
+        { name: "minute", within: "hour", radix: "60" },
+        { name: "second", within: "minute", radix: "60" },
+        { name: "subsecond", within: "second" }
+      ]
+    }
+  };
+  document.frames["frame:wall-time"] = {
+    id: "frame:wall-time",
+    title: "Wall time",
+    traits: ["line", "temporal", "gregorian"],
+    coordinate: {
+      kind: "gregorian",
+      levels: [
+        { name: "year" },
+        { name: "month", within: "year", transition: "gregorian.months" },
+        { name: "day", within: "month", transition: "gregorian.days" },
+        { name: "hour", within: "day", radix: "24" },
+        { name: "minute", within: "hour", radix: "60" },
+        { name: "second", within: "minute", radix: "60" },
+        { name: "subsecond", within: "second" }
+      ]
+    }
+  };
+  return document;
+}
+
 export function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
@@ -242,23 +286,12 @@ function validateCoordinateMapping(document, relation, errors) {
   }
 }
 
-// Read old prototype descriptors without forcing a document-wide rewrite.  The
-// canonical result remains chronolog/1: generic Frame traits, authored unit
-// definitions under coordinate, and Relations for cross-frame meaning.
+// Placeholder for future loss-minimizing migrations when the canonical
+// chronolog/1 shape evolves. The canonical result remains chronolog/1:
+// generic Frame traits, authored unit definitions under coordinate, and
+// Relations for cross-frame meaning.
 export function migrateDocument(document) {
   if (!document || typeof document !== "object") return document;
-  for (const frame of Object.values(document.frames || {})) {
-    if (!frame || typeof frame !== "object") continue;
-    if (!frame.basis && typeof frame.basisFrame === "string") frame.basis = frame.basisFrame;
-    if (Array.isArray(frame.coordinate)) frame.coordinate = { kind: "nested", levels: frame.coordinate };
-    if (frame.cyclePeriodDays !== undefined && !frame.period) {
-      frame.period = {
-        frame: "measure:human-time",
-        value: coordinate([{ level: "day", value: String(frame.cyclePeriodDays) }]),
-        provenance: { kind: "approximation", migratedFrom: "cyclePeriodDays" }
-      };
-    }
-  }
   return document;
 }
 
@@ -426,12 +459,6 @@ export function eventRelations(document, eventId) {
   );
 }
 
-export function frameRelations(document, frameId) {
-  return Object.values(document.relations).filter(
-    (relation) => relation.type === "attachment" && relation.frame === frameId
-  );
-}
-
 // An open end is deliberately not stored on a line. It means this particular
 // projection stopped before reaching a persisted terminator, not that the line
 // itself has died. Callers pass the attachment visible at the rendered edge.
@@ -442,13 +469,6 @@ export function renderTerminatorState(document, lineId, boundaryAttachmentId) {
       && relation.terminator === boundaryAttachmentId
   );
   return termination?.state || "open";
-}
-
-export function frameChildren(document, frameId) {
-  return Object.values(document.relations)
-    .filter((relation) => relation.type === "composition" && relation.parent === frameId)
-    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
-    .map((relation) => document.frames[relation.child]);
 }
 
 export function coordinateToDays(document, frameId, value) {

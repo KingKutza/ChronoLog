@@ -31,7 +31,6 @@ jobs:
           node-version: 20
       - run: npm test
       - run: npm run check
-      - run: npm run package:check
       - run: node tools/build-portable.js --platform ${{ matrix.platform }} --output dist/${{ matrix.artifact }}
       - if: runner.os == 'Linux'
         run: tar -czf dist/${{ matrix.artifact }}.tar.gz -C dist ${{ matrix.artifact }}

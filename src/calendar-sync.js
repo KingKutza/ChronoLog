@@ -1,5 +1,5 @@
 import { importICS, property } from "./ics.js";
-import { clone, createDocument, createId, touch } from "./model.js";
+import { clone, createDocument, touch } from "./model.js";
 
 function sourceFrame(document, sourceId) {
   return Object.values(document.frames || {}).find((frame) => frame?.foreign?.ics?.source === sourceId) || null;
@@ -271,6 +271,3 @@ export function calendarSyncConnections(document) {
   return [...connections.values()];
 }
 
-export function newCalendarConnectionId(prefix = "feed") {
-  return createId(`calendar-${prefix}`);
-}

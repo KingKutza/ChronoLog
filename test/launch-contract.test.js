@@ -1,29 +1,40 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { join, win32 } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import test from "node:test";
 import { defaultDataDirectory, parseArguments } from "../bin/chronolog.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const packageInfo = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 
-assert.equal(packageInfo.bin.chronolog, "bin/chronolog.js");
-assert.equal(packageInfo.scripts.dev, "node tools/serve.js");
-assert.equal(packageInfo.scripts.start, "node bin/chronolog.js");
-assert.match(await readFile(join(root, "tools", "serve.js"), "utf8"), /Chronolog \(\$\{mode\}\):/);
-assert.deepEqual(parseArguments(["--no-open", "--port", "4312", "--data-dir", "./data"]), {
-  open: false, port: 4312, dataDirectory: join(process.cwd(), "data"), lan: false, lanToken: null
+test("package.json and tools/serve.js expose the documented launch contract", async () => {
+  const packageInfo = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  assert.equal(packageInfo.scripts.dev, "node tools/serve.js");
+  assert.equal(packageInfo.scripts.start, "node bin/chronolog.js");
+  assert.match(await readFile(join(root, "tools", "serve.js"), "utf8"), /Chronolog: http:\/\/127\.0\.0\.1:\$\{activePort\}/);
 });
-assert.deepEqual(parseArguments(["--lan", "--lan-token", "a-long-enough-lan-token"]), {
-  open: true, port: 0, dataDirectory: null, lan: true, lanToken: "a-long-enough-lan-token"
+
+test("parseArguments parses flags and rejects invalid values", () => {
+  assert.deepEqual(parseArguments(["--no-open", "--port", "4312", "--data-dir", "./data"]), {
+    open: false, port: 4312, dataDirectory: join(process.cwd(), "data")
+  });
+  assert.throws(() => parseArguments(["--port", "wat"]), /--port/);
 });
-assert.throws(() => parseArguments(["--lan-token", "short"]), /at least 16/);
-assert.throws(() => parseArguments(["--port", "wat"]), /--port/);
-assert.equal(defaultDataDirectory({ HOME: "/home/alex" }, "linux"), "/home/alex/.local/share/chronolog");
-assert.equal(defaultDataDirectory({ XDG_DATA_HOME: "/data" }, "linux"), "/data/chronolog");
-assert.equal(defaultDataDirectory({ HOME: "/Users/alex" }, "darwin"), "/Users/alex/Library/Application Support/ChronoLog");
-assert.equal(defaultDataDirectory({ APPDATA: "C:\\Users\\alex\\AppData\\Roaming" }, "win32"), win32.resolve("C:\\Users\\alex\\AppData\\Roaming", "ChronoLog"));
-const help = spawnSync(process.execPath, [join(root, "bin/chronolog.js"), "--help"], { encoding: "utf8" });
-assert.equal(help.status, 0, help.stderr);
-assert.match(help.stdout, /Usage: chronolog/);
+
+test("defaultDataDirectory defaults to the app's own root directory (portable, no per-OS profile dirs)", () => {
+  assert.equal(defaultDataDirectory({}), resolve(root));
+  assert.equal(defaultDataDirectory({ HOME: "/home/alex" }), resolve(root));
+  assert.equal(defaultDataDirectory({ APPDATA: "C:\\Users\\alex\\AppData\\Roaming" }), resolve(root));
+});
+
+test("defaultDataDirectory honors CHRONOLOG_DATA_DIR as the only environment override", () => {
+  assert.equal(defaultDataDirectory({ CHRONOLOG_DATA_DIR: "/custom/data" }), resolve("/custom/data"));
+  assert.equal(defaultDataDirectory({ CHRONOLOG_DATA_DIR: "./relative-data" }), resolve("./relative-data"));
+});
+
+test("chronolog --help exits cleanly with usage text", () => {
+  const help = spawnSync(process.execPath, [join(root, "bin/chronolog.js"), "--help"], { encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /Usage: chronolog/);
+});

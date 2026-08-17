@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createSampleDocument, createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
 import { civilCoordinateToDays, coordinate, daysFromCivil } from "../src/exact.js";
 import { escapeICSText, exportICS, importICS, parseICSTree, unescapeICSText } from "../src/ics.js";
@@ -28,7 +28,7 @@ function vcalendar(lines) {
 }
 
 function importCalendar(lines) {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const result = importICS(vcalendar(lines), document, { label: "Roundtrip" });
   return { document, result };
 }
@@ -96,7 +96,7 @@ test("VTODO round-trips DTSTART, DTSTAMP, and COMPLETED distinctly", () => {
 });
 
 test("signed and large years round-trip through the adapter", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   const ides = addEvent(document, {
     traits: ["event"],
     magnitudes: { duration: durationMagnitude("3600", "second") },
@@ -124,7 +124,7 @@ test("signed and large years round-trip through the adapter", () => {
   const output = exportICS(document, { frame: "calendar:personal", now: NOW });
   assert.match(output, /DTSTART:-00440315T000000/);
   assert.match(output, /DTSTART:1000020260806T000000/);
-  const back = createCelestialDocument();
+  const back = createSampleDocument({ includeEvents: false });
   importICS(output, back, { label: "Back" });
   const backIdes = Object.values(back.events).find((event) => event.payload.title === "Ides of March");
   const backRelation = Object.values(back.relations).find(
@@ -243,7 +243,7 @@ test("cross-zone DTEND keeps the wall-clock duration but warns", () => {
 });
 
 test("fresh events gain a deterministic DTSTAMP from the injected clock", () => {
-  const document = createCelestialDocument();
+  const document = createSampleDocument({ includeEvents: false });
   const event = addEvent(document, {
     traits: ["event"],
     magnitudes: { duration: durationMagnitude("0") },

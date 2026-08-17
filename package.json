@@ -4,27 +4,11 @@
   "private": true,
   "type": "module",
   "description": "A local-first timeline instrument",
-  "bin": {
-    "chronolog": "bin/chronolog.js"
-  },
-  "files": [
-    "bin/",
-    "assets/",
-    "src/",
-    "tools/",
-    "pocket-instrument.html",
-    "README.md",
-    "docs/"
-  ],
-  "engines": {
-    "node": ">=20"
-  },
   "scripts": {
     "start": "node bin/chronolog.js",
     "dev": "node tools/serve.js",
     "test": "node tools/test.js",
     "check": "node tools/check.js",
-    "build:portable": "node tools/build-portable.js",
-    "package:check": "npm pack --dry-run --ignore-scripts"
+    "build:portable": "node tools/build-portable.js"
   }
 }

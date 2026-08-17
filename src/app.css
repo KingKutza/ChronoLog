@@ -136,8 +136,6 @@ button {
   letter-spacing: -.035em;
 }
 
-.chronolog-wordmark { white-space: nowrap; }
-.chronolog-wordmark > span { margin-left: .04em; color: var(--primary); font-weight: 850; }
 .responsive-label-short { display: none; }
 
 .instrument-button,
@@ -280,23 +278,6 @@ button {
   letter-spacing: .035em;
   text-transform: uppercase;
 }
-
-.chronolog-mark {
-  width: 26px;
-  height: 26px;
-  flex: none;
-  overflow: visible;
-  fill: none;
-  color: var(--ink);
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.chronolog-mark__frame--primary { stroke-width: 2.8; }
-.chronolog-mark__frame--secondary { stroke: var(--accent); stroke-width: 2.35; }
-.chronolog-mark__staple { stroke-width: 1.8; opacity: .88; }
-.chronolog-mark__join { fill: var(--primary); stroke: var(--paper); stroke-width: 1; }
-.chronolog-mark__endpoint { fill: currentColor; stroke: none; }
 
 #create-menu { flex: none; position: relative; }
 #create-menu > summary {
@@ -684,12 +665,6 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   background: var(--panel);
 }
 .calendar-sync-status { min-height: 18px; color: var(--muted); font: 600 11px/1.45 var(--data); }
-.microsoft-sync-card { margin: 14px 0; padding: 12px; border: 1px solid var(--strong); border-radius: 9px; background: white; }
-.microsoft-sync-card h3 { margin: 0 0 6px; font-size: 13px; }
-.microsoft-sync-controls { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
-.microsoft-sync-controls .field-note { flex-basis: 100%; }
-.microsoft-client-form { width: 100%; }
-.microsoft-device-code { display: block; flex-basis: 100%; padding: 9px; border: 1px dashed var(--strong); border-radius: 7px; background: var(--panel); font: 800 18px/1.2 var(--data); letter-spacing: .12em; text-align: center; }
 .calendar-sync-list { display: grid; gap: 8px; }
 .calendar-sync-row { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--hair); border-radius: 8px; background: white; }
 .calendar-sync-row > div:first-child { min-width: 0; display: grid; gap: 3px; }
@@ -1308,7 +1283,6 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 #inspector-body { overflow-x: hidden; }
 
 @media (max-width: 1400px) {
-  .chronolog-wordmark { display: none; }
   #brand { gap: 0; margin-right: 0; }
   #save-status {
     width: 20px;

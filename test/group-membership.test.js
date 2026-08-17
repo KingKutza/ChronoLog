@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCelestialDocument } from "../src/celestial.js";
+import { createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
 import { addEvent, addFrame, addRelation, durationMagnitude, validateDocument } from "../src/model.js";
 
@@ -15,7 +15,7 @@ function member(document, id, groupId, memberId) {
 }
 
 test("group membership preserves authored, query, and union provenance", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const authored = event(document, "event:authored", ["event", "personal"]);
   const queried = event(document, "event:queried", ["event", "work"]);
   const both = event(document, "event:both", ["event", "work"]);
@@ -31,7 +31,7 @@ test("group membership preserves authored, query, and union provenance", () => {
 });
 
 test("positive nested, self, mutual, and deeper group cycles terminate at the least fixed point", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const leaf = event(document, "event:leaf");
   const a = group(document, "group:a");
   const b = group(document, "group:b");
@@ -48,7 +48,7 @@ test("positive nested, self, mutual, and deeper group cycles terminate at the le
 });
 
 test("recursive negation is rejected instead of receiving order-dependent semantics", () => {
-  const document = createCelestialDocument();
+  const document = createStructuralDocument();
   const a = group(document, "group:a", { excludeGroups: ["group:b"] });
   const b = group(document, "group:b");
   member(document, "membership:b-a", b.id, a.id);
