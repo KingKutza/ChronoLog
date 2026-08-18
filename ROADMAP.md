@@ -19,7 +19,13 @@ Ordered by priority.
    bar; ToDo and Notes buttons live in the view bar (colored distinctly)
    and open their dock cards; lenses can be hidden via the lens
    configuration surface, with a right-side drop on the view bar for
-   hidden ones.
+   hidden ones. Interaction rulings: the dock never closes in response to
+   stage interactions — only explicit user action closes it (a mid-drag
+   collapse moves the world under the cursor); opening a second object
+   adds a card, replacing only when it is the same object; double-click
+   on a stage event opens its editor card; the event editor defaults to
+   editing the series, with a toggle at the top to swap to
+   this-occurrence and back.
 2. **Chrome and stage polish.** No scrollbar on the stage's right edge —
    it scrolls and drags without a bar. The Autosaved chip becomes a small
    color indicator. Context bar: forward/back on the right, mirroring the
@@ -70,7 +76,11 @@ Ordered by priority.
    model. New notes and todos auto-anchor to now; notes and todos
    right-align in Intimate. Includes the sigils-and-zones display work and
    an ICS path (VJOURNAL) so Notes round-trip. Open questions remain —
-   this is labeled as work, not settled design.
+   this is labeled as work, not settled design. Field evidence for the
+   retirement: converting a group named "important" to the legacy
+   importance kind removes it from groups, stops it coloring its events,
+   and an important-marked ToDo renders in Strategic under neither
+   mechanism — the split dropdown is the bad semantics this item deletes.
 10. **Staple anchoring** (see LEXICON.md, staple anchoring entry) — retire
     the start-time-plus-duration assumption: a staple can anchor start,
     end, midpoint, or another named point of an event, paired with a
