@@ -52,8 +52,10 @@ Ordered by priority.
    invisible inside colored zones. Overlap must be indicated locally, not
    globally: a 30-minute collision currently lanes both events for their
    full height and roughs up the whole interface even where no text
-   contends — narrow or mark only the actual overlapping interval, leave
-   every non-contended element at full size. Placing an event inside an
+   contends. Events stay rectangles — no key-shaped blocks whose width
+   varies along their height. The overlap itself gets drawn (a zone
+   marking the contended interval) rather than deforming the
+   participants. Placing an event inside an
    occupied span must not require dragging the occupant away and back
    (today's workaround; midnight-crossing drag made it survivable, but it
    is a bad operating mode) — create-in-place must work through an
