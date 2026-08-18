@@ -18,6 +18,12 @@ import {
 import { OBJECT_KINDS, normalizeObjectKind, objectKindForEvent, traitsForObjectKind } from "../object-kinds.js";
 import { delOp, putOp } from "../ops.js";
 import { calendarFrames, groupFrames } from "../projections.js";
+import {
+  applyRecurrenceEnd,
+  recurrenceEndMode,
+  recurrenceUntilDate,
+  truncateRecurrenceAt
+} from "../recurrence-end.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
 
 // The Inspector panel: generic open/close chrome, the provisional-draft
@@ -151,8 +157,48 @@ export function createInspector(app, dom) {
       || null;
   }
 
-  function relationDate(relation) {
-    return relation?.coordinate ? formatCivil(relation.coordinate, true) : "";
+  // A pattern carries its rule twice: the parsed `rrule` the engine reads and the
+  // `rawRule` property ICS export re-serializes. Writing one without the other is
+  // how a rule change survives a render and then vanishes on export, so both are
+  // written together, and the verbatim copy of the old text is dropped because it
+  // no longer describes this rule.
+  function writePatternRule(pattern, rrule) {
+    pattern.rrule = rrule;
+    if (!pattern.rawRule) return;
+    pattern.rawRule = {
+      ...pattern.rawRule,
+      value: Object.entries(rrule).map(([key, value]) => `${key}=${value}`).join(";")
+    };
+    delete pattern.rawRule.raw;
+    delete pattern.rawRule.verbatim;
+  }
+
+  // "Stop propagating the series here": cap the series with an RRULE UNTIL at
+  // this occurrence rather than deleting the whole pattern — the humane
+  // alternative to losing every occurrence including the past ones. Inclusive of
+  // the occurrence in hand, undoable like every other edit, and deliberately not
+  // behind a confirm dialog.
+  //
+  // Occurrences after this point that were already materialized into explicit
+  // events stay: they are real records someone chose to make, and silently
+  // deleting them here would be a second, hidden edit.
+  function stopRepeatingAt(patternId, occurrence) {
+    const { chronolog } = app;
+    const pattern = chronolog.patterns[patternId];
+    if (!pattern) {
+      app.toast("That repeating series no longer exists.", true);
+      return;
+    }
+    if (!occurrence) {
+      app.toast("This occurrence has no date to end the series at.", true);
+      return;
+    }
+    const rrule = truncateRecurrenceAt(pattern.rrule || {}, occurrence);
+    app.executeRecordChange("Stop repeating series", "patterns", patternId, (documentValue) => {
+      writePatternRule(documentValue.patterns[patternId], rrule);
+    });
+    app.toast(`Series now ends with ${formatCivil(occurrence, true)}. Undo restores it.`);
+    dismissInspector();
   }
 
   function relationDateParts(relation) {
@@ -279,6 +325,7 @@ export function createInspector(app, dom) {
     <div class="inspector-actions">
       <button class="instrument-button primary" id="materialize" type="button">Edit this occurrence</button>
       <button class="instrument-button" id="edit-series" type="button">Edit series</button>
+      <button class="instrument-button" id="stop-series" type="button" title="Keep this occurrence and every earlier one; stop the series repeating after it">Stop repeating here</button>
     </div>`;
     openInspector(fact.event.payload?.title || "Generated fact", wrapper);
     byId("materialize").addEventListener("click", () => {
@@ -294,6 +341,9 @@ export function createInspector(app, dom) {
     byId("edit-series").addEventListener("click", () => {
       const pattern = chronolog.patterns[fact.event.provenance?.pattern];
       if (pattern?.templateEvent) openEventInspector(pattern.templateEvent);
+    });
+    byId("stop-series").addEventListener("click", () => {
+      stopRepeatingAt(fact.event.provenance?.pattern, fact.coordinate);
     });
   }
 
@@ -314,6 +364,8 @@ export function createInspector(app, dom) {
       (pattern) => pattern.kind === "ics-rrule" && pattern.templateEvent === eventId
     );
     const originalRecurrenceChoice = recurrenceFormChoice(recurrence);
+    const recurrenceEnd = recurrenceEndMode(recurrence?.rrule);
+    const completedParts = relationDateParts(completed);
     const membershipReasons = new Map(engine.eventGroupMemberships(eventId)
       .map(({ group, provenance }) => [group, provenance]));
     const memberships = new Set([
@@ -386,12 +438,28 @@ export function createInspector(app, dom) {
         <input name="interval" type="number" min="1" max="999" value="${escapeHTML(recurrence?.rrule?.INTERVAL || "1")}">
       </label>
     </div>
-    <label class="field recurrence-options"><span>Ends after</span>
-      <input name="count" type="number" min="1" max="10000" value="${escapeHTML(recurrence?.rrule?.COUNT || "")}" placeholder="Leave blank to continue">
-    </label>
-    <label class="field" data-completed-field><span>Completed at (optional)</span>
-      <input name="completed" value="${escapeHTML(relationDate(completed))}">
-    </label>
+    <div class="form-row recurrence-options">
+      <label class="field"><span>Ends</span>
+        <select name="endMode">
+          ${[["never", "Never"], ["count", "After a number of times"], ["until", "On a date"]]
+            .map(([value, label]) => `<option value="${value}" ${recurrenceEnd === value ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field" data-end-count><span>Times</span>
+        <input name="count" type="number" min="1" max="10000" value="${escapeHTML(recurrence?.rrule?.COUNT || "")}">
+      </label>
+      <label class="field" data-end-until><span>Last date</span>
+        <input name="until" type="date" value="${escapeHTML(recurrenceUntilDate(recurrence?.rrule?.UNTIL))}">
+      </label>
+    </div>
+    <div class="form-row" data-completed-field>
+      <label class="field"><span>Completed date (optional)</span>
+        <input name="completedDate" type="date" value="${escapeHTML(completedParts.date)}">
+      </label>
+      <label class="field"><span>Completed time</span>
+        <input name="completedTime" type="time" step="60" value="${escapeHTML(completedParts.time)}">
+      </label>
+    </div>
     <label class="field"><span>Description</span>
       <textarea name="description">${escapeHTML(event.payload?.description || "")}</textarea>
     </label>
@@ -434,14 +502,22 @@ export function createInspector(app, dom) {
     </details>
     <div class="inspector-actions">
       <button class="instrument-button primary" type="submit">Save</button>
-      ${event.provenance?.pattern ? `<button class="instrument-button" id="edit-series" type="button">Edit series</button>` : ""}
+      ${event.provenance?.pattern ? `<button class="instrument-button" id="edit-series" type="button">Edit series</button>
+      <button class="instrument-button" id="stop-series" type="button" title="Keep this occurrence and every earlier one; stop the series repeating after it">Stop repeating here</button>` : ""}
       ${provisionalEvent?.id === eventId ? `<button class="instrument-button" id="cancel-draft" type="button">Cancel</button>` : ""}
       <button class="instrument-button danger" id="delete-object" type="button">Delete</button>
     </div>`;
-    const syncRecurrenceFields = () => wrapper.classList.toggle(
-      "has-recurrence",
-      Boolean(wrapper.elements.repeat.value)
-    );
+    const syncRecurrenceFields = () => {
+      wrapper.classList.toggle("has-recurrence", Boolean(wrapper.elements.repeat.value));
+      // COUNT and UNTIL are mutually exclusive in RFC 5545, so only the chosen
+      // one is offered — and the unused input is disabled as well as hidden, so a
+      // stale value cannot be submitted from a field nobody can see.
+      const mode = wrapper.elements.endMode.value;
+      wrapper.querySelector("[data-end-count]").hidden = mode !== "count";
+      wrapper.querySelector("[data-end-until]").hidden = mode !== "until";
+      wrapper.elements.count.disabled = mode !== "count";
+      wrapper.elements.until.disabled = mode !== "until";
+    };
     const syncObjectKind = () => {
       const kind = normalizeObjectKind(wrapper.elements.objectKind.value);
       const definition = OBJECT_KINDS[kind];
@@ -451,9 +527,11 @@ export function createInspector(app, dom) {
       wrapper.elements.duration.disabled = definition.zeroDuration;
       wrapper.elements.unit.disabled = definition.zeroDuration;
       wrapper.querySelector("[data-completed-field]").hidden = kind !== "todo";
-      wrapper.elements.completed.disabled = kind !== "todo";
+      wrapper.elements.completedDate.disabled = kind !== "todo";
+      wrapper.elements.completedTime.disabled = kind !== "todo";
     };
     wrapper.elements.repeat.addEventListener("change", syncRecurrenceFields);
+    wrapper.elements.endMode.addEventListener("change", syncRecurrenceFields);
     wrapper.elements.objectKind.addEventListener("change", syncObjectKind);
     syncRecurrenceFields();
     syncObjectKind();
@@ -470,6 +548,10 @@ export function createInspector(app, dom) {
       if (pattern?.templateEvent) openEventInspector(pattern.templateEvent);
     });
 
+    wrapper.querySelector("#stop-series")?.addEventListener("click", () => {
+      stopRepeatingAt(event.provenance?.pattern, relation?.coordinate);
+    });
+
     wrapper.addEventListener("submit", (inputEvent) => {
       inputEvent.preventDefault();
       const data = new FormData(wrapper);
@@ -479,13 +561,19 @@ export function createInspector(app, dom) {
           : null;
         const dateOnly = !String(data.get("startTime") || "");
         const objectKindChoice = normalizeObjectKind(data.get("objectKind"));
-        const completedCoordinate = objectKindChoice === "todo" && data.get("completed")
-          ? parseDateText(data.get("completed"))
+        const completedCoordinate = objectKindChoice === "todo" && data.get("completedDate")
+          ? parseDateText(`${data.get("completedDate")} ${data.get("completedTime") || "00:00"}`)
           : null;
         const repeatChoice = String(data.get("repeat") || "");
         const repeat = repeatChoice === "WEEKDAYS" ? "WEEKLY" : repeatChoice;
         const interval = Math.max(1, Math.min(999, Number(data.get("interval")) || 1));
-        const count = String(data.get("count") || "").trim();
+        const endMode = String(data.get("endMode") || "never");
+        if (endMode === "until" && !String(data.get("until") || "").trim()) {
+          throw new Error("Choose the date the series ends on, or set Ends to Never.");
+        }
+        if (endMode === "count" && !String(data.get("count") || "").trim()) {
+          throw new Error("Choose how many times the series repeats, or set Ends to Never.");
+        }
         if (repeat && !nextCoordinate) throw new Error("A repeating event needs a start date.");
         const selectedGroups = new Set(data.getAll("groups").map(String));
         const selectedImportance = String(data.get("importance") || "standard");
@@ -601,25 +689,20 @@ export function createInspector(app, dom) {
           if (!repeat && existingPattern) {
             delete documentValue.patterns[existingPattern.id];
           } else if (repeat) {
-            const rrule = { ...(existingPattern?.rrule || {}), FREQ: repeat, INTERVAL: String(interval) };
+            let rrule = { ...(existingPattern?.rrule || {}), FREQ: repeat, INTERVAL: String(interval) };
             if (repeatChoice !== originalRecurrenceChoice) {
               delete rrule.BYDAY;
               delete rrule.BYMONTHDAY;
               delete rrule.BYMONTH;
             }
             if (repeatChoice === "WEEKDAYS") rrule.BYDAY = "MO,TU,WE,TH,FR";
-            if (count) rrule.COUNT = String(Math.max(1, Math.min(10000, Number(count) || 1)));
-            else delete rrule.COUNT;
+            rrule = applyRecurrenceEnd(rrule, {
+              mode: endMode,
+              count: data.get("count"),
+              until: data.get("until")
+            });
             if (existingPattern) {
-              existingPattern.rrule = rrule;
-              if (existingPattern.rawRule) {
-                existingPattern.rawRule = {
-                  ...existingPattern.rawRule,
-                  value: Object.entries(rrule).map(([key, value]) => `${key}=${value}`).join(";")
-                };
-                delete existingPattern.rawRule.raw;
-                delete existingPattern.rawRule.verbatim;
-              }
+              writePatternRule(existingPattern, rrule);
               existingPattern.appliesTo = [chosenFrame];
               existingPattern.frame = chosenFrame;
               existingPattern.templateRelation = existing?.id;

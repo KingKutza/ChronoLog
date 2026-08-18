@@ -47,11 +47,22 @@ character when you touch adjacent code or docs.
   application lives here.
 - `lines.js`, `radial.js`, `minimap.js`, `strategic-density.js` — per-lens
   math (topology layout, spiral/concentric geometry, minimap magnitude,
-  density budgeting).
+  density budgeting). `minimap.js` owns the whole dot-field contract —
+  magnitude, the coarse scale ladder that keeps busy/free contrast readable at
+  every document density, field geometry, and per-lens label granularity — so
+  `renderMinimap` only draws what it decides.
+- `intimate-pan.js` — the Intimate rail's free two-axis pan arithmetic.
+  Horizontal motion spends the rail's own scroll slack first and becomes
+  whole-day window steps once it is pinned, which is the only thing that works
+  on a window wide enough that `1fr` day columns leave no horizontal overflow
+  at all.
 - `calendar-structure.js`, `calendar-projection.js`, `event-cycle.js` — the
   frame model: fixed nested-calendar authoring/validation, read-only
   projection helpers for that schema, and event-defined (observed-boundary)
   cycle resolution.
+- `recurrence-end.js` — how an RRULE stops: COUNT/UNTIL mode detection, their
+  mutual exclusion, and the UNTIL values for "ends on this date" (inclusive of
+  the whole day) and "stop repeating here" (inclusive of that occurrence).
 - `object-kinds.js` — trait bundles for Event/ToDo/Note-shaped objects.
 - `visual-language.js` — the sigil vocabulary, theme fields, and the 4-step
   color cascade; contains no DOM code so it is testable as a pure contract.

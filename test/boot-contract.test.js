@@ -9,7 +9,7 @@ import { calendarFrames, groupFrames } from "../src/projections.js";
 import { ViewSession, sanitizeSessionParameters } from "../src/session.js";
 import { lineFramePlan, linesRenderState } from "../src/lines.js";
 import { FIXED_RADIAL_CYCLES, resolveRadialCycle } from "../src/radial.js";
-import { MINIMAP_GRID_ROWS, minimapDotGrid } from "../src/minimap.js";
+import { MINIMAP_BUCKETS, MINIMAP_GRID_ROWS, minimapDotGrid } from "../src/minimap.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -117,7 +117,10 @@ test("the first-run empty workspace document drives the boot chain with no calen
   assert.ok(resolved, "the radial cycle still resolves against the fixed catalog");
   assert.ok(resolved.period, "a resolved cycle carries a period the radial lenses can render");
 
-  const grid = minimapDotGrid(new Float64Array(140), { rows: MINIMAP_GRID_ROWS });
+  const grid = minimapDotGrid(new Float64Array(MINIMAP_BUCKETS), { rows: MINIMAP_GRID_ROWS });
   assert.equal(grid.rows, MINIMAP_GRID_ROWS);
+  assert.equal(grid.columns, MINIMAP_BUCKETS);
   assert.equal(grid.cells.length, grid.rows * grid.columns);
+  // An empty document still paints a baseline axis and nothing above it.
+  assert.deepEqual([...grid.columnDots], new Array(MINIMAP_BUCKETS).fill(0));
 });

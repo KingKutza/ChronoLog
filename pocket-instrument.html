@@ -25,7 +25,7 @@
         <button class="icon-button" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
         <button class="icon-button" id="redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo (Ctrl+Shift+Z)">↷</button>
       </div>
-      <span id="save-status" class="status-chip" data-state="clean" role="status" aria-live="polite" aria-label="Save status" title="Current save status">Saved</span>
+      <span id="save-status" data-state="clean" role="status" aria-live="polite" aria-label="Save status: Saved" title="Saved"></span>
       <details id="document-menu">
         <summary title="Document actions" aria-label="Document actions"><span class="responsive-label-long">Document</span><span class="responsive-label-short" aria-hidden="true">⋮</span></summary>
         <div class="document-menu-panel">
@@ -60,8 +60,7 @@
       <div id="projection"></div>
     </section>
 
-    <div id="focus-readout"></div>
-    <div id="minimap" title="Drag the outlined view window. The fixed-scale dot field shows event magnitude; red is now and black is the view center."></div>
+    <div id="minimap" title="Drag the outlined view window. The dot field shows activity per bucket; red is now and the thin dark line is the view centre."></div>
 
     <aside id="inspector" aria-label="Object inspector">
       <header class="inspector-head">

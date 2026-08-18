@@ -2,9 +2,7 @@ import {
   Rational,
   civilFromDays,
   daysFromCivil,
-  daysInMonth,
-  daysToCivilCoordinate,
-  formatCivil
+  daysInMonth
 } from "../exact.js";
 import { calendarFrames } from "../projections.js";
 import { FIXED_RADIAL_CYCLES, cyclePeriodHint, normalizeRadialGuideValues, radialGuideSettings, resolveRadialCycle } from "../radial.js";
@@ -62,7 +60,6 @@ export function createToolbar(app, dom) {
   function updateChrome() {
     const { session, history } = app;
     byId("shared-focus").checked = session.sharedFocus;
-    byId("focus-readout").textContent = formatCivil(daysToCivilCoordinate(session.currentFocus()), true);
     byId("undo").disabled = history.undoStack.length === 0;
     byId("redo").disabled = history.redoStack.length === 0;
     const lensBar = byId("lens-bar");
@@ -239,8 +236,21 @@ export function createToolbar(app, dom) {
       return node;
     };
 
+    // Three destinations, chosen per control rather than sliced out of one list
+    // by index. The old index slicing is why Intimate lost its forward step: the
+    // primary set was [1, 2, 3] of a seven-control list, which happens to take
+    // "back one day", "zoom out" and the readout, and leaves "day ›" and
+    // "week »" reachable only through Options.
+    //
+    //   navControls — anything that moves the window. These sit at the bar's
+    //     right end, in one group with the today and reset targets they mirror.
+    //   barControls — a lens's own primary affordance, at the left end.
+    //   controls    — everything else, in the Options panel. The window-span
+    //     readouts live here now: on the bar they were the one element allowed
+    //     to grow, so they spanned it. Blank space in the middle is correct.
     const controls = [];
-    let primaryControlIndexes = [];
+    const navControls = [];
+    const barControls = [];
     const hourLabel = (hour) => hour === 0 || hour === 24 ? "12 AM" : hour === 12 ? "12 PM" : `${hour % 12} ${hour < 12 ? "AM" : "PM"}`;
     const todayControl = button("◎", goToToday, "Center this lens on today");
     todayControl.id = "today";
@@ -256,14 +266,15 @@ export function createToolbar(app, dom) {
       zoomIn.setAttribute("aria-label", "Zoom Intimate in");
       todayControl.title = "Center Intimate on today and now";
       todayControl.setAttribute("aria-label", "Center Intimate on today and now");
+      navControls.push(
+        button("« week", () => session.move(-7), "Back one week"),
+        button("‹ day", () => session.move(-1), "Back one day"),
+        button("day ›", () => session.move(1), "Forward one day"),
+        button("week »", () => session.move(7), "Forward one week")
+      );
+      barControls.push(zoomOut, zoomIn);
       controls.push(
-        button("« week", () => session.move(-7)),
-        button("‹ day", () => session.move(-1)),
-        zoomOut,
         readout(`~${visibleHours < 10 ? visibleHours.toFixed(1) : Math.round(visibleHours)} hr screen`),
-        zoomIn,
-        button("day ›", () => session.move(1)),
-        button("week »", () => session.move(7)),
         number("back", session.intimateBack, 0, 14, (value) => { session.intimateBack = value; }),
         number("forward", session.intimateForward, 0, 14, (value) => { session.intimateForward = value; }),
         select("grain", [["15", "15 min"], ["30", "30 min"], ["60", "1 hour"]], String(session.intimateGrain), (value) => { session.intimateGrain = Number(value); }),
@@ -274,31 +285,34 @@ export function createToolbar(app, dom) {
           session.intimateEndHour = Math.max(Number(value), session.intimateStartHour + 1);
         })
       );
-      primaryControlIndexes = [1, 2, 3];
     } else if (lens === "tactical") {
+      navControls.push(
+        button("‹ row", () => session.move(-session.tacticalColumns), "Back one row of days"),
+        button("row ›", () => session.move(session.tacticalColumns), "Forward one row of days")
+      );
       controls.push(
-        button("‹ row", () => session.move(-session.tacticalColumns)),
         readout(`${session.tacticalRows} × ${session.tacticalColumns} · ${session.tacticalRows * session.tacticalColumns} days`),
-        button("row ›", () => session.move(session.tacticalColumns)),
         number("rows", session.tacticalRows, 1, 8, (value) => { session.tacticalRows = value; }),
         number("days / row", session.tacticalColumns, 1, 14, (value) => { session.tacticalColumns = value; })
       );
-      primaryControlIndexes = [0, 1, 2];
     } else if (lens === "lines") {
+      navControls.push(
+        button("‹ fortnight", () => session.move(-14), "Back one fortnight"),
+        button("fortnight ›", () => session.move(14), "Forward one fortnight")
+      );
       controls.push(
-        button("‹ fortnight", () => session.move(-14)),
         readout(`${session.linesDays} days`),
-        button("fortnight ›", () => session.move(14)),
         number("window", session.linesDays, 3, 90, (value) => { session.linesDays = value; })
       );
-      primaryControlIndexes = [0, 1, 2];
     } else if (["strategic", "wall"].includes(lens)) {
       const property = lens === "strategic" ? "strategicMonths" : "wallMonths";
       const maximum = lens === "wall" ? 12 : 18;
+      navControls.push(
+        button("‹ month", () => shiftFocusMonths(-1), "Back one month"),
+        button("month ›", () => shiftFocusMonths(1), "Forward one month")
+      );
       controls.push(
-        button("‹ month", () => shiftFocusMonths(-1)),
         readout(`${session[property]} month${session[property] === 1 ? "" : "s"}`),
-        button("month ›", () => shiftFocusMonths(1)),
         number("window", session[property], 1, maximum, (value) => { session[property] = value; })
       );
       if (lens === "strategic") {
@@ -318,7 +332,6 @@ export function createToolbar(app, dom) {
           checkbox("zone fill", session.wallZoneFill, (value) => { session.wallZoneFill = value; })
         );
       }
-      primaryControlIndexes = [0, 1, 2];
     } else if (["spiral", "radial"].includes(lens)) {
       const cycleDays = session.radialCycle.toNumber();
       const guide = radialGuideSettings(session);
@@ -327,11 +340,13 @@ export function createToolbar(app, dom) {
       const subdivision = subdivisionDays < 1
         ? `${(subdivisionDays * 24).toFixed(subdivisionDays * 24 < 10 ? 1 : 0)} hr / spoke`
         : `${subdivisionDays.toFixed(subdivisionDays < 10 ? 1 : 0)} days / spoke`;
+      navControls.push(
+        button("‹ cycle", () => session.move(session.radialCycle.neg()), "Back one cycle"),
+        button("cycle ›", () => session.move(session.radialCycle), "Forward one cycle")
+      );
       controls.push(
-        button("‹ cycle", () => session.move(session.radialCycle.neg())),
         select("cycle", cycles.map((cycle) => [cycle.id, cycle.title]), session.activeCycle, selectCycle),
-        readout(`${divisions} ticks · ${subdivision}`),
-        button("cycle ›", () => session.move(session.radialCycle))
+        readout(`${divisions} ticks · ${subdivision}`)
       );
       if (lens === "spiral") {
         controls.push(
@@ -363,12 +378,10 @@ export function createToolbar(app, dom) {
         ),
         select("marks", [["auto", "Cycle aware"], ["day-night", "Midnight + noon"], ["plain", "Plain"]], session.radialMarks, (value) => { session.radialMarks = value; })
       );
-      primaryControlIndexes = [0, 2, 3];
     }
     if (lens === "intimate") controls.push(checkbox("zone fill", session.intimateZoneFill, (value) => { session.intimateZoneFill = value; }));
     if (lens === "tactical") controls.push(checkbox("zone fill", session.tacticalZoneFill, (value) => { session.tacticalZoneFill = value; }));
-    const primaryControls = primaryControlIndexes.map((index) => controls[index]);
-    const optionControls = controls.filter((_, index) => !primaryControlIndexes.includes(index));
+    const optionControls = controls;
     const options = document.createElement("details");
     options.className = "lens-control-overflow";
     options.open = optionsWasOpen;
@@ -379,7 +392,15 @@ export function createToolbar(app, dom) {
     optionPanel.className = "lens-control-overflow-panel";
     optionPanel.append(...optionControls);
     options.append(summary, optionPanel);
-    lensControls.append(...primaryControls, options, todayControl, resetControl);
+    // One right-hand group: window movement, then today, then reset. The group's
+    // `margin-left: auto` is the only thing holding the bar's middle open, which
+    // is why nothing else on the bar may grow.
+    const windowGroup = document.createElement("div");
+    windowGroup.className = "lens-control-group";
+    windowGroup.setAttribute("role", "group");
+    windowGroup.setAttribute("aria-label", `${LENS_CATALOG[lens].title} window`);
+    windowGroup.append(...navControls, todayControl, resetControl);
+    lensControls.append(...barControls, options, windowGroup);
   }
 
   function openThemeEditor() {

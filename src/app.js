@@ -78,10 +78,12 @@ function toast(message, error = false) {
 app.toast = toast;
 
 app.store = new JournalStore({
+  // The save state is a colour-only indicator, so the message never becomes
+  // text in the chrome — it stays on `title` and `aria-label`, which is where a
+  // hover and a screen reader look for it.
   onStatus(status) {
     const node = byId("save-status");
     node.dataset.state = status.state;
-    node.textContent = status.message;
     node.title = status.message;
     node.setAttribute("aria-label", `Save status: ${status.message}`);
   },

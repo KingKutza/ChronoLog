@@ -1,10 +1,48 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 
 async function readSource(path) {
   return (await readFile(path, "utf8")).replace(/\r\n/g, "\n");
 }
+
+async function jsFiles(directory) {
+  const found = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...await jsFiles(full));
+    else if (entry.name.endsWith(".js")) found.push(full);
+  }
+  return found.sort();
+}
+
+// boot-contract.test.js catches a broken import graph; this catches a broken DOM
+// graph, which fails the same way — silently, with a green suite and an app that
+// throws on its first render because `byId(...)` returned null. Removing a node
+// from the shell while a module still reaches for it is the exact shape of that
+// mistake.
+test("every element a module looks up by id exists in the shell or is created in source", async () => {
+  const html = await readSource("pocket-instrument.html");
+  const files = await jsFiles("src");
+  const available = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
+  const lookups = new Map();
+  for (const file of files) {
+    const source = await readSource(file);
+    // Ids the source creates itself, in markup strings or by assignment, are as
+    // real as the ones in the shell.
+    for (const [, id] of source.matchAll(/\bid="([^"]+)"/g)) available.add(id);
+    for (const [, id] of source.matchAll(/\.id = "([^"]+)"/g)) available.add(id);
+    for (const [, , id] of source.matchAll(/\b(byId|getElementById)\("([^"]+)"\)/g)) {
+      if (!lookups.has(id)) lookups.set(id, file);
+    }
+  }
+  assert.ok(lookups.size > 20, `expected the UI's id lookups, found ${lookups.size}`);
+  const missing = [...lookups]
+    .filter(([id]) => !available.has(id))
+    .map(([id, file]) => `${file} looks up #${id}, which nothing creates`);
+  assert.deepEqual(missing, []);
+});
 
 test("lens bar exposes seven explicit lenses with a minimap and a lens configuration entry point", async () => {
   const html = await readSource("pocket-instrument.html");

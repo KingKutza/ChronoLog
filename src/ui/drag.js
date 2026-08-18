@@ -1,4 +1,11 @@
 import { Rational, daysToCivilCoordinate, formatCivil } from "../exact.js";
+import {
+  INTIMATE_COLUMN_PIXELS_FALLBACK,
+  intimatePanStep,
+  intimateWheelStep,
+  scrollSlack,
+  wheelHorizontalDelta
+} from "../intimate-pan.js";
 import { clone, durationMagnitudeDays } from "../model.js";
 import { putOp } from "../ops.js";
 import { minimapDragFocus, minimapDragState } from "../session.js";
@@ -16,7 +23,29 @@ export function createDragController(app, dom) {
 
   let zoomWheel = 0;
   let panWheel = 0;
+  let intimateWheelCarry = 0;
   let radialWheelAnimation = null;
+
+  function intimateScroll() {
+    return projection.querySelector(".intimate-scroll");
+  }
+
+  // One day column's width in pixels: the distance a horizontal gesture has to
+  // cover to be worth one day of window movement.
+  function intimateColumnPixels() {
+    const width = projection.querySelector(".intimate-day-column")?.getBoundingClientRect().width || 0;
+    return width > 1 ? width : INTIMATE_COLUMN_PIXELS_FALLBACK;
+  }
+
+  // LEXICON's "roll, first dose" gives the header the horizontal gesture:
+  // "drag the header / horizontal wheel slides the window". The day-header strip
+  // and the hour rail are chrome — no event is ever created by dragging across
+  // them — so a plain drag there pans, while a plain drag inside a day column
+  // still creates. Shift-drag pans anywhere, exactly as before, so a modifier
+  // never means two different things.
+  function intimatePanSurface(target) {
+    return Boolean(target?.closest?.(".intimate-header,.intimate-gutter,.intimate-corner"));
+  }
 
   function animateRadialWheel(delta) {
     const { session } = app;
@@ -91,11 +120,31 @@ export function createDragController(app, dom) {
 
   function panFromWheel(event) {
     const { session } = app;
-    if (session.currentLens() === "intimate" && !event.ctrlKey && !event.metaKey) return;
+    if (session.currentLens() === "intimate" && !event.ctrlKey && !event.metaKey) {
+      // Vertical wheel is the rail's own scrolling and stays native. Horizontal
+      // wheel spends the rail's slack natively too, and becomes window movement
+      // only once the rail is pinned at an edge — so a narrow window scrolls its
+      // columns, and a wide window, which has no horizontal slack at all because
+      // the columns are `1fr`, moves time instead of doing nothing.
+      const horizontal = wheelHorizontalDelta(event);
+      if (!horizontal) return;
+      const scroll = intimateScroll();
+      const slack = scroll
+        ? scrollSlack(scroll.scrollLeft, scroll.scrollWidth - scroll.clientWidth, horizontal)
+        : 0;
+      if (slack > 0.5) return;
+      event.preventDefault();
+      const step = intimateWheelStep({ carried: intimateWheelCarry, delta: horizontal });
+      intimateWheelCarry = step.carried;
+      if (!step.dayShift) return;
+      session.move(step.dayShift);
+      app.scheduleRender();
+      return;
+    }
     event.preventDefault();
     if (event.ctrlKey || event.metaKey) {
       if (session.currentLens() === "intimate") {
-        const scroll = projection.querySelector(".intimate-scroll");
+        const scroll = intimateScroll();
         const offset = scroll
           ? Math.max(0, Math.min(scroll.clientHeight, event.clientY - scroll.getBoundingClientRect().top))
           : null;
@@ -429,17 +478,21 @@ export function createDragController(app, dom) {
     const { session } = app;
     if (!event.shiftKey && event.target.closest("[data-event-id],button")) return;
     const cell = event.target.closest("[data-create-day],[data-drop-start]");
-    if (!cell) return;
-    const start = destinationForDrop(cell, event.clientX, event.clientY, cell.dataset.createDay);
+    const pan = event.shiftKey || intimatePanSurface(event.target);
+    if (!cell && !pan) return;
+    const scroll = intimateScroll();
     createDrag = {
       pointerId: event.pointerId,
-      start,
+      start: cell
+        ? destinationForDrop(cell, event.clientX, event.clientY, cell.dataset.createDay)
+        : session.currentFocus(),
       startX: event.clientX,
       startY: event.clientY,
       startFocus: session.currentFocus(),
-      startScrollTop: projection.querySelector(".intimate-scroll")?.scrollTop || 0,
-      startScrollLeft: projection.querySelector(".intimate-scroll")?.scrollLeft || 0,
-      pan: event.shiftKey,
+      startScrollTop: scroll?.scrollTop || 0,
+      startScrollLeft: scroll?.scrollLeft || 0,
+      pan,
+      appliedDays: 0,
       active: false,
       rangeCells: [...projection.querySelectorAll("[data-create-day]")]
     };
@@ -458,10 +511,35 @@ export function createDragController(app, dom) {
     event.preventDefault();
     if (createDrag.pan) {
       if (session.currentLens() === "intimate") {
-        const scroll = projection.querySelector(".intimate-scroll");
+        const scroll = intimateScroll();
         if (scroll) {
-          scroll.scrollTop = createDrag.startScrollTop - dy;
-          scroll.scrollLeft = createDrag.startScrollLeft - dx;
+          // Both axes come out of the same gesture, never chosen against each
+          // other: the drag is free. Horizontal motion the rail cannot absorb
+          // becomes whole-day window movement, which is the only thing that
+          // works on a window wide enough to have no horizontal slack.
+          const step = intimatePanStep({
+            startScrollLeft: createDrag.startScrollLeft,
+            startScrollTop: createDrag.startScrollTop,
+            dx,
+            dy,
+            maxScrollLeft: scroll.scrollWidth - scroll.clientWidth,
+            maxScrollTop: scroll.scrollHeight - scroll.clientHeight,
+            columnPixels: intimateColumnPixels(),
+            appliedDays: createDrag.appliedDays
+          });
+          scroll.scrollTop = step.scrollTop;
+          scroll.scrollLeft = step.scrollLeft;
+          if (step.dayDelta) {
+            createDrag.appliedDays = step.dayShift;
+            // The window step reflows the day columns. Pin the rail's scroll
+            // through that reflow so the hours under the pointer hold still —
+            // and deliberately do not shift `top` by a day the way the vertical
+            // midnight rebase does: paging sideways should show the same hours
+            // of a different day, not the same instant.
+            app.pendingIntimateRebase = { top: step.scrollTop, left: step.scrollLeft };
+            session.move(step.dayDelta);
+            app.scheduleRender();
+          }
         }
         return;
       }

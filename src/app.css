@@ -47,6 +47,13 @@
 
 * { box-sizing: border-box; }
 
+/* `hidden` has to win. The browser's own `[hidden] { display: none }` comes from
+   the UA stylesheet, so any author rule that sets `display` beats it — and both
+   `.field` and `.form-row` set `display: grid`. That is why the ToDo "completed
+   at" row stayed on screen for an Event while its input was disabled: a field
+   you can see and cannot click. */
+[hidden] { display: none !important; }
+
 html,
 body,
 #app {
@@ -100,6 +107,24 @@ button {
   border-radius: 14px;
   background: color-mix(in srgb, var(--paper) 91%, transparent);
   box-shadow: var(--shadow);
+}
+
+/* The stage carries no scrollbar. It scrolls and drags exactly as before — this
+   removes the bar, not the behaviour — because the minimap is already the
+   position readout and a gutter on the right edge would only steal width from
+   the day columns. `[data-scroll-key]` is the whole set of stage scroll
+   surfaces by construction (workspace.js finds them the same way), so a lens
+   added later inherits this without a new rule. */
+#projection,
+#projection [data-scroll-key] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+#projection::-webkit-scrollbar,
+#projection [data-scroll-key]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 /* #app isolates one stacking context, so #hud competes directly with its
@@ -202,17 +227,30 @@ button {
   background: currentColor;
 }
 
-.status-chip[data-state="dirty"] { color: color-mix(in srgb, var(--primary) 55%, #9a6700); }
-.status-chip[data-state="saving"] { color: var(--blue); }
-.status-chip[data-state="error"] { color: var(--now); }
-.status-chip[data-state="conflict"] { color: var(--now); }
+/* Save state is a colour-only indicator. "Saved" is true almost all the time,
+   so the words were spending the chrome's most valuable strip on a constant;
+   the text survives on `title` and `aria-label`, which is what a screen reader
+   and a hover read anyway. */
 #save-status {
-  min-width: 20px;
-  max-width: 180px;
-  flex: 0 1 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  width: 11px;
+  height: 11px;
+  min-height: 0;
+  flex: none;
+  align-self: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: currentColor;
+  color: var(--green);
+  font-size: 0;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 20%, transparent);
 }
+
+#save-status[data-state="loading"] { color: var(--muted); }
+#save-status[data-state="dirty"] { color: color-mix(in srgb, var(--primary) 55%, #9a6700); }
+#save-status[data-state="saving"] { color: var(--blue); }
+#save-status[data-state="error"],
+#save-status[data-state="conflict"] { color: var(--now); }
 
 #lens-bar {
   position: absolute;
@@ -377,11 +415,21 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 .lens-control select { width: auto; max-width: 180px; }
 .lens-control input[type="checkbox"] { width: auto; min-height: auto; }
 .lens-readout { color: var(--now); background: var(--paper); }
+/* No element on the context bar grows. The readout used to, which is exactly how
+   a time-span label came to span the bar; it lives in the Options grid now. */
 .lens-readout {
   min-width: 0;
-  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The window group is pushed to the right end, mirroring today/reset. */
+.lens-control-group {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
 }
 
 .lens-control-overflow {
@@ -458,20 +506,6 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 }
 
 #minimap svg { width: 100%; height: 100%; display: block; }
-
-#focus-readout {
-  position: absolute;
-  z-index: 19;
-  left: calc(var(--workspace-control-edge) + var(--workspace-inner-half) + var(--workspace-inner));
-  top: calc(var(--workspace-minimap-top) + var(--workspace-minimap-height) - 22px);
-  bottom: auto;
-  padding: 4px 8px;
-  border-radius: 7px;
-  background: var(--ink);
-  color: white;
-  font: 600 10px/1 var(--data);
-  pointer-events: none;
-}
 
 #inspector {
   position: absolute;
@@ -755,7 +789,6 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   flex: 1;
   min-height: 0;
   overflow: auto;
-  scrollbar-color: var(--strong) transparent;
 }
 
 .intimate-body {
@@ -1230,18 +1263,20 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
 body.radial-wheel-motion .radial-event-arc { animation: none; }
 
 .minimap-tick { stroke: color-mix(in srgb, var(--hair) 72%, transparent); stroke-width: 1; }
-.minimap-focus-line { stroke: var(--ink); stroke-width: 1.6; }
-.minimap-now-line { stroke: var(--now); stroke-width: 2.2; }
-.minimap-dot-field { pointer-events: none; }
-.minimap-grid-unlit { fill: color-mix(in srgb, var(--muted) 22%, transparent); }
-.minimap-grid-baseline { fill: color-mix(in srgb, var(--ink) 52%, transparent); pointer-events: none; }
-.minimap-grid-active {
-  fill: color-mix(in srgb, var(--primary) 82%, var(--accent));
-  stroke: color-mix(in srgb, var(--paper) 74%, transparent);
-  stroke-width: .4;
+.minimap-focus-line { stroke: var(--ink); stroke-width: 1.4; }
+.minimap-now-line { stroke: var(--now); stroke-width: 2; }
+.minimap-window {
+  fill: color-mix(in srgb, var(--paper) 12%, transparent);
+  stroke: var(--ink);
+  stroke-width: 1.25;
   pointer-events: none;
 }
-.minimap-summary { fill: var(--muted); font: 650 7px/1 var(--data); pointer-events: none; }
+.minimap-dot-field { pointer-events: none; }
+.minimap-grid-unlit { fill: color-mix(in srgb, var(--muted) 20%, transparent); }
+.minimap-grid-baseline { fill: color-mix(in srgb, var(--ink) 46%, transparent); }
+/* The lit dot carries no stroke now: at this pitch a halo merges neighbouring
+   dots into a smear instead of separating them. */
+.minimap-grid-active { fill: color-mix(in srgb, var(--primary) 82%, var(--accent)); }
 .minimap-label { fill: var(--muted); font: 700 8px/1 var(--data); }
 
 .object-browser-toolbar,
@@ -1289,16 +1324,6 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 
 @media (max-width: 1400px) {
   #brand { gap: 0; margin-right: 0; }
-  #save-status {
-    width: 20px;
-    min-width: 20px;
-    justify-content: center;
-    gap: 0;
-    overflow: hidden;
-    padding: 0;
-    font-size: 0;
-  }
-  #save-status::before { flex: none; }
 }
 
 @media (max-width: 1000px) {
@@ -1312,7 +1337,6 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
   #lens-bar,
   #lens-controls { left: var(--workspace-outer); right: var(--workspace-outer); width: auto; }
   #minimap { left: var(--workspace-outer); right: var(--workspace-outer); }
-  #focus-readout { left: calc(var(--workspace-outer) + var(--workspace-inner)); }
 }
 
 @media (max-width: 780px) {
@@ -1361,7 +1385,6 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
   #lens-bar,
   #lens-controls,
   #minimap,
-  #focus-readout,
   #inspector { display: none !important; }
   #viewport { position: static; padding: 0; }
   html, body, #app, #projection { height: auto; overflow: visible; }
