@@ -129,7 +129,11 @@ function replaceDocument(next, storageTarget = {}) {
   app.engine = new ChronologEngine(app.chronolog);
   app.history = makeHistory();
   app.store.attach(app.chronolog, storageTarget);
-  app.closeInspector();
+  // Opening a different document is the one moment every card is meaningless at
+  // once: each one edits a record from the document being replaced. This is the
+  // user's own explicit act, not a stage interaction, so emptying the dock here
+  // does not violate the never-close-on-stage rule.
+  app.closeAllDockCards();
   reconcileSession();
   app.scheduleRender();
 }

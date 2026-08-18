@@ -704,6 +704,24 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   padding: 14px;
 }
 
+/* A single click on the stage selects rather than opening an editor, so the mark
+   has to be unmistakable without being a colour — colour already carries authored
+   frame and group meaning and must not be overloaded. An outline plus a ring does
+   the job in both themes and in grayscale. */
+[data-selected="true"] {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* SVG lenses cannot take an outline, so they get a stroke instead. */
+svg [data-selected="true"] {
+  outline: none;
+  stroke: var(--ink);
+  stroke-width: 2;
+  paint-order: stroke;
+}
+
 .dock-empty {
   display: grid;
   place-items: center;

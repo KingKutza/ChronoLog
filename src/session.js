@@ -105,6 +105,22 @@ export function normalizeLensWorkspace(input = {}) {
   return { lensOrder: order, enabledLenses: enabled };
 }
 
+// Does this rendered fact carry the current selection? A single click on the
+// stage selects rather than opening an editor, so this is the rule that decides
+// what gets the selected mark.
+//
+// Identity is the event plus, for a generated occurrence, its virtual id: two
+// occurrences of one series share an event id, so matching on the event alone
+// would light up every occurrence of a weekly meeting when the user picked one.
+export function factMatchesSelection(selection, fact) {
+  if (!selection || selection.type !== "event" || !fact?.event) return false;
+  if (selection.id !== fact.event.id) return false;
+  const selectedVirtual = selection.virtualId || null;
+  const factVirtual = fact.virtualId || null;
+  if (selectedVirtual || factVirtual) return selectedVirtual === factVirtual;
+  return true;
+}
+
 export function minimapDragState(input) {
   const start = Rational.parse(input.start);
   const span = Rational.parse(input.end).sub(start);

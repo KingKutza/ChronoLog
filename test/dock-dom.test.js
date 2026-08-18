@@ -312,6 +312,49 @@ test("a width drag re-renders once at rest, not on every pointer move", () => {
   }
 });
 
+// The Stage 1.5 defect, as an invariant. Pressing down on the stage to drag out a
+// new event used to collapse the dock, which widened the stage under the pointer
+// mid-gesture and then reopened on release. Nothing about a stage interaction may
+// change the dock's open state or its width.
+test("stage interaction never collapses the dock", async () => {
+  const { createToolbar } = await import("../src/ui/toolbar.js");
+  void createToolbar;
+  const h = harness();
+  try {
+    h.dock.openDockCard({ id: "panel:object", title: "Meeting", body: new h.StubElement("form") });
+    const openBefore = h.dock.dockIsOpen();
+    const trackBefore = h.root.style.getPropertyValue("--dock-track");
+    assert.equal(openBefore, true);
+
+    // The whole vocabulary of a drag-to-create gesture on the stage, none of which
+    // the dock listens to and none of which may reach it.
+    for (const type of ["pointerdown", "pointermove", "pointerup", "click", "dblclick"]) {
+      h.workspace.dispatch(type, { target: h.workspace, clientX: 300, clientY: 300 });
+    }
+    assert.equal(h.dock.dockIsOpen(), true, "the dock is still open");
+    assert.equal(h.root.dataset.dockOpen, "true");
+    assert.equal(h.root.style.getPropertyValue("--dock-track"), trackBefore, "and it never gave up width mid-gesture");
+    assert.deepEqual(h.dock.dockCardIds(), ["panel:object"], "and its card survived");
+  } finally {
+    h.restore();
+  }
+});
+
+// The other half of the rule: it still closes when the user closes it.
+test("the dock closes only for explicit user action", () => {
+  const h = harness();
+  try {
+    h.dock.openDockCard({ id: "panel:object", title: "Meeting", body: new h.StubElement("form") });
+    // Clicking the card's own close control in the rail is explicit.
+    const close = h.rail.children[0].children[1];
+    assert.equal(close.className, "dock-handle-close");
+    h.rail.dispatch("click", { target: close });
+    assert.equal(h.dock.dockIsOpen(), false, "its last card closed, so the dock closed");
+  } finally {
+    h.restore();
+  }
+});
+
 test("rail order is append-only and a reorder keeps the viewed card in view", () => {
   const h = harness();
   try {
