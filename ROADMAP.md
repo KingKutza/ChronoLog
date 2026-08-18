@@ -24,7 +24,8 @@ Ordered by priority.
    it scrolls and drags without a bar. The Autosaved chip becomes a small
    color indicator. Context bar: forward/back on the right, mirroring the
    today/reset buttons; blank space is fine, a time-span label spanning
-   the bar is not.
+   the bar is not. Option menus on Tactical open leftward and get cut by
+   the window edge — panels must flip to stay inside the viewport.
 3. **Settings window** — theme, workspace defaults, dock side, layout
    presets, lens hiding, and the snapshot-compaction period (server
    endpoint already live). Takes over the stage.
@@ -60,26 +61,35 @@ Ordered by priority.
    right-align in Intimate. Includes the sigils-and-zones display work and
    an ICS path (VJOURNAL) so Notes round-trip. Open questions remain —
    this is labeled as work, not settled design.
-10. **Slim the retained ICS payload** — 93.8% of the owner's real document
+10. **Staple anchoring** (see LEXICON.md, staple anchoring entry) — retire
+    the start-time-plus-duration assumption: a staple can anchor start,
+    end, midpoint, or another named point of an event, paired with a
+    magnitude; two or three staples derive the magnitude instead. Fuzzy
+    staples ("about 5ish") make uncertainty per-staple data. Constraint
+    bounds ("can't go later than 7:30") are adjacent and unruled. The
+    authoring path must handle real cases like end-anchored work shifts
+    and irregular night-shift cycles (event-defined periods already model
+    the cycles; entry is the gap). Needs design.
+11. **Slim the retained ICS payload** — 93.8% of the owner's real document
     is a per-event duplicate of its own parsed ICS node
     (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
     round-trip fidelity while storing the source once, not per event.
-11. **Control-bar aesthetics.**
-12. **New logo** — plain text until a better mark earns the spot.
-13. **More calendar subscriptions** — Google Calendar and other providers,
+12. **Control-bar aesthetics.**
+13. **New logo** — plain text until a better mark earns the spot.
+14. **More calendar subscriptions** — Google Calendar and other providers,
     each through its published ICS URL.
-14. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
+15. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
     web, built on the journal's per-op foundation.
-15. **Mobile version** — Android first. The dock becomes a full-screen
+16. **Mobile version** — Android first. The dock becomes a full-screen
     sheet under a width breakpoint; card paging becomes swipe gestures.
-16. **Super-strategic band** — the lens beyond Strategic, which caps at 18
+17. **Super-strategic band** — the lens beyond Strategic, which caps at 18
     months where this band would take over. Needs design.
-17. **Field-level merge** — real merging on top of per-op sequencing. Needs
+18. **Field-level merge** — real merging on top of per-op sequencing. Needs
     design.
-18. **Compiled native binaries** — the distribution end-state; the portable
+19. **Compiled native binaries** — the distribution end-state; the portable
     Node bundles are interim. Native shells may pop dock cards out into
     real second OS windows on desktop platforms.
-19. **The document's own timeline** — a lens over the journal itself:
+20. **The document's own timeline** — a lens over the journal itself:
     scroll back through what the document was, watch a deleted series
     vanish and return. The journal already records every op; this is the
     view it makes possible. The very far bottom, on purpose.
