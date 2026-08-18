@@ -34,6 +34,40 @@ export function objectKindForEvent(event) {
   return "event";
 }
 
+// The ToDo and Notes roster: every object of one kind, newest first, with the
+// coordinate it is stapled at. Pure over the document so the roster's contents
+// and ordering are testable without a DOM.
+//
+// This is deliberately a flat roster, not the staple/decay model. Floats living
+// at their staples, projecting forward for a keep-range and lapsing from the
+// present view is ROADMAP #9 and is not decided yet; showing every object of a
+// kind is the honest placeholder, because it invents no lifecycle rule that would
+// later have to be unwound.
+export function rosterEntries(chronologDocument, requestedKind) {
+  const kind = normalizeObjectKind(requestedKind);
+  const events = Object.values(chronologDocument?.events || {})
+    .filter((event) => objectKindForEvent(event) === kind);
+  const placements = new Map();
+  for (const relation of Object.values(chronologDocument?.relations || {})) {
+    if (!relation?.event || placements.has(relation.event)) continue;
+    if (relation.coordinate) placements.set(relation.event, relation);
+  }
+  return events
+    .map((event) => {
+      const relation = placements.get(event.id) || null;
+      return {
+        id: event.id,
+        title: event.payload?.title || "(untitled)",
+        coordinate: relation?.coordinate || null,
+        frame: relation?.frame || null,
+        // A roster row has to be able to say "this one has no staple yet" rather
+        // than inventing a date for it.
+        anchored: Boolean(relation?.coordinate)
+      };
+    })
+    .sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
+}
+
 export function traitsForObjectKind(existingTraits, requestedKind) {
   const kind = normalizeObjectKind(requestedKind);
   const extra = (existingTraits || []).filter((trait) => !CONTROLLED_TRAITS.has(trait));

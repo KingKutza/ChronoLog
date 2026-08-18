@@ -8,6 +8,7 @@ import {
   formatCivil
 } from "./exact.js";
 import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./radial.js";
+import { objectKindForEvent } from "./object-kinds.js";
 import { factMatchesSelection } from "./session.js";
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
@@ -456,13 +457,19 @@ function renderIntimate(target, context) {
         item.laneCount = Math.max(1, ...overlaps.map((other) => other.lane + 1));
       }
     };
-    assignLanes(timed.filter((item) => item.fact.displayLayer !== "included"));
+    // Notes and ToDos are floats, not blocks of committed time, so they get their
+    // own lane group and right-align in the column. They read as marginalia beside
+    // the day rather than competing with events for its width.
+    const isFloat = (item) => ["todo", "note"].includes(objectKindForEvent(item.fact.event));
+    assignLanes(timed.filter((item) => item.fact.displayLayer !== "included" && !isFloat(item)));
     assignLanes(timed.filter((item) => item.fact.displayLayer === "included"));
+    assignLanes(timed.filter((item) => item.fact.displayLayer !== "included" && isFloat(item)));
     for (const item of timed.slice(0, 80)) {
       const included = item.fact.displayLayer === "included";
       const important = factImportance(context, item.fact) !== "standard";
       const continuation = item.fact.continuation && durationMinutes(item.fact.event) < 1440;
-      const button = element("button", `intimate-event${included ? " included-event" : ""}${important ? " important-event" : ""}${continuation ? " continuation-event" : ""}`);
+      const float = !included && isFloat(item);
+      const button = element("button", `intimate-event${included ? " included-event" : ""}${float ? " float-event" : ""}${important ? " important-event" : ""}${continuation ? " continuation-event" : ""}`);
       button.type = "button";
       bindFact(button, item.fact);
       applySigil(button, item.fact);
@@ -472,6 +479,9 @@ function renderIntimate(target, context) {
       if (included) {
         button.style.right = `${3 + item.lane * 9}px`;
         button.style.width = `${Math.max(18, 36 - item.lane * 5)}%`;
+      } else if (float) {
+        button.style.right = `${3 + item.lane * 7}px`;
+        button.style.width = `${Math.max(22, 42 - item.lane * 6)}%`;
       } else {
         button.style.left = `${item.lane / item.laneCount * 100}%`;
         button.style.width = `calc(${100 / item.laneCount}% - 3px)`;

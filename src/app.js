@@ -8,6 +8,7 @@ import { createTransactions } from "./ui/transactions.js";
 import { SESSION_STORAGE_KEY, createWorkspace } from "./ui/workspace.js";
 import { createDock } from "./ui/dock.js";
 import { createInspector } from "./ui/inspector.js";
+import { createRoster } from "./ui/roster.js";
 import { createFramesPanel } from "./ui/frames-panel.js";
 import { applyTheme, createToolbar, storedTheme } from "./ui/toolbar.js";
 import { createDragController } from "./ui/drag.js";
@@ -162,6 +163,7 @@ Object.assign(app, createWorkspace(app, { projection, minimap }));
 // the shared object rather than capturing it.
 Object.assign(app, createDock(app, dockDom));
 Object.assign(app, createInspector(app));
+Object.assign(app, createRoster(app));
 Object.assign(app, createFramesPanel(app));
 Object.assign(app, createToolbar(app, { projection, lensControls, LOCAL_WORKSPACE_TARGET }));
 Object.assign(app, createDragController(app, { projection, minimap }));
