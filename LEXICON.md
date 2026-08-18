@@ -118,6 +118,21 @@ Rulings and additions (Don, 2026-08-17/18, KISS pass + dock/floats design):
   ruled "the most broken backward way to do what I said while undermining
   what I meant" and removed); stapling an arbitrary occurrence anchors the
   cycle's phase.
+- **The Rob-and-John scenario** (the correct usage pattern series stapling
+  exists to support): Rob says "let's do Monday meetings — you always get
+  in early on Mondays." John adds a Monday meeting, 6:15 to 6:30, repeat
+  every Monday, skip holidays (events on frame xyz), run indefinite
+  (projected up to 2 years into the future; default settable in
+  settings). Six years later John has a kid, doesn't get in till 8:00,
+  and after some conversation they move to a Thursday lunch meeting. At
+  that decision they place a staple at the inflection point defining an
+  end to the initial series rule, then either define a new rule
+  post-staple or a new series, on preference. What this pins: a series is
+  an identity whose rules are segments partitioned by staples; holiday
+  exclusion is a live reference to another frame's events, not a baked
+  list; the rule's extent (indefinite) and the projection horizon
+  (bounded, settable) are different things; and the inflection staple
+  records where life changed the schedule.
 
 ## Vocabulary (time-traveler framing, from ReadMe.txt and the pr-2 mockup)
 

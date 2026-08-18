@@ -33,8 +33,9 @@ Ordered by priority.
    the bar is not. Option menus on Tactical open leftward and get cut by
    the window edge — panels must flip to stay inside the viewport.
 3. **Settings window** — theme, workspace defaults, dock side, layout
-   presets, lens hiding, and the snapshot-compaction period (server
-   endpoint already live). Takes over the stage.
+   presets, lens hiding, the series projection horizon (default ~2
+   years), and the snapshot-compaction period (server endpoint already
+   live). Takes over the stage.
 4. **Two-way calendar sync, Outlook first** — through ICS import/export
    semantics, never a provider API. The journal's per-op conflict
    foundation now exists; provider-side conflict semantics for
@@ -90,10 +91,17 @@ Ordered by priority.
     bounds ("can't go later than 7:30") are adjacent and unruled. Series
     staple the same way — at the beginning, the end, or any arbitrary
     reference point on the body: an end-staple ends a series, an
-    occurrence staple anchors the cycle's phase. The authoring path must
-    handle real cases like end-anchored work shifts and irregular
-    night-shift cycles (event-defined periods already model the cycles;
-    entry is the gap). Needs design.
+    occurrence staple anchors the cycle's phase. A series is an identity
+    whose rules are segments partitioned by staples (the Rob-and-John
+    scenario in LEXICON.md is the acceptance case): a staple at an
+    inflection point ends the reigning rule, and a new rule may follow on
+    the same series or a new series may begin, on preference. Exclusions
+    are live references to another frame's events (skip holidays = events
+    on frame xyz), not baked lists. Rule extent (indefinite) is distinct
+    from projection horizon (bounded, default ~2 years, settable). The
+    authoring path must handle real cases like end-anchored work shifts
+    and irregular night-shift cycles (event-defined periods already model
+    the cycles; entry is the gap). Needs design.
 11. **Slim the retained ICS payload** — 93.8% of the owner's real document
     is a per-event duplicate of its own parsed ICS node
     (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
