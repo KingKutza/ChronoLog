@@ -11,7 +11,14 @@ import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./rad
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
-import { MINIMAP_GRID_ROWS, minimapDotGrid, minimapEventMagnitude } from "./minimap.js";
+import {
+  MINIMAP_BUCKETS,
+  MINIMAP_GRID_ROWS,
+  minimapDotGrid,
+  minimapEventMagnitude,
+  minimapLabelGranularity,
+  minimapLabelTicks
+} from "./minimap.js";
 import { SIGIL_VOCABULARY, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -20,8 +27,7 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
-// The minimap is a fixed-scale topology preview, not a second event list.
-const MINIMAP_BIN_COUNT = 140;
+// The minimap is an activity preview, not a second event list.
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -1357,8 +1363,12 @@ export function renderMinimap(target, context) {
     }
     indexedRanges.push({ entries: indexed, start: low, end: after });
   }
-  const binCount = MINIMAP_BIN_COUNT;
+  const binCount = MINIMAP_BUCKETS;
   const magnitudes = new Float64Array(binCount);
+  // Objects per bucket, tracked alongside magnitude so the dot field can honour
+  // its "every object is at least one dot" floor. A span counts in every bucket
+  // it crosses: it is present there, so the bucket must not read as free.
+  const counts = new Uint16Array(binCount);
   const rangeDays = outerEnd.sub(outerStart);
   const seenFacts = new Set();
   let indexedFactCount = 0;
@@ -1382,10 +1392,13 @@ export function renderMinimap(target, context) {
         stapleCount: Math.max(0, context.engine.eventFrames(sourceId).length - 1),
         importance: factImportance(context, fact)
       }) / occupiedBins;
-      for (let bin = firstBin; bin <= lastBin; bin += 1) magnitudes[bin] += magnitude;
+      for (let bin = firstBin; bin <= lastBin; bin += 1) {
+        magnitudes[bin] += magnitude;
+        if (counts[bin] < 0xffff) counts[bin] += 1;
+      }
     }
   }
-  const dotGrid = minimapDotGrid(magnitudes, { rows: MINIMAP_GRID_ROWS });
+  const dotGrid = minimapDotGrid(magnitudes, { rows: MINIMAP_GRID_ROWS, counts });
   const svg = svgElement("svg", {
     viewBox: "0 0 1000 120",
     preserveAspectRatio: "none",
@@ -1394,86 +1407,108 @@ export function renderMinimap(target, context) {
   });
   svg.dataset.minimapStart = outerStart.toJSON();
   svg.dataset.minimapEnd = outerEnd.toJSON();
+  const lens = context.session.currentLens();
+  const granularity = minimapLabelGranularity(lens);
   const title = svgElement("title");
-  title.textContent = "Fixed-scale activity grid. Every event contributes a base magnitude plus duration and cross-frame staples, multiplied by importance.";
-  const gridTop = 20;
-  const gridHeight = 80;
+  title.textContent = `Activity field, ${dotGrid.columns} buckets across ${granularity}-labelled boundaries. Each object is at least one dot; duration, cross-frame staples and importance add more. A full column is ${dotGrid.ceiling} magnitude or above. ${indexedFactCount} event${indexedFactCount === 1 ? "" : "s"} in range.`;
+  const gridTop = 16;
+  const gridHeight = 98;
   const columnWidth = 960 / dotGrid.columns;
   const rowHeight = gridHeight / dotGrid.rows;
+  const baselineTop = gridTop + dotGrid.baseline * rowHeight;
   const definitions = svgElement("defs");
-  const dotPattern = svgElement("pattern", {
-    id: "minimap-dot-pattern",
-    x: 20,
-    y: gridTop,
-    width: columnWidth,
-    height: rowHeight,
-    patternUnits: "userSpaceOnUse"
-  });
-  dotPattern.append(svgElement("circle", {
-    cx: columnWidth / 2,
-    cy: rowHeight / 2,
-    r: 1.15,
-    class: "minimap-grid-unlit"
-  }));
-  definitions.append(dotPattern);
+  // Both the unlit ground and the lit columns are drawn as pattern-filled
+  // rects rather than one circle per cell. At 288x25 the cell-per-node approach
+  // would put 7200 nodes into a surface that re-renders on every pan frame; the
+  // pattern tiles from the same origin as the grid, so a rect whose edges land
+  // on cell boundaries paints exactly the dots that cell range owns.
+  for (const [id, radius, className] of [
+    ["minimap-dot-unlit", 0.85, "minimap-grid-unlit"],
+    ["minimap-dot-lit", 1.15, "minimap-grid-active"],
+    ["minimap-dot-baseline", 1, "minimap-grid-baseline"]
+  ]) {
+    const pattern = svgElement("pattern", {
+      id,
+      x: 20,
+      y: gridTop,
+      width: columnWidth,
+      height: rowHeight,
+      patternUnits: "userSpaceOnUse"
+    });
+    pattern.append(svgElement("circle", { cx: columnWidth / 2, cy: rowHeight / 2, r: radius, class: className }));
+    definitions.append(pattern);
+  }
   svg.append(title, definitions, svgElement("rect", {
     x: 20,
     y: gridTop,
     width: 960,
     height: gridHeight,
-    fill: "url(#minimap-dot-pattern)",
+    fill: "url(#minimap-dot-unlit)",
     class: "minimap-dot-field"
   }));
-  for (let row = 0; row < dotGrid.rows; row += 1) {
-    for (let column = 0; column < dotGrid.columns; column += 1) {
-      if (!dotGrid.cells[row * dotGrid.columns + column]) continue;
-      svg.append(svgElement("circle", {
-        cx: 20 + (column + .5) * columnWidth,
-        cy: gridTop + (row + .5) * rowHeight,
-        r: row === dotGrid.center ? 1.35 : 1.8,
-        class: row === dotGrid.center ? "minimap-grid-baseline" : "minimap-grid-active",
-        "aria-hidden": "true"
+  // Every column owns a baseline dot, so the field always reads as a time axis
+  // even where nothing is scheduled. One rect covers the whole baseline row.
+  svg.append(svgElement("rect", {
+    x: 20,
+    y: baselineTop,
+    width: 960,
+    height: rowHeight,
+    fill: "url(#minimap-dot-baseline)",
+    class: "minimap-dot-field"
+  }));
+  // Runs of equal height collapse into one rect, which keeps a quiet field down
+  // to a handful of nodes and a saturated one down to a few hundred.
+  for (let column = 0; column < dotGrid.columns;) {
+    const dots = dotGrid.columnDots[column];
+    let end = column + 1;
+    while (end < dotGrid.columns && dotGrid.columnDots[end] === dots) end += 1;
+    if (dots) {
+      svg.append(svgElement("rect", {
+        x: 20 + column * columnWidth,
+        y: baselineTop - dots * rowHeight,
+        width: (end - column) * columnWidth,
+        height: dots * rowHeight,
+        fill: "url(#minimap-dot-lit)",
+        class: "minimap-dot-field"
       }));
     }
+    column = end;
   }
-  for (let index = 0; index <= 7; index += 1) {
-    const fraction = index / 7;
-    const tickX = 20 + fraction * 960;
-    const tickDay = outerStart.add(outerEnd.sub(outerStart).mul(String(fraction)));
-    svg.append(svgElement("line", {
-      x1: tickX, y1: 14, x2: tickX, y2: 106, class: "minimap-tick"
-    }));
+  const rangeSpan = outerEnd.sub(outerStart);
+  const positionFor = (value) => 20 + value.sub(outerStart).div(rangeSpan).toNumber() * 960;
+  for (const tick of minimapLabelTicks(outerStart, outerEnd, granularity)) {
+    const tickX = positionFor(tick.days);
+    svg.append(svgElement("line", { x1: tickX, y1: 13, x2: tickX, y2: gridTop + gridHeight, class: "minimap-tick" }));
+    // Boundary labels sit just right of their own boundary rather than centred
+    // on it, so the text and the line it names cannot drift apart.
     const label = svgElement("text", {
-      x: tickX,
+      x: Math.min(978, tickX + 2),
       y: 11,
-      "text-anchor": index === 0 ? "start" : index === 7 ? "end" : "middle",
+      "text-anchor": tickX > 940 ? "end" : "start",
       class: "minimap-label"
     });
-    label.textContent = formatCivil(daysToCivilCoordinate(tickDay)).replace(/ 00:00:00$/, "");
+    label.textContent = tick.text;
     svg.append(label);
   }
-  if (indexedFactCount) {
-    const summary = svgElement("text", { x: 980, y: 117, "text-anchor": "end", class: "minimap-summary" });
-    summary.textContent = `${indexedFactCount} event${indexedFactCount === 1 ? "" : "s"} · fixed magnitude`;
-    svg.append(summary);
-  }
   const viewportStart = context.session.currentFocus().sub(span.div(2));
-  const x = 20 + viewportStart.sub(outerStart).div(outerEnd.sub(outerStart)).toNumber() * 960;
-  const width = span.div(outerEnd.sub(outerStart)).toNumber() * 960;
+  const x = positionFor(viewportStart);
+  const width = span.div(rangeSpan).toNumber() * 960;
   svg.append(svgElement("rect", {
-    x, y: 17, width, height: 86, rx: 2,
-    fill: "rgba(255,253,247,.10)", stroke: "#2a2620", "stroke-width": 1.25,
+    x, y: gridTop - 2, width, height: gridHeight + 4, rx: 2,
     class: "minimap-window"
   }));
-  const focusX = 20 + focus.sub(outerStart).div(outerEnd.sub(outerStart)).toNumber() * 960;
+  const focusX = positionFor(focus);
   svg.append(svgElement("line", {
-    x1: focusX, y1: 12, x2: focusX, y2: 108,
+    x1: focusX, y1: gridTop - 4, x2: focusX, y2: gridTop + gridHeight + 4,
     class: "minimap-focus-line"
   }));
   const now = currentDays();
   if (now.compare(outerStart) >= 0 && now.compare(outerEnd) <= 0) {
-    const nowX = 20 + now.sub(outerStart).div(outerEnd.sub(outerStart)).toNumber() * 960;
-    svg.append(svgElement("line", { x1: nowX, y1: 8, x2: nowX, y2: 112, class: "minimap-now-line" }));
+    const nowX = positionFor(now);
+    svg.append(svgElement("line", {
+      x1: nowX, y1: gridTop - 6, x2: nowX, y2: gridTop + gridHeight + 6,
+      class: "minimap-now-line"
+    }));
   }
   target.append(svg);
 }

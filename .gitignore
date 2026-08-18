@@ -1,6 +1,8 @@
 # User data
 *.ics
 *.chronolog
+*.journal
+.chronolog-*
 
 # Free space — anything under local/ never enters the repo
 local/

@@ -14,47 +14,72 @@ Ordered by priority.
    below the chrome. The stage hosts views, the dock hosts editors;
    settings takes over the stage; no floating windows. Lens resize
    re-renders once at rest; whatever opened the panel stays visually
-   anchored through the reflow.
-2. **Settings window** — theme, workspace defaults, dock side, layout
-   presets, and the snapshot-compaction period (server endpoint already
-   live). Takes over the stage.
-3. **Two-way calendar sync, Outlook first** — through ICS import/export
+   anchored through the reflow. Chrome changes that ride with it: the
+   document menu becomes a dock card; a Settings button joins the document
+   bar; ToDo and Notes buttons live in the view bar (colored distinctly)
+   and open their dock cards; lenses can be hidden via the lens
+   configuration surface, with a right-side drop on the view bar for
+   hidden ones.
+2. **Chrome and stage polish.** No scrollbar on the stage's right edge —
+   it scrolls and drags without a bar. The Autosaved chip becomes a small
+   color indicator. Context bar: forward/back on the right, mirroring the
+   today/reset buttons; blank space is fine, a time-span label spanning
+   the bar is not.
+3. **Settings window** — theme, workspace defaults, dock side, layout
+   presets, lens hiding, and the snapshot-compaction period (server
+   endpoint already live). Takes over the stage.
+4. **Two-way calendar sync, Outlook first** — through ICS import/export
    semantics, never a provider API. The journal's per-op conflict
    foundation now exists; provider-side conflict semantics for
    recurring/edited events still need design.
-4. **No-op instance edits fork the series** — opening an occurrence of a
-   series for editing materializes it; closing without changes must revert
-   it to a projection of its series instead of leaving a separate instance.
-5. **Minimap tuning** — dots are too large and need too many events to
-   register.
-6. **Intimate lens legibility** — base-increment lines are invisible inside
-   colored zones.
-7. **Toolbar order** — swap "jump to today" and "reset lens".
-8. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
+5. **Series editing** — opening an occurrence of a series for editing
+   materializes it; closing without changes must revert it to a projection
+   of its series instead of leaving a separate instance. There is no clear
+   way to stop a series propagating from a given point — truncating a
+   series at "here" must exist as an alternative to deleting it. "Ends
+   after" only accepts integer counts — it needs an end date too. The
+   "completed at" field cannot be clicked.
+6. **Minimap rebuild.** Dots are too big: go from 11 rows to 21–31 and at
+   least triple the dot density. Everything counts for at least one dot
+   and some things several — a busy day and a free day must look different
+   at a glance, at every lens's granularity (multi-hour window, day, week,
+   quarter). The current-time black bubble goes. Top labels become
+   context-aware: no year in Intimate; Q1-26 / Q2-26 style in Strategic.
+7. **Intimate lens interaction and legibility** — restore horizontal drag
+   (drag is free, both axes at once), the forward/back one-day buttons,
+   and horizontal scroll alongside vertical. Base-increment lines are
+   invisible inside colored zones.
+8. **Toolbar order** — swap "jump to today" and "reset lens".
+9. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
    2026-08-17/18 rulings): floats live at their staples, project forward
    for a keep-range, lapse from present view without deletion. Importance
    levels are groups whose handling (keep-range, decay, display weight) is
    a group property — composable, addable, removable, including irregular
    levels; the fixed standard/important/landmark enum retires into that
-   model. Includes the sigils-and-zones display work and an ICS path
-   (VJOURNAL) so Notes round-trip. Open questions remain — this is labeled
-   as work, not settled design.
-9. **Slim the retained ICS payload** — 93.8% of the owner's real document
-   is a per-event duplicate of its own parsed ICS node
-   (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
-   round-trip fidelity while storing the source once, not per event.
-10. **Control-bar aesthetics.**
-11. **New logo** — plain text until a better mark earns the spot.
-12. **More calendar subscriptions** — Google Calendar and other providers,
+   model. New notes and todos auto-anchor to now; notes and todos
+   right-align in Intimate. Includes the sigils-and-zones display work and
+   an ICS path (VJOURNAL) so Notes round-trip. Open questions remain —
+   this is labeled as work, not settled design.
+10. **Slim the retained ICS payload** — 93.8% of the owner's real document
+    is a per-event duplicate of its own parsed ICS node
+    (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
+    round-trip fidelity while storing the source once, not per event.
+11. **Control-bar aesthetics.**
+12. **New logo** — plain text until a better mark earns the spot.
+13. **More calendar subscriptions** — Google Calendar and other providers,
     each through its published ICS URL.
-13. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
+14. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
     web, built on the journal's per-op foundation.
-14. **Mobile version** — Android first. The dock becomes a full-screen
+15. **Mobile version** — Android first. The dock becomes a full-screen
     sheet under a width breakpoint; card paging becomes swipe gestures.
-15. **Super-strategic band** — the lens beyond Strategic, which caps at 18
+16. **Super-strategic band** — the lens beyond Strategic, which caps at 18
     months where this band would take over. Needs design.
-16. **Field-level merge** — real merging on top of per-op sequencing. Needs
+17. **Field-level merge** — real merging on top of per-op sequencing. Needs
     design.
-17. **Compiled native binaries** — the distribution end-state; the portable
+18. **Compiled native binaries** — the distribution end-state; the portable
     Node bundles are interim. Native shells may pop dock cards out into
     real second OS windows on desktop platforms.
+19. **The document's own timeline** — a lens over the journal itself:
+    scroll back through what the document was, watch a deleted series
+    vanish and return. The journal already records every op; this is the
+    view it makes possible. The very far bottom, on purpose.
