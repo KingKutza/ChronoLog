@@ -102,6 +102,16 @@ Rulings and additions (Don, 2026-08-17/18, KISS pass + dock/floats design):
   way to implement" calendar sync; two-way sync with popular calendars,
   Outlook first, remains a high-priority goal via ICS semantics. Provider
   API clients are out.
+- **Staple anchoring** (from entering a friend's work schedule for D&D
+  planning — "working early to 5ish," "can't go later than like 7:30/8,"
+  irregular night-shift cycles): the system is "built under a start time
+  duration assumption," and that assumption must go. "We should be able to
+  place a staple — start, end, midpoint, etc. — and a magnitude; or two or
+  three staples and calculate magnitude. Also a fuzzy staple, e.g. 'about
+  5ish,' would be good too." Fuzziness becomes per-staple, not per-object —
+  the staple axiom made concrete. Adjacent, unruled: "can't go later than
+  7:30" reads as a bound — a constraint staple distinct from the fuzzy
+  actual.
 
 ## Vocabulary (time-traveler framing, from ReadMe.txt and the pr-2 mockup)
 
