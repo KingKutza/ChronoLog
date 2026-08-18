@@ -607,6 +607,14 @@ export function createDragController(app, dom) {
     panWheel = 0;
   });
 
+  // Single click selects; double click opens the editor card.
+  //
+  // The split exists because opening a card is no longer a cheap, reversible
+  // glance — it takes a real grid track away from the stage, and with plural cards
+  // a stray click while scanning a busy week would pile up editors nobody asked
+  // for. So a single click is the glance: it selects the object, which highlights
+  // it and gives the keyboard something to act on, and changes nothing else.
+  // Nothing is created, opened, or paged.
   projection.addEventListener("click", (event) => {
     if (suppressEventClick) {
       suppressEventClick = false;
@@ -616,9 +624,36 @@ export function createDragController(app, dom) {
     const item = event.target.closest("[data-event-id]");
     if (!item) return;
     event.stopPropagation();
+    selectStageObject(item);
+  });
+
+  projection.addEventListener("dblclick", (event) => {
+    const item = event.target.closest("[data-event-id]");
+    if (!item) return;
+    event.stopPropagation();
+    event.preventDefault();
+    // A double click implies its own single click, so the object is already
+    // selected by the time this runs — the two agree rather than compete.
     if (item.dataset.virtualId) app.openVirtualInspector(item.dataset.virtualId);
     else app.openEventInspector(item.dataset.eventId);
   });
+
+  function selectStageObject(item) {
+    const { session } = app;
+    const next = {
+      type: "event",
+      id: item.dataset.eventId,
+      virtualId: item.dataset.virtualId || null,
+      day: item.dataset.factDay || null
+    };
+    // Clicking the selected object again clears the selection, so a click is
+    // always its own undo and never leaves the stage in a state the user cannot
+    // get out of without opening something.
+    const current = session.selection;
+    const same = current?.id === next.id && (current?.virtualId || null) === next.virtualId;
+    session.selection = same ? null : next;
+    app.scheduleRender();
+  }
 
   minimap.addEventListener("pointerdown", (event) => {
     const { session } = app;

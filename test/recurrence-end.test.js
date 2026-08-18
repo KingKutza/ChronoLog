@@ -127,7 +127,10 @@ test("'ends on a date' covers the whole of that day, whatever time the series ru
   assert.equal(recurrenceUntilForDate("bad"), "");
 });
 
-test("'stop repeating here' caps the series at exactly that occurrence", () => {
+// There is no longer a button that does this — ending a series will arrive as an
+// end-staple on the series body, not an imperative command. The arithmetic stays
+// because the "Ends on a date" control uses it and the staple model will too.
+test("an inclusive UNTIL cap lands exactly on the occurrence it names", () => {
   // A timed occurrence needs its own instant, or an inclusive cap is impossible.
   assert.deepEqual(
     truncateRecurrenceAt({ FREQ: "WEEKLY", COUNT: "40" }, civil(2026, 10, 5, 9, 30)),
@@ -144,7 +147,7 @@ test("'stop repeating here' caps the series at exactly that occurrence", () => {
 // The point of an inclusive cap is that the occurrence in hand survives and the
 // next one does not. That is a claim about the engine, so it is asserted against
 // the engine rather than against the string.
-test("stopping a series here keeps that occurrence and drops every later one", () => {
+test("an inclusive cap keeps the occurrence it names and drops every later one", () => {
   const context = series("FREQ=WEEKLY;COUNT=8");
   assert.equal(occurrences(context).length, 8);
 

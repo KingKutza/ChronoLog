@@ -5,7 +5,8 @@ import {
   INTIMATE_HOUR_PIXELS_MAX,
   INTIMATE_HOUR_PIXELS_MIN,
   LENS_VIEW_DEFAULTS,
-  ViewSession
+  ViewSession,
+  factMatchesSelection
 } from "../src/session.js";
 
 test("shared focus remains constant between projections by default", () => {
@@ -138,4 +139,46 @@ test("Intimate vertical zoom clamps at usable extremes and survives restoration"
   session.setIntimateHourPixels(42.5);
   const restored = new ViewSession(session.toJSON());
   assert.equal(restored.intimateHourPixels, 42.5);
+});
+
+// A single click on the stage selects; a double click opens the editor. These are
+// the identity rules that decide what the selected mark lands on.
+test("selection matches one occurrence, not every occurrence of its series", () => {
+  const explicit = { type: "event", id: "event:one" };
+  assert.equal(factMatchesSelection(explicit, { event: { id: "event:one" } }), true);
+  assert.equal(factMatchesSelection(explicit, { event: { id: "event:two" } }), false);
+
+  // Two generated occurrences of one weekly series share an event id. Matching on
+  // the event alone would light up the whole series when the user picked one week.
+  const occurrence = { type: "event", id: "event:series", virtualId: "pattern:p/2026-01-12" };
+  assert.equal(
+    factMatchesSelection(occurrence, { event: { id: "event:series" }, virtualId: "pattern:p/2026-01-12" }),
+    true
+  );
+  assert.equal(
+    factMatchesSelection(occurrence, { event: { id: "event:series" }, virtualId: "pattern:p/2026-01-19" }),
+    false,
+    "a different week of the same series is not the selected object"
+  );
+  // A materialized instance is not the generated occurrence it replaced.
+  assert.equal(factMatchesSelection(occurrence, { event: { id: "event:series" } }), false);
+});
+
+test("an absent or foreign selection never marks anything", () => {
+  assert.equal(factMatchesSelection(null, { event: { id: "event:one" } }), false);
+  assert.equal(factMatchesSelection({ type: "frame", id: "frame:a" }, { event: { id: "frame:a" } }), false);
+  assert.equal(factMatchesSelection({ type: "event", id: "event:one" }, {}), false);
+  assert.equal(factMatchesSelection({ type: "event", id: "event:one" }, null), false);
+});
+
+test("dock geometry is view state and survives a session round trip", () => {
+  const session = new ViewSession({ dockSide: "left", dockWidth: 0.5, dockOrder: ["object:a", "panel:frames-browser"] });
+  const restored = new ViewSession(session.toJSON());
+  assert.equal(restored.dockSide, "left");
+  assert.equal(restored.dockWidth, 0.5);
+  assert.deepEqual(restored.dockOrder, ["object:a", "panel:frames-browser"]);
+  // Garbage degrades to the documented defaults rather than throwing.
+  const fallback = new ViewSession({ dockSide: "sideways", dockWidth: "wide" });
+  assert.equal(fallback.dockSide, "right");
+  assert.equal(fallback.dockWidth, 1 / 3);
 });

@@ -21,8 +21,7 @@ import { calendarFrames, groupFrames } from "../projections.js";
 import {
   applyRecurrenceEnd,
   recurrenceEndMode,
-  recurrenceUntilDate,
-  truncateRecurrenceAt
+  recurrenceUntilDate
 } from "../recurrence-end.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
 
@@ -33,9 +32,15 @@ import { byId, escapeHTML } from "./dom-helpers.js";
 // small `framesReturnTarget` focus-return slot that the Frames panel also
 // writes when it reopens this same panel.
 export function createInspector(app) {
-  let provisionalEvent = null;
-  // Which panel the editor last opened, so `dismissInspector` knows which card to
-  // close. The drawer only ever had one surface, so it did not need this.
+  // Provisional drafts, keyed by event id. This is a Map rather than a single
+  // slot because several event editors can be open at once now, each holding its
+  // own unsaved draft. The store's deferral is already refcounted, so N open
+  // drafts hold autosave off exactly N times and the last one to resolve releases
+  // it.
+  const drafts = new Map();
+  // Which singleton panel the editor last opened, so `dismissInspector` knows
+  // which card to close. Object cards are closed by id instead, because "the"
+  // object card no longer exists.
   let lastPanel = "object";
 
   // Every editor in the app funnels through `openInspector`, which is why the
@@ -44,27 +49,33 @@ export function createInspector(app) {
   // the object editor, the Frames workspace and the calendar-sync panel are
   // separate cards rather than one surface they take turns overwriting.
   //
-  // A card id of "object" is shared by the event/frame/pattern editors on
-  // purpose for now — Stage 2 gives each open object its own card and its own
-  // provisional draft, which is the point at which this becomes plural.
-  function openInspector(title, body, panel = "object") {
-    const cardId = `panel:${panel}`;
-    lastPanel = panel;
+  // `key` makes the card's identity per-object. Without it every event editor
+  // shared one card, so clicking a second meeting replaced the first instead of
+  // adding to the dock. With it, "open this object" is idempotent per object:
+  // the same object focuses its existing card, a different object gets its own.
+  function objectCardId(objectId) {
+    return `object:${objectId}`;
+  }
+
+  function openInspector(title, body, panel = "object", key = null) {
+    const cardId = key ? objectCardId(key) : `panel:${panel}`;
+    if (!key) lastPanel = panel;
     app.openDockCard({
       id: cardId,
       title,
       body,
-      onClose: () => handleCardClosed(panel)
+      onClose: () => handleCardClosed(panel, key)
     });
   }
 
   // The dock closed a card on its own (its handle was clicked). Anything the
   // editor was holding for that surface has to be released, or a discarded draft
-  // would linger in a card nobody can see.
-  function handleCardClosed(panel) {
-    if (panel === "object") {
-      discardProvisionalDraft();
-      app.session.inspector = null;
+  // would linger in a card nobody can see. Only this card's draft is discarded —
+  // closing one editor must not touch another card's unsaved work.
+  function handleCardClosed(panel, key) {
+    if (key) {
+      discardProvisionalDraft(key);
+      if (app.session.inspector?.id === key) app.session.inspector = null;
     }
     if (!app.dockIsOpen()) restoreFramesFocus(panel);
   }
@@ -85,13 +96,19 @@ export function createInspector(app) {
     restoreFramesFocus(panel);
   }
 
+  // Closing one object's editor. Its own draft goes with it and every other open
+  // card is left exactly as it was.
+  function dismissObjectCard(objectId) {
+    if (app.session.inspector?.id === objectId) app.session.inspector = null;
+    app.closeDockCard(objectCardId(objectId));
+  }
+
   function closeInspector() {
-    discardProvisionalDraft();
     dismissInspector();
   }
 
   function hasProvisionalDraft() {
-    return Boolean(provisionalEvent);
+    return drafts.size > 0;
   }
 
   // Used only when the whole document is being replaced wholesale (a fresh
@@ -99,13 +116,15 @@ export function createInspector(app) {
   // that is about to stop existing, so there is nothing to discard through
   // an undo transaction — just forget it.
   function clearProvisionalDraft() {
-    provisionalEvent = null;
+    drafts.clear();
   }
 
-  function discardProvisionalDraft(nextEventId = null) {
-    if (!provisionalEvent || provisionalEvent.id === nextEventId) return false;
-    const eventId = provisionalEvent.id;
-    provisionalEvent = null;
+  // Discard one specific draft. It used to mean "discard the draft, unless it is
+  // the one being opened next", because there could only be one; now it is
+  // explicitly scoped, so opening a second editor never disturbs the first.
+  function discardProvisionalDraft(eventId) {
+    if (!eventId || !drafts.has(eventId)) return false;
+    drafts.delete(eventId);
     try {
       app.executeEventChange("Discard provisional draft", eventId, (documentValue) => {
         delete documentValue.events[eventId];
@@ -121,15 +140,16 @@ export function createInspector(app) {
     return true;
   }
 
-  function resolveProvisionalDraft(nextEventId = null) {
-    if (!provisionalEvent || provisionalEvent.id === nextEventId) return true;
-    discardProvisionalDraft();
+  // Opening an editor no longer has to settle anyone else's unsaved work: cards
+  // are plural, so a second draft is a second card rather than a replacement. The
+  // hook stays so callers keep a single place to ask "may I open?".
+  function resolveProvisionalDraft() {
     return true;
   }
 
   function commitProvisionalDraft(eventId) {
-    if (!provisionalEvent || provisionalEvent.id !== eventId) return false;
-    provisionalEvent = null;
+    if (!drafts.has(eventId)) return false;
+    drafts.delete(eventId);
     app.store.endDeferred();
     return true;
   }
@@ -137,7 +157,7 @@ export function createInspector(app) {
   function focusInspectorEditor(eventId) {
     requestAnimationFrame(() => {
       if (app.session.inspector?.type !== "event" || app.session.inspector.id !== eventId) return;
-      const body = app.dockCardBody("panel:object");
+      const body = app.dockCardBody(objectCardId(eventId));
       const title = body?.querySelector('input[name="title"]');
       if (!(title instanceof HTMLInputElement)) return;
       title.focus({ preventScroll: true });
@@ -201,33 +221,14 @@ export function createInspector(app) {
     delete pattern.rawRule.verbatim;
   }
 
-  // "Stop propagating the series here": cap the series with an RRULE UNTIL at
-  // this occurrence rather than deleting the whole pattern — the humane
-  // alternative to losing every occurrence including the past ones. Inclusive of
-  // the occurrence in hand, undoable like every other edit, and deliberately not
-  // behind a confirm dialog.
-  //
-  // Occurrences after this point that were already materialized into explicit
-  // events stay: they are real records someone chose to make, and silently
-  // deleting them here would be a second, hidden edit.
-  function stopRepeatingAt(patternId, occurrence) {
-    const { chronolog } = app;
-    const pattern = chronolog.patterns[patternId];
-    if (!pattern) {
-      app.toast("That repeating series no longer exists.", true);
-      return;
-    }
-    if (!occurrence) {
-      app.toast("This occurrence has no date to end the series at.", true);
-      return;
-    }
-    const rrule = truncateRecurrenceAt(pattern.rrule || {}, occurrence);
-    app.executeRecordChange("Stop repeating series", "patterns", patternId, (documentValue) => {
-      writePatternRule(documentValue.patterns[patternId], rrule);
-    });
-    app.toast(`Series now ends with ${formatCivil(occurrence, true)}. Undo restores it.`);
-    dismissInspector();
-  }
+  // There is deliberately no "stop repeating here" command. Ending a series is
+  // not an imperative act on an occurrence — it is placing an end-staple on the
+  // series' body, at its beginning, its end, or any other reference point
+  // (ROADMAP staple anchoring). A button that truncated the rule from whichever
+  // occurrence happened to be open contradicted that model, so it is gone rather
+  // than kept as a shortcut. The UNTIL arithmetic it used survives in
+  // src/recurrence-end.js, where the "Ends on a date" control and the eventual
+  // staple model both need it.
 
   function relationDateParts(relation) {
     if (!relation?.coordinate) return { date: "", time: "" };
@@ -353,7 +354,6 @@ export function createInspector(app) {
     <div class="inspector-actions">
       <button class="instrument-button primary" id="materialize" type="button">Edit this occurrence</button>
       <button class="instrument-button" id="edit-series" type="button">Edit series</button>
-      <button class="instrument-button" id="stop-series" type="button" title="Keep this occurrence and every earlier one; stop the series repeating after it">Stop repeating here</button>
     </div>`;
     openInspector(fact.event.payload?.title || "Generated fact", wrapper);
     byId("materialize").addEventListener("click", () => {
@@ -369,9 +369,6 @@ export function createInspector(app) {
     byId("edit-series").addEventListener("click", () => {
       const pattern = chronolog.patterns[fact.event.provenance?.pattern];
       if (pattern?.templateEvent) openEventInspector(pattern.templateEvent);
-    });
-    byId("stop-series").addEventListener("click", () => {
-      stopRepeatingAt(fact.event.provenance?.pattern, fact.coordinate);
     });
   }
 
@@ -530,9 +527,8 @@ export function createInspector(app) {
     </details>
     <div class="inspector-actions">
       <button class="instrument-button primary" type="submit">Save</button>
-      ${event.provenance?.pattern ? `<button class="instrument-button" id="edit-series" type="button">Edit series</button>
-      <button class="instrument-button" id="stop-series" type="button" title="Keep this occurrence and every earlier one; stop the series repeating after it">Stop repeating here</button>` : ""}
-      ${provisionalEvent?.id === eventId ? `<button class="instrument-button" id="cancel-draft" type="button">Cancel</button>` : ""}
+      ${event.provenance?.pattern ? `<button class="instrument-button" id="edit-series" type="button">Edit series</button>` : ""}
+      ${drafts.has(eventId) ? `<button class="instrument-button" id="cancel-draft" type="button">Cancel</button>` : ""}
       <button class="instrument-button danger" id="delete-object" type="button">Delete</button>
     </div>`;
     const syncRecurrenceFields = () => {
@@ -563,21 +559,19 @@ export function createInspector(app) {
     wrapper.elements.objectKind.addEventListener("change", syncObjectKind);
     syncRecurrenceFields();
     syncObjectKind();
-    if (provisionalEvent?.id === eventId) {
-      provisionalEvent.form = wrapper;
-      wrapper.addEventListener("input", () => { if (provisionalEvent?.id === eventId) provisionalEvent.dirty = true; });
-      wrapper.addEventListener("change", () => { if (provisionalEvent?.id === eventId) provisionalEvent.dirty = true; });
+    const draft = drafts.get(eventId);
+    if (draft) {
+      draft.form = wrapper;
+      const markDirty = () => { const live = drafts.get(eventId); if (live) live.dirty = true; };
+      wrapper.addEventListener("input", markDirty);
+      wrapper.addEventListener("change", markDirty);
     }
-    openInspector(event.payload?.title || "Event", wrapper);
-    if (provisionalEvent?.id === eventId) focusInspectorEditor(eventId);
+    openInspector(event.payload?.title || "Event", wrapper, "object", eventId);
+    if (drafts.has(eventId)) focusInspectorEditor(eventId);
 
     wrapper.querySelector("#edit-series")?.addEventListener("click", () => {
       const pattern = chronolog.patterns[event.provenance?.pattern];
       if (pattern?.templateEvent) openEventInspector(pattern.templateEvent);
-    });
-
-    wrapper.querySelector("#stop-series")?.addEventListener("click", () => {
-      stopRepeatingAt(event.provenance?.pattern, relation?.coordinate);
     });
 
     wrapper.addEventListener("submit", (inputEvent) => {
@@ -751,15 +745,17 @@ export function createInspector(app) {
           }
         });
         commitProvisionalDraft(eventId);
-        dismissInspector();
+        // Saving closes this object's card only. Any other editor the user left open
+        // stays open with its own draft intact.
+        dismissObjectCard(eventId);
       } catch (error) {
         app.toast(error.message, true);
       }
     });
 
     wrapper.querySelector("#delete-object").addEventListener("click", () => {
-      const wasProvisional = provisionalEvent?.id === eventId;
-      if (wasProvisional) provisionalEvent = null;
+      const wasProvisional = drafts.has(eventId);
+      if (wasProvisional) drafts.delete(eventId);
       app.executeEventChange("Delete event", eventId, (documentValue) => {
         delete documentValue.events[eventId];
         for (const relationValue of Object.values(documentValue.relations)) {
@@ -775,11 +771,11 @@ export function createInspector(app) {
         }
       });
       if (wasProvisional) app.store.endDeferred();
-      dismissInspector();
+      dismissObjectCard(eventId);
     });
 
     wrapper.querySelector("#cancel-draft")?.addEventListener("click", () => {
-      if (discardProvisionalDraft()) dismissInspector();
+      if (discardProvisionalDraft(eventId)) dismissObjectCard(eventId);
     });
     return true;
   }
@@ -823,14 +819,16 @@ export function createInspector(app) {
           coordinate: daysToCivilCoordinate(orderedStart)
         });
       }, true);
-      provisionalEvent = { id: eventId, dirty: false, form: null };
+      drafts.set(eventId, { id: eventId, dirty: false, form: null });
       if (!openEventInspector(eventId)) {
-        discardProvisionalDraft();
-        dismissInspector();
+        discardProvisionalDraft(eventId);
+        dismissObjectCard(eventId);
       }
     } catch (error) {
-      if (provisionalEvent?.id === eventId) discardProvisionalDraft();
-      else store.endDeferred();
+      // Creating the draft deferred autosave before this failed. Either the draft
+      // cleanup releases that deferral or this does — never neither, or the
+      // document stays permanently unsaveable.
+      if (!discardProvisionalDraft(eventId)) app.store.endDeferred();
       app.toast(`Could not create event: ${error.message}`, true);
     }
   }

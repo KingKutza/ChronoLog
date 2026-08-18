@@ -661,11 +661,20 @@ export function createToolbar(app, dom) {
     app.toggleDockSide();
   });
 
+  // A press outside the dock used to discard a provisional draft and close the
+  // panel. That was harmless when the panel was a drawer floating over the stage,
+  // and it is poison now the dock owns a grid track: pressing down to drag out a
+  // new event collapsed the dock, so the stage widened under the pointer in the
+  // middle of the gesture and then the dock reopened on release.
+  //
+  // The rule is now explicit: stage interactions never collapse the dock. It
+  // closes when the user closes it — its last card's handle, or Escape. A
+  // provisional draft therefore survives until it is saved or its card is closed,
+  // which is also the only reading that makes sense once several drafts can be
+  // open at once.
   document.addEventListener("pointerdown", (event) => {
     const createMenu = byId("create-menu");
     if (createMenu.open && !createMenu.contains(event.target)) closeCreateMenu();
-    if (!app.hasProvisionalDraft() || !app.dockIsOpen() || byId("dock").contains(event.target)) return;
-    app.closeInspector();
   });
 
   byId("open-document").addEventListener("click", async () => {

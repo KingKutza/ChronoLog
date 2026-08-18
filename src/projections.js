@@ -8,6 +8,7 @@ import {
   formatCivil
 } from "./exact.js";
 import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./radial.js";
+import { factMatchesSelection } from "./session.js";
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
@@ -273,11 +274,19 @@ function clockLabel(minutes) {
   return `${displayHour}${minute ? `:${String(minute).padStart(2, "0")}` : ""}${suffix}`;
 }
 
+// The selection in force for this render pass. Every lens funnels its fact nodes
+// through `bindFact`, so marking selection there covers all seven at once; the
+// alternative was threading `context` through every call site of a function whose
+// whole job is stamping dataset attributes. `renderProjection` is the single
+// entry point, so this is set exactly once per pass.
+let activeSelection = null;
+
 function bindFact(node, fact) {
   node.dataset.eventId = fact.event.id;
   node.dataset.factDay = fact.day;
   if (fact.virtualId) node.dataset.virtualId = fact.virtualId;
   else if (fact.relation?.id) node.dataset.relationId = fact.relation.id;
+  if (factMatchesSelection(activeSelection, fact)) node.dataset.selected = "true";
   return node;
 }
 
@@ -512,8 +521,19 @@ function strategicPresentation(context, fact) {
   }
   if (visibility === "show") return "name";
   const duration = durationMinutes(fact.event);
-  const important = fact.event.traits?.some((trait) => ["important", "milestone", "deadline"].includes(trait))
-    || fact.event.payload?.categories?.some((category) => /important|milestone|deadline/i.test(category));
+  // Strategic was the one importance-aware lens that hand-rolled its own check
+  // instead of asking `factImportance`, and it got two things wrong: it never
+  // consulted importance frames at all, so an object made important by group
+  // affiliation was invisible here at any duration; and its trait list omitted
+  // "landmark", so the stronger half of the legacy mechanism was invisible too.
+  // A short, non-recurring object with `important === false` degrades to "none",
+  // which is why the data vanished rather than merely rendering plainly.
+  //
+  // The imported-category regex that used to sit here is gone on purpose: meaning
+  // is authored, never inferred, and specifically not from imported categories.
+  // It was the only place in the codebase that promoted an object on the strength
+  // of a provider's category string.
+  const important = factImportance(context, fact) !== "standard";
   const pattern = context.document.patterns[fact.event.provenance?.pattern];
   const frequency = String(pattern?.rrule?.FREQ || "").toUpperCase();
   if (context.session.strategicMode === "blocks") return duration >= 240 ? "name" : "none";
@@ -1301,6 +1321,7 @@ function renderRadial(target, context) {
 
 export function renderProjection(target, context) {
   target.replaceChildren();
+  activeSelection = context.session.selection || null;
   target.dataset.projection = context.session.projection;
   if (context.session.projection === "calendar") renderCalendar(target, context);
   else if (context.session.projection === "wall") renderWall(target, context);
@@ -1532,4 +1553,7 @@ export function renderMinimap(target, context) {
   target.append(svg);
 }
 
-export { calendarFrames, groupFrames };
+// Exposed for tests only: importance deciding whether an object renders at all is
+// exactly the kind of rule that must be pinned, and it cannot be reached through
+// renderProjection without a DOM.
+export { calendarFrames, groupFrames, strategicPresentation as strategicPresentationForTest };
