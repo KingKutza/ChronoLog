@@ -2,7 +2,6 @@ import {
   Rational,
   coordinate,
   daysToCivilCoordinate,
-  durationMagnitudeDays,
   formatCivil,
   levelValue
 } from "../exact.js";
@@ -13,6 +12,7 @@ import {
   clone,
   createId,
   durationMagnitude,
+  durationMagnitudeDays,
   eventRelations
 } from "../model.js";
 import { OBJECT_KINDS, normalizeObjectKind, objectKindForEvent, traitsForObjectKind } from "../object-kinds.js";
