@@ -41,11 +41,12 @@ Ordered by priority.
    recurring/edited events still need design.
 5. **Series editing** — opening an occurrence of a series for editing
    materializes it; closing without changes must revert it to a projection
-   of its series instead of leaving a separate instance. There is no clear
-   way to stop a series propagating from a given point — truncating a
-   series at "here" must exist as an alternative to deleting it. "Ends
-   after" only accepts integer counts — it needs an end date too. The
-   "completed at" field cannot be clicked.
+   of its series instead of leaving a separate instance. Ending a series
+   from a given point is a series staple (an end-staple on its body — see
+   #10), never a bespoke command; a "stop repeating here" button shipped
+   from misreading that and was removed. "Ends after" only accepts integer
+   counts — it needs an end date too. The "completed at" field cannot be
+   clicked.
 6. **Minimap rebuild.** Dots are too big: go from 11 rows to 21–31 and at
    least triple the dot density. Everything counts for at least one dot
    and some things several — a busy day and a free day must look different
@@ -86,10 +87,13 @@ Ordered by priority.
     end, midpoint, or another named point of an event, paired with a
     magnitude; two or three staples derive the magnitude instead. Fuzzy
     staples ("about 5ish") make uncertainty per-staple data. Constraint
-    bounds ("can't go later than 7:30") are adjacent and unruled. The
-    authoring path must handle real cases like end-anchored work shifts
-    and irregular night-shift cycles (event-defined periods already model
-    the cycles; entry is the gap). Needs design.
+    bounds ("can't go later than 7:30") are adjacent and unruled. Series
+    staple the same way — at the beginning, the end, or any arbitrary
+    reference point on the body: an end-staple ends a series, an
+    occurrence staple anchors the cycle's phase. The authoring path must
+    handle real cases like end-anchored work shifts and irregular
+    night-shift cycles (event-defined periods already model the cycles;
+    entry is the gap). Needs design.
 11. **Slim the retained ICS payload** — 93.8% of the owner's real document
     is a per-event duplicate of its own parsed ICS node
     (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
