@@ -30,6 +30,7 @@
         <summary title="Document actions" aria-label="Document actions"><span class="responsive-label-long">Document</span><span class="responsive-label-short" aria-hidden="true">⋮</span></summary>
         <div class="document-menu-panel">
           <button class="instrument-button" id="manage-frames" type="button" aria-controls="dock" aria-expanded="false">Frames workspace</button>
+          <button class="instrument-button" id="settings" type="button">Settings</button>
           <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
           <button class="instrument-button" id="lens-settings" type="button">Configure lenses</button>
           <button class="instrument-button" id="dock-side" type="button" title="Move the dock to the other edge">Dock side</button>
@@ -53,6 +54,15 @@
       <button type="button" data-lens="lines" aria-label="Lines"><span class="responsive-label-long">Lines</span><span class="responsive-label-short" aria-hidden="true">Lines</span></button>
       <button type="button" data-lens="spiral" aria-label="Spiral"><span class="responsive-label-long">Spiral</span><span class="responsive-label-short" aria-hidden="true">Spir</span></button>
       <button type="button" data-lens="radial" aria-label="Radial"><span class="responsive-label-long">Radial</span><span class="responsive-label-short" aria-hidden="true">Rad</span></button>
+      <!-- ToDo and Notes sit after the seven lenses and are coloured distinctly
+           because they are not lenses: they open dock cards rather than changing
+           what the stage projects. -->
+      <button class="view-bar-card" type="button" id="open-todos" aria-controls="dock"><span class="responsive-label-long">ToDo</span><span class="responsive-label-short" aria-hidden="true">Do</span></button>
+      <button class="view-bar-card" type="button" id="open-notes" aria-controls="dock"><span class="responsive-label-long">Notes</span><span class="responsive-label-short" aria-hidden="true">Note</span></button>
+      <details id="hidden-lenses" hidden>
+        <summary title="Hidden lenses" aria-label="Hidden lenses">⋯</summary>
+        <div class="hidden-lens-panel"></div>
+      </details>
     </nav>
 
     <section id="lens-controls" aria-label="Lens window controls"></section>

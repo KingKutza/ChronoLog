@@ -37,6 +37,9 @@ export function createWorkspace(app, dom) {
     }
     app.updateCalendarSelect();
     app.updateChrome();
+    // An open roster card is a live list of the document's todos or notes, so it is
+    // rebuilt with the rest of the chrome rather than going stale until reopened.
+    app.refreshRosters();
     app.updateLensControls();
     renderProjection(projection, context());
     const nextScroll = projection.querySelector("[data-scroll-key]");

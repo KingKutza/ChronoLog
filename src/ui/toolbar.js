@@ -68,12 +68,59 @@ export function createToolbar(app, dom) {
       const button = lensBar.querySelector(`[data-lens="${lens}"]`);
       if (button) lensBar.append(button);
     }
-    document.querySelectorAll("[data-lens]").forEach((button) => {
+    // The ToDo/Notes buttons and the hidden-lens drop always sit after the lenses,
+    // whatever order the lenses themselves are in.
+    for (const id of ["open-todos", "open-notes", "hidden-lenses"]) {
+      const node = byId(id);
+      if (node) lensBar.append(node);
+    }
+    lensBar.querySelectorAll("[data-lens]").forEach((button) => {
       const available = session.enabledLenses.includes(button.dataset.lens);
       button.hidden = !available;
       button.disabled = !available;
       button.classList.toggle("active", button.dataset.lens === session.currentLens());
     });
+    renderHiddenLenses();
+  }
+
+  // Hidden lenses are not gone, only off the bar: they collect in a drop at its
+  // right end so a lens can always be reached without opening a settings surface
+  // first. Picking one restores it to the bar and switches to it.
+  //
+  // It restores rather than making a temporary visit on purpose. `setLens` refuses
+  // a lens that is not enabled, and `configureLenses` switches away from a lens it
+  // has just disabled — so "visit while staying hidden" would have to fight two
+  // invariants that exist for good reason. Restoring is also trivially reversible
+  // from the same Configure lenses surface that hid it.
+  function renderHiddenLenses() {
+    const { session } = app;
+    const drop = byId("hidden-lenses");
+    if (!drop) return;
+    const hidden = session.lensOrder.filter((lens) => !session.enabledLenses.includes(lens));
+    drop.hidden = hidden.length === 0;
+    if (!hidden.length) {
+      drop.open = false;
+      return;
+    }
+    const panel = drop.querySelector(".hidden-lens-panel");
+    const signature = hidden.join("|");
+    if (panel.dataset.signature === signature) return;
+    panel.dataset.signature = signature;
+    panel.replaceChildren();
+    for (const lens of hidden) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "instrument-button small";
+      button.textContent = LENS_CATALOG[lens].title;
+      button.title = `Show ${LENS_CATALOG[lens].title} on the view bar again`;
+      button.addEventListener("click", () => {
+        drop.open = false;
+        session.configureLenses({ enabledLenses: [...session.enabledLenses, lens] });
+        session.setLens(lens);
+        app.scheduleRender();
+      });
+      panel.append(button);
+    }
   }
 
   // Every dropdown panel in the chrome is positioned from measurement rather than
@@ -497,7 +544,11 @@ export function createToolbar(app, dom) {
     wrapper.className = "event-form";
     const note = document.createElement("p");
     note.className = "field-note";
-    note.textContent = "Choose the lenses that belong in this workspace and arrange their toolbar order. Each lens keeps only the controls it declares; this does not delete its settings.";
+    // "Hide" rather than "enable": unchecking a lens takes it off the view bar and
+    // into the drop at the bar's right end, where it stays reachable. Nothing is
+    // deleted and no lens setting is lost, which is why this is a display choice
+    // and lives in the view session rather than the document.
+    note.textContent = "Uncheck a lens to take it off the view bar. Hidden lenses stay reachable from the drop at the bar's right end, and keep all their own settings. Arrange the order here too; the number keys follow whatever order you see.";
     const list = document.createElement("div");
     list.className = "frame-group-list";
     const render = () => {
@@ -660,6 +711,15 @@ export function createToolbar(app, dom) {
     closeDocumentMenu();
     app.toggleDockSide();
   });
+  // Settings opens the surfaces that exist today. The settings takeover view that
+  // replaces the stage is ROADMAP #3; this button is the entry point it will
+  // inherit, so the owner has one predictable place to look in the meantime.
+  byId("settings").addEventListener("click", () => {
+    closeDocumentMenu();
+    openLensWorkspace();
+  });
+  byId("open-todos").addEventListener("click", () => app.openRoster("todo"));
+  byId("open-notes").addEventListener("click", () => app.openRoster("note"));
 
   // A press outside the dock used to discard a provisional draft and close the
   // panel. That was harmless when the panel was a drawer floating over the stage,
@@ -801,7 +861,14 @@ export function createToolbar(app, dom) {
       app.pageDockTo(Number(event.key) - 1);
       return;
     } else if (/^[1-7]$/.test(event.key)) {
-      session.setLens(["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"][Number(event.key) - 1]);
+      // The digits follow the bar the user is looking at, not a fixed catalogue
+      // order. With a lens hidden or reordered, the old hard-coded list meant 4
+      // could land on a lens that was not the fourth button — or on a hidden one,
+      // where `setLens` refused and the key silently did nothing.
+      const visible = session.availableLenses();
+      const lens = visible[Number(event.key) - 1];
+      if (!lens) return;
+      session.setLens(lens);
     } else return;
     event.preventDefault();
     app.scheduleRender();

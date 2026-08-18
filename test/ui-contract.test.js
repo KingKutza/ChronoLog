@@ -89,6 +89,33 @@ test("Frames triggers are accessible toggles for the dock", async () => {
   assert.doesNotMatch(html, /id="inspector"/, "the inspector drawer is gone, not hidden");
 });
 
+test("the view bar carries ToDo and Notes card triggers and a hidden-lens drop", async () => {
+  const html = await readSource("pocket-instrument.html");
+  // They live inside the view bar, after the seven lenses, and open dock cards
+  // rather than changing what the stage projects.
+  assert.match(html, /id="open-todos"[^>]*aria-controls="dock"/);
+  assert.match(html, /id="open-notes"[^>]*aria-controls="dock"/);
+  assert.match(html, /id="hidden-lenses"/);
+
+  const start = html.indexOf('<nav id="lens-bar"');
+  const end = html.indexOf("</nav>", start);
+  assert.ok(start >= 0 && end > start, "the view bar exists");
+  const bar = html.slice(start, end);
+  for (const id of ["open-todos", "open-notes", "hidden-lenses"]) {
+    assert.ok(bar.includes(`id="${id}"`), `#${id} is in the view bar, not somewhere else`);
+  }
+  // They come after the seven lenses, which is where the ruling puts them.
+  assert.ok(bar.indexOf('data-lens="radial"') < bar.indexOf('id="open-todos"'));
+  // Distinct styling is a requirement, not a nicety: they are not lenses.
+  assert.match(bar, /class="view-bar-card"[^>]*id="open-todos"/);
+  assert.match(bar, /class="view-bar-card"[^>]*id="open-notes"/);
+});
+
+test("the document bar carries a Settings entry point", async () => {
+  const html = await readSource("pocket-instrument.html");
+  assert.match(html, /id="settings"/);
+});
+
 test("the shell provides the dock's rail, pager strip, and resize separator", async () => {
   const html = await readSource("pocket-instrument.html");
   for (const id of ["workspace", "dock", "dock-resize", "dock-rail", "dock-viewport", "dock-strip"]) {

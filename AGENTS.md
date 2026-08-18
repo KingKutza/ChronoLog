@@ -35,6 +35,10 @@ character when you touch adjacent code or docs.
     width drag and the side swap. It holds no rules of its own — it measures,
     asks `src/dock-layout.js`, and applies the answer — because it is the part
     that cannot run outside a browser.
+  - `roster.js` — the ToDo and Notes dock cards: every object of one kind plus a
+    "new" affordance that anchors to now. Deliberately a flat roster — the
+    staple/decay model is ROADMAP #9 and unsettled, so this invents no lifecycle
+    rule that would have to be unwound.
   - `workspace.js` — the render loop and minimap wiring.
   - `transactions.js` — document-mutation-with-undo helpers shared by the
     inspector and Frames panel.

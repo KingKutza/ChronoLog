@@ -329,6 +329,62 @@ button {
 #lens-bar button:hover { background: var(--surface); color: var(--ink); }
 #lens-bar button.active { background: var(--ink); color: white; }
 
+/* ToDo and Notes are not lenses — they open dock cards rather than changing what
+   the stage projects — so they are coloured distinctly and never take the lens
+   bar's active state. */
+#lens-bar .view-bar-card {
+  border: 1px solid color-mix(in srgb, var(--secondary) 42%, transparent);
+  color: color-mix(in srgb, var(--secondary) 72%, var(--ink));
+  background: color-mix(in srgb, var(--secondary) 9%, transparent);
+}
+
+#lens-bar .view-bar-card:hover {
+  border-color: var(--secondary);
+  background: color-mix(in srgb, var(--secondary) 17%, transparent);
+  color: var(--ink);
+}
+
+/* The hidden-lens drop sits at the bar's right end. It is sized to its glyph
+   rather than taking a full lens-width column, because it is chrome about the
+   bar rather than a destination on it. */
+#hidden-lenses {
+  position: relative;
+  align-self: stretch;
+  display: grid;
+  max-width: 28px;
+}
+
+#hidden-lenses > summary {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--strong);
+  border-radius: 7px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font: 700 12px/1 var(--data);
+}
+
+#hidden-lenses > summary::-webkit-details-marker { display: none; }
+#hidden-lenses > summary:hover,
+#hidden-lenses[open] > summary { border-color: var(--ink); color: var(--ink); background: var(--surface); }
+
+.hidden-lens-panel {
+  position: absolute;
+  z-index: 72;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  min-width: 140px;
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--strong);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
 #lens-controls {
   position: relative;
   z-index: 21;
@@ -721,6 +777,34 @@ svg [data-selected="true"] {
   stroke-width: 2;
   paint-order: stroke;
 }
+
+/* Notes and ToDos read as marginalia down the right of an Intimate day: dashed,
+   quieter, and never claiming the full column width the way committed time does. */
+.intimate-event.float-event {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--event-color) 12%, var(--paper));
+  opacity: .92;
+}
+
+.roster-list {
+  display: grid;
+  gap: 5px;
+}
+
+.roster-row {
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--surface);
+  text-align: left;
+}
+
+.roster-row:hover { border-color: var(--ink); background: var(--paper); }
+.roster-row strong { font: 600 12px/1.25 var(--ui); }
+.roster-row small { color: var(--faint); font: 500 10px/1.2 var(--data); }
 
 .dock-empty {
   display: grid;
