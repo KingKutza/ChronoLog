@@ -6,6 +6,7 @@ import { JournalStore, parseDocument } from "./store.js";
 import { THEME_PRESETS } from "./visual-language.js";
 import { createTransactions } from "./ui/transactions.js";
 import { SESSION_STORAGE_KEY, createWorkspace } from "./ui/workspace.js";
+import { createDock } from "./ui/dock.js";
 import { createInspector } from "./ui/inspector.js";
 import { createFramesPanel } from "./ui/frames-panel.js";
 import { applyTheme, createToolbar, storedTheme } from "./ui/toolbar.js";
@@ -22,11 +23,16 @@ import { createCalendarSyncPanel } from "./ui/calendar-sync-panel.js";
 const byId = (id) => document.getElementById(id);
 const projection = byId("projection");
 const minimap = byId("minimap");
-const inspector = byId("inspector");
-const inspectorBody = byId("inspector-body");
-const inspectorTitle = byId("inspector-title");
 const toastNode = byId("toast");
 const lensControls = byId("lens-controls");
+const dockDom = {
+  root: byId("app"),
+  dock: byId("dock"),
+  resize: byId("dock-resize"),
+  rail: byId("dock-rail"),
+  viewport: byId("dock-viewport"),
+  strip: byId("dock-strip")
+};
 function workspaceTarget() {
   return {
     api: "/api",
@@ -147,9 +153,13 @@ function reconcileSession() {
 
 Object.assign(app, createTransactions(app));
 Object.assign(app, createWorkspace(app, { projection, minimap }));
-Object.assign(app, createInspector(app, { inspector, inspectorBody, inspectorTitle }));
-Object.assign(app, createFramesPanel(app, { inspector, inspectorBody }));
-Object.assign(app, createToolbar(app, { projection, inspector, inspectorBody, lensControls, LOCAL_WORKSPACE_TARGET }));
+// The dock is wired before every module that opens a card into it, because those
+// modules call `app.openDockCard` at construction-time-plus-one and read it off
+// the shared object rather than capturing it.
+Object.assign(app, createDock(app, dockDom));
+Object.assign(app, createInspector(app));
+Object.assign(app, createFramesPanel(app));
+Object.assign(app, createToolbar(app, { projection, lensControls, LOCAL_WORKSPACE_TARGET }));
 Object.assign(app, createDragController(app, { projection, minimap }));
 createCalendarSyncPanel(app);
 

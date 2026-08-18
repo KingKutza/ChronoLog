@@ -7,6 +7,7 @@ import {
 import { calendarFrames } from "../projections.js";
 import { FIXED_RADIAL_CYCLES, cyclePeriodHint, normalizeRadialGuideValues, radialGuideSettings, resolveRadialCycle } from "../radial.js";
 import { DEFAULT_LENS_ORDER, LENS_CATALOG } from "../session.js";
+import { panelPlacement } from "../panel-flip.js";
 import { parseDocument } from "../store.js";
 import { THEME_FIELDS, THEME_PRESETS, normalizeTheme } from "../visual-language.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
@@ -32,7 +33,7 @@ export function applyTheme(theme) {
 // the Frames panel (`app.selectLeadingFrame`) and the drag/wheel module
 // (`app.adjustWindow`).
 export function createToolbar(app, dom) {
-  const { projection, inspector, inspectorBody, lensControls, LOCAL_WORKSPACE_TARGET } = dom;
+  const { projection, lensControls, LOCAL_WORKSPACE_TARGET } = dom;
   let lensControlsSignature = "";
 
   function updateCalendarSelect() {
@@ -74,6 +75,46 @@ export function createToolbar(app, dom) {
       button.classList.toggle("active", button.dataset.lens === session.currentLens());
     });
   }
+
+  // Every dropdown panel in the chrome is positioned from measurement rather than
+  // pinned to an edge in CSS. Pinning is what sent the lens Options panel off the
+  // left of the window once the context bar became the left third: it was fixed
+  // `right: 0` against its summary, so it could only ever open leftward. The panel
+  // is placed as `fixed` so no ancestor's overflow can clip it either.
+  function placePanel(panel, anchor) {
+    if (!panel || !anchor) return;
+    panel.style.position = "fixed";
+    panel.style.left = "0px";
+    panel.style.top = "0px";
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    const placement = panelPlacement({
+      anchor: anchor.getBoundingClientRect(),
+      panel: panel.getBoundingClientRect(),
+      viewport: { width: window.innerWidth, height: window.innerHeight }
+    });
+    panel.style.left = `${placement.left}px`;
+    panel.style.top = `${placement.top}px`;
+    panel.dataset.placement = placement.placement;
+    panel.dataset.align = placement.align;
+  }
+
+  // Re-measure on open, and again whenever the window changes shape underneath an
+  // open panel.
+  function placeOpenPanels() {
+    for (const [containerId, panelSelector] of [
+      ["create-menu", ".create-menu-panel"],
+      ["document-menu", ".document-menu-panel"]
+    ]) {
+      const container = byId(containerId);
+      if (container?.open) placePanel(container.querySelector(panelSelector), container.querySelector("summary"));
+    }
+    const options = lensControls.querySelector(".lens-control-overflow");
+    if (options?.open) placePanel(options.querySelector(".lens-control-overflow-panel"), options.querySelector("summary"));
+  }
+
+  app.placeOpenPanels = placeOpenPanels;
+  window.addEventListener("resize", placeOpenPanels);
 
   // Compaction repairs a document it had to change to make loadable. Say so on
   // the way in — a silent repair is how the condition that caused it stays
@@ -399,6 +440,9 @@ export function createToolbar(app, dom) {
     optionPanel.className = "lens-control-overflow-panel";
     optionPanel.append(...optionControls);
     options.append(summary, optionPanel);
+    options.addEventListener("toggle", () => {
+      if (options.open) placePanel(optionPanel, summary);
+    });
     // One right-hand group: window movement, then today, then reset. The group's
     // `margin-left: auto` is the only thing holding the bar's middle open, which
     // is why nothing else on the bar may grow.
@@ -597,9 +641,11 @@ export function createToolbar(app, dom) {
 
   byId("create-menu").addEventListener("toggle", (event) => {
     if (event.currentTarget.open) closeDocumentMenu();
+    placeOpenPanels();
   });
   byId("document-menu").addEventListener("toggle", (event) => {
     if (event.currentTarget.open) closeCreateMenu();
+    placeOpenPanels();
   });
 
   byId("theme-settings").addEventListener("click", () => {
@@ -610,11 +656,15 @@ export function createToolbar(app, dom) {
     closeDocumentMenu();
     openLensWorkspace();
   });
+  byId("dock-side").addEventListener("click", () => {
+    closeDocumentMenu();
+    app.toggleDockSide();
+  });
 
   document.addEventListener("pointerdown", (event) => {
     const createMenu = byId("create-menu");
     if (createMenu.open && !createMenu.contains(event.target)) closeCreateMenu();
-    if (!app.hasProvisionalDraft() || !inspector.classList.contains("open") || inspector.contains(event.target)) return;
+    if (!app.hasProvisionalDraft() || !app.dockIsOpen() || byId("dock").contains(event.target)) return;
     app.closeInspector();
   });
 
@@ -699,15 +749,23 @@ export function createToolbar(app, dom) {
 
   window.addEventListener("keydown", (event) => {
     const { session, history } = app;
-    if (event.key === "Escape" && inspector.classList.contains("open")) {
+    if (event.key === "Escape" && app.dockIsOpen()) {
       event.preventDefault();
       app.closeInspector();
+      return;
+    }
+    // Dock paging works while a field has focus, because a card is usually a form
+    // and requiring the user to leave it before cycling cards would defeat the
+    // point of paging. PageUp/PageDown do not type anything, so they are safe here.
+    if (app.dockIsOpen() && (event.key === "PageUp" || event.key === "PageDown")) {
+      event.preventDefault();
+      app.pageDockBy(event.key === "PageDown" ? 1 : -1);
       return;
     }
     const editing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
     if (editing) return;
     if (event.key === "Delete" && session.inspector?.type === "event") {
-      const deleteButton = inspectorBody.querySelector("#delete-object");
+      const deleteButton = app.dockCardBody("panel:object")?.querySelector("#delete-object");
       if (deleteButton) {
         event.preventDefault();
         deleteButton.click();
@@ -726,6 +784,12 @@ export function createToolbar(app, dom) {
     else if (event.key === "-") app.adjustWindow(1);
     else if (event.key.toLowerCase() === "n") {
       app.createEventAt(session.currentFocus());
+      return;
+    } else if (/^[1-9]$/.test(event.key) && (event.altKey || app.dockIsOpen() && event.ctrlKey)) {
+      // Ordinal keys jump to a card by position in the rail. They are modified so
+      // the bare digits stay with the lenses, which are the more frequent target.
+      event.preventDefault();
+      app.pageDockTo(Number(event.key) - 1);
       return;
     } else if (/^[1-7]$/.test(event.key)) {
       session.setLens(["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"][Number(event.key) - 1]);

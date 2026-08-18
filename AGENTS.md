@@ -31,6 +31,10 @@ character when you touch adjacent code or docs.
     drag-to-move, drag-to-create, Intimate rail rebasing, minimap scrubbing.
   - `calendar-sync-panel.js` — the ICS feed UI: file import/export, staple
     suggestions, and the read-only HTTPS calendar-feed subscription panel.
+  - `dock.js` — the dock: the handle rail, the transform-only card pager, the
+    width drag and the side swap. It holds no rules of its own — it measures,
+    asks `src/dock-layout.js`, and applies the answer — because it is the part
+    that cannot run outside a browser.
   - `workspace.js` — the render loop and minimap wiring.
   - `transactions.js` — document-mutation-with-undo helpers shared by the
     inspector and Frames panel.
@@ -60,6 +64,12 @@ character when you touch adjacent code or docs.
   frame model: fixed nested-calendar authoring/validation, read-only
   projection helpers for that schema, and event-defined (observed-boundary)
   cycle resolution.
+- `dock-layout.js` — the dock's DOM-free logic: width clamping and snap points,
+  the pager's retarget-don't-queue state machine, and the append-only card order
+  that only a user drag reorders.
+- `panel-flip.js` — where a dropdown panel goes so it stays inside the window.
+  Panels are placed from measurement; pinning one to an edge in CSS is what sent
+  the lens Options panel off-screen once the context bar became the left third.
 - `recurrence-end.js` — how an RRULE stops: COUNT/UNTIL mode detection, their
   mutual exclusion, and the UNTIL values for "ends on this date" (inclusive of
   the whole day) and "stop repeating here" (inclusive of that occurrence).
