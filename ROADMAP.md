@@ -49,7 +49,15 @@ Ordered by priority.
 7. **Intimate lens interaction and legibility** — restore horizontal drag
    (drag is free, both axes at once), the forward/back one-day buttons,
    and horizontal scroll alongside vertical. Base-increment lines are
-   invisible inside colored zones.
+   invisible inside colored zones. Overlap must be indicated locally, not
+   globally: a 30-minute collision currently lanes both events for their
+   full height and roughs up the whole interface even where no text
+   contends — narrow or mark only the actual overlapping interval, leave
+   every non-contended element at full size. Placing an event inside an
+   occupied span must not require dragging the occupant away and back
+   (today's workaround; midnight-crossing drag made it survivable, but it
+   is a bad operating mode) — create-in-place must work through an
+   existing block.
 8. **Toolbar order** — swap "jump to today" and "reset lens".
 9. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
    2026-08-17/18 rulings): floats live at their staples, project forward
