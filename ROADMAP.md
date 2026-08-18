@@ -83,6 +83,15 @@ Ordered by priority.
    importance kind removes it from groups, stops it coloring its events,
    and an important-marked ToDo renders in Strategic under neither
    mechanism — the split dropdown is the bad semantics this item deletes.
+   (Strategic's invisibility was a shallow bug, fixed separately.) Further
+   split-brain symptoms awaiting this item: the Frames panel's
+   per-calendar presence control silently does nothing for importance
+   frames; a group's per-lens display settings are lost when it converts
+   to an importance frame; sigil shape is blind to group-based importance,
+   breaking shape-carries-meaning. The engine collision is one condition
+   (isOrdinaryGroup excluding importance frames); membership relations are
+   already the same shape, so no schema change — but legacy trait strings
+   and additive kind-switching need cleanup.
 10. **Staple anchoring** (see LEXICON.md, staple anchoring entry) — retire
     the start-time-plus-duration assumption: a staple can anchor start,
     end, midpoint, or another named point of an event, paired with a
