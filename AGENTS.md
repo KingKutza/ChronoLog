@@ -165,6 +165,25 @@ Compaction (apply journal, atomic snapshot rewrite, truncate) runs at
 boot, on the periodic timer, and on shutdown — SIGINT/SIGTERM on POSIX,
 stdin-close on Windows, where signals cannot be delivered.
 
+Referential cascades are the edit's job, not the loader's. An override names the
+occurrence it acts on by a virtual id (`${patternId}/${encodedKey}`), so an
+override belongs to its pattern the way a relation belongs to an event: deleting
+a pattern must delete its overrides in the same undoable transaction. That
+invariant lives in the bundle helpers (`src/ui/transactions.js` —
+`executePatternChange` plus the event/event-set/frame bundles) and in the sync
+reconciler, so undo restores pattern and overrides together and the journal
+carries every removal. `removeOverridesForPatterns` and `overridePatternId` in
+`src/model.js` are the single derivation every consumer shares.
+
+Because validation runs only at load, a document journaled into an invalid state
+fails long after the edit that caused it — and one bad pointer rejects the whole
+file. So `compactDocument` repairs what it can before validation, counting each
+repair into an optional caller-supplied report that `parseDocument` threads
+through (never a field on the document, which would end up serialized). The
+recoveries are siblings: legacy recurrence constraints, dangling override
+replacements, and overrides orphaned from a deleted pattern. `validateDocument`
+itself stays strict; repair belongs to the parse path alone.
+
 Client: edits are captured as ops at the `src/ui/transactions.js` helpers
 and the converted direct-delta sites; the store batches ops on the 350 ms
 debounce into one journal post. Undo/redo post inverse ops. The File

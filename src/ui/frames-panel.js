@@ -485,7 +485,11 @@ export function createFramesPanel(app, dom) {
       }
     });
     if (!isNew) wrapper.querySelector("#delete-object").addEventListener("click", () => {
-      app.executeRecordChange("Delete pattern", "patterns", value.id, (documentValue) => {
+      // A pattern bundle, not a single record: the overrides that suppress or
+      // replace this series' occurrences have to go with it, and come back with it
+      // on undo. This is the path the owner took when deleting a series left six
+      // orphaned overrides behind.
+      app.executePatternChange("Delete pattern", value.id, (documentValue) => {
         delete documentValue.patterns[value.id];
       });
       openObjectBrowser("pattern");

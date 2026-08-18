@@ -203,8 +203,7 @@ export function validateDocument(document) {
       continue;
     }
     if (override.id !== id) errors.push(`Override map key ${id} does not match its id`);
-    const virtual = typeof override.virtual === "string" ? override.virtual : "";
-    const patternId = virtual.slice(0, virtual.lastIndexOf("/"));
+    const patternId = overridePatternId(override);
     if (!patternId || !document.patterns?.[patternId]) {
       errors.push(`Override ${id} references a missing virtual pattern`);
     }
@@ -506,6 +505,41 @@ function daysToCoordinateSeen(document, frameId, days, seen) {
   }
   if (frame.basis) return daysToCoordinateSeen(document, frame.basis, days, seen);
   return coordinate([{ level: "day", value: Rational.parse(days).toJSON() }]);
+}
+
+// An override names the occurrence it acts on by a virtual id, which
+// `stableVirtualId` builds as `${patternId}/${encodedKey}`. The key is
+// percent-encoded, so the last slash is always the boundary — and every consumer
+// has to split it the same way or repair and validation will disagree about which
+// pattern an override belongs to. That is what this pair exists for: one
+// derivation, used by validateDocument, the load-time repair in store.js, the
+// undo bundles in ui/transactions.js, and the sync reconciler.
+export function virtualPatternId(virtualId) {
+  const virtual = typeof virtualId === "string" ? virtualId : "";
+  const boundary = virtual.lastIndexOf("/");
+  return boundary > 0 ? virtual.slice(0, boundary) : "";
+}
+
+export function overridePatternId(override) {
+  return virtualPatternId(override?.virtual);
+}
+
+// An override belongs to its pattern the way a relation belongs to an event: it
+// means "this occurrence of that series is suppressed or replaced". Once the
+// series is gone the record can never match a fact again, so deleting a pattern
+// without its overrides leaves pointers to nothing — and validateDocument rejects
+// the document at its next load, which is how a handful of dead pointers can take
+// an entire file offline. Returns how many it removed so callers can report.
+export function removeOverridesForPatterns(document, patternIds) {
+  const removed = patternIds instanceof Set ? patternIds : new Set(patternIds);
+  if (!removed.size) return 0;
+  let count = 0;
+  for (const [id, override] of Object.entries(document?.overrides || {})) {
+    if (!removed.has(overridePatternId(override))) continue;
+    delete document.overrides[id];
+    count += 1;
+  }
+  return count;
 }
 
 export function stableVirtualId(patternId, key) {
