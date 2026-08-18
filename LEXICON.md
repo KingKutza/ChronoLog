@@ -111,7 +111,13 @@ Rulings and additions (Don, 2026-08-17/18, KISS pass + dock/floats design):
   5ish,' would be good too." Fuzziness becomes per-staple, not per-object —
   the staple axiom made concrete. Adjacent, unruled: "can't go later than
   7:30" reads as a bound — a constraint staple distinct from the fuzzy
-  actual.
+  actual. Series staple the same way: "the goal is to be able to staple a
+  series at the beginning, the end, or any other arbitrary point we can
+  use as reference to the location of its body" — ending a series is an
+  end-staple, not a command (a shipped "stop repeating here" button was
+  ruled "the most broken backward way to do what I said while undermining
+  what I meant" and removed); stapling an arbitrary occurrence anchors the
+  cycle's phase.
 
 ## Vocabulary (time-traveler framing, from ReadMe.txt and the pr-2 mockup)
 
