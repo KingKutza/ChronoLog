@@ -85,14 +85,27 @@ export function minimapColumnDots(magnitude, count, options = {}) {
   return Math.min(capacity, Math.max(objects, scaled));
 }
 
-// The dot field: one column per bucket, growing upward from an always-lit
-// baseline row. Bottom-anchored growth (rather than the old centre-out growth)
-// spends all 24 activity rows on one comparable height instead of 12 mirrored
-// pairs, which is what makes adjacent columns comparable at a glance.
+// Where a column's dots sit, in the order they light up. The always-lit baseline
+// row is the field's vertical middle — it reads as the time axis, and it belongs
+// in the middle of the band the way the horizon does. Growth alternates outward
+// from it, one row above then one row below, so a column's blob stays centred on
+// the axis and all 24 activity rows are still spendable: with 25 rows there are
+// exactly 12 above and 12 below, so nothing is lost to the symmetry.
+export function minimapRowOrder(rows, baseline) {
+  const order = [];
+  for (let distance = 1; distance < rows; distance += 1) {
+    if (baseline - distance >= 0) order.push(baseline - distance);
+    if (baseline + distance < rows) order.push(baseline + distance);
+  }
+  return order;
+}
+
+// The dot field: one column per bucket, growing symmetrically out of the centre
+// baseline row.
 export function minimapDotGrid(magnitudes, options = {}) {
   const columns = magnitudes.length;
   const rows = Math.max(3, Math.floor(Number(options.rows) || MINIMAP_GRID_ROWS));
-  const baseline = rows - 1;
+  const baseline = Math.floor(rows / 2);
   const capacity = rows - 1;
   const counts = options.counts || [];
   const ceiling = Math.max(
@@ -100,15 +113,32 @@ export function minimapDotGrid(magnitudes, options = {}) {
     Number(options.ceiling) || minimapMagnitudeCeiling(magnitudes, options.quantile)
   );
   const dotsPerMagnitude = capacity / ceiling;
+  const rowOrder = minimapRowOrder(rows, baseline);
   const cells = new Uint8Array(columns * rows);
   const columnDots = new Uint8Array(columns);
   for (let column = 0; column < columns; column += 1) {
     cells[baseline * columns + column] = 1;
     const dots = minimapColumnDots(magnitudes[column], counts[column], { capacity, dotsPerMagnitude });
     columnDots[column] = dots;
-    for (let step = 1; step <= dots; step += 1) cells[(baseline - step) * columns + column] = 1;
+    for (let step = 0; step < dots; step += 1) cells[rowOrder[step] * columns + column] = 1;
   }
-  return { cells, columns, rows, baseline, capacity, ceiling, dotsPerMagnitude, columnDots };
+  return {
+    cells, columns, rows, baseline, capacity, ceiling, dotsPerMagnitude, columnDots, rowOrder
+  };
+}
+
+// The half-height a column of `dots` reaches above and below the axis. The
+// renderer draws each column as a band centred on the baseline, so it needs the
+// reach rather than the raw dot count.
+export function minimapColumnReach(dots, rows, baseline) {
+  const order = minimapRowOrder(rows, baseline);
+  let above = 0;
+  let below = 0;
+  for (let step = 0; step < Math.min(dots, order.length); step += 1) {
+    if (order[step] < baseline) above = Math.max(above, baseline - order[step]);
+    else below = Math.max(below, order[step] - baseline);
+  }
+  return { above, below };
 }
 
 const MONTH_ABBREVIATIONS = Object.freeze([

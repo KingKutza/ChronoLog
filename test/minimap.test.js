@@ -6,6 +6,7 @@ import {
   MINIMAP_GRID_ROWS,
   MINIMAP_MAGNITUDE_LADDER,
   minimapColumnDots,
+  minimapColumnReach,
   minimapDotGrid,
   minimapEventMagnitude,
   minimapLabelGranularity,
@@ -45,10 +46,22 @@ test("the field is one baseline row plus 24 activity rows at 288 buckets", () =>
   const grid = minimapDotGrid(magnitudes, { counts });
   assert.equal(grid.rows, 25);
   assert.equal(grid.columns, 288);
-  assert.equal(grid.baseline, 24);
   assert.equal(grid.capacity, 24);
   assert.equal(grid.capacity % 12, 0, "24 activity rows keep quarter and third bands on real rows");
   assert.equal(grid.cells.length, grid.rows * grid.columns);
+});
+
+// The axis is the field's horizon: it belongs in the vertical middle, not at the
+// bottom edge. 25 rows put exactly 12 above it and 12 below, so centring the
+// baseline costs none of the 24 activity rows.
+test("the baseline axis sits at the field's vertical centre", () => {
+  const grid = minimapDotGrid(new Float64Array(8), {});
+  assert.equal(grid.baseline, 12);
+  assert.equal(grid.baseline, Math.floor(grid.rows / 2));
+  const above = grid.baseline;
+  const below = grid.rows - 1 - grid.baseline;
+  assert.equal(above, below, "the axis has equal room on both sides");
+  assert.equal(above + below, grid.capacity, "and every activity row stays spendable");
 });
 
 test("every column keeps a baseline dot so the field always reads as a time axis", () => {
@@ -57,27 +70,50 @@ test("every column keeps a baseline dot so the field always reads as a time axis
   for (let column = 0; column < grid.columns; column += 1) {
     assert.equal(grid.cells[grid.baseline * grid.columns + column], 1);
   }
-  // An empty bucket is the baseline and nothing else.
+  // An empty bucket is the axis dot and nothing else, on either side.
   assert.equal(grid.columnDots[6], 0);
   assert.equal(grid.cells[(grid.baseline - 1) * grid.columns + 6], 0);
+  assert.equal(grid.cells[(grid.baseline + 1) * grid.columns + 6], 0);
 });
 
-test("activity grows upward from the baseline and never spills into a neighbour", () => {
-  // An explicit ceiling keeps this column short of saturation, so the top of the
+test("activity grows outward from the axis and never spills into a neighbour", () => {
+  // An explicit ceiling keeps this column short of saturation, so the edge of the
   // growth is somewhere the test can actually look at.
   const { magnitudes, counts } = field([[100, 6, 3]]);
   const grid = minimapDotGrid(magnitudes, { counts, ceiling: 24 });
   const dots = grid.columnDots[100];
   assert.equal(dots, 6);
   assert.ok(dots < grid.capacity);
-  for (let step = 1; step <= dots; step += 1) {
-    assert.equal(grid.cells[(grid.baseline - step) * grid.columns + 100], 1, `row ${step} above baseline is lit`);
+
+  const reach = minimapColumnReach(dots, grid.rows, grid.baseline);
+  assert.deepEqual(reach, { above: 3, below: 3 }, "six dots read as three rows each side of the axis");
+  for (let step = 1; step <= reach.above; step += 1) {
+    assert.equal(grid.cells[(grid.baseline - step) * grid.columns + 100], 1, `row ${step} above the axis is lit`);
   }
-  assert.equal(grid.cells[(grid.baseline - dots - 1) * grid.columns + 100], 0, "growth stops at the column's height");
+  for (let step = 1; step <= reach.below; step += 1) {
+    assert.equal(grid.cells[(grid.baseline + step) * grid.columns + 100], 1, `row ${step} below the axis is lit`);
+  }
+  assert.equal(grid.cells[(grid.baseline - reach.above - 1) * grid.columns + 100], 0, "growth stops at the column's reach");
+  assert.equal(grid.cells[(grid.baseline + reach.below + 1) * grid.columns + 100], 0);
+
   // The old field bled a full column's overflow sideways, which smeared one busy
   // day across its neighbours. Neighbours now stay exactly as empty as they are.
   assert.equal(grid.columnDots[99], 0);
   assert.equal(grid.columnDots[101], 0);
+});
+
+test("a column's reach stays balanced and never leaves the field", () => {
+  const grid = minimapDotGrid(new Float64Array(4), {});
+  for (let dots = 0; dots <= grid.capacity; dots += 1) {
+    const { above, below } = minimapColumnReach(dots, grid.rows, grid.baseline);
+    assert.ok(Math.abs(above - below) <= 1, `${dots} dots stay symmetric within one row`);
+    assert.ok(grid.baseline - above >= 0, `${dots} dots stay inside the top of the field`);
+    assert.ok(grid.baseline + below <= grid.rows - 1, `${dots} dots stay inside the bottom`);
+  }
+  // A saturated column fills the field edge to edge.
+  const full = minimapColumnReach(grid.capacity, grid.rows, grid.baseline);
+  assert.equal(full.above, grid.baseline);
+  assert.equal(full.below, grid.rows - 1 - grid.baseline);
 });
 
 test("every object in a bucket is at least one dot, and magnitude lifts the column further", () => {

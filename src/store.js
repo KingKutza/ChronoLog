@@ -1,4 +1,4 @@
-import { clone, migrateDocument, validateDocument } from "./model.js";
+import { clone, migrateDocument, overridePatternId, validateDocument } from "./model.js";
 import { OpLog, applyOps } from "./ops.js";
 
 function parsedRRule(value = "") {
@@ -36,10 +36,49 @@ function recoverDanglingOverrideReplacements(document) {
   return document;
 }
 
-export function compactDocument(document) {
+// An override whose series no longer exists cannot ever match a fact again, so
+// it is unreachable data rather than a decision worth keeping. Deleting a pattern
+// used not to cascade to its overrides, so a document could be journaled into a
+// state that `validateDocument` refuses — and because validation runs only at
+// load, the failure surfaced as a whole document declining to open long after the
+// edit that caused it.
+//
+// This is a repair, not a relaxation: `validateDocument` stays strict, and the
+// sweep happens in the parse path ahead of it, exactly like the two recoveries
+// above. The repaired state persists on the next journal append or compaction.
+function recoverOrphanedVirtualOverrides(document, report) {
+  const overrides = document?.overrides;
+  if (!overrides) return document;
+  let dropped = 0;
+  for (const [id, override] of Object.entries(overrides)) {
+    if (!override || typeof override !== "object") continue;
+    const patternId = overridePatternId(override);
+    if (patternId && document.patterns?.[patternId]) continue;
+    delete overrides[id];
+    dropped += 1;
+  }
+  if (dropped) {
+    addRepair(report, {
+      kind: "orphaned-virtual-overrides",
+      count: dropped,
+      message: `Swept ${dropped} leftover exception${dropped === 1 ? "" : "s"} from repeating series that no longer exist.`
+    });
+  }
+  return document;
+}
+
+// Repairs are reported through a caller-supplied collector rather than a field on
+// the document, so nothing a repair notices can ever end up in serialized output.
+function addRepair(report, entry) {
+  if (Array.isArray(report)) report.push(entry);
+  else if (report && typeof report === "object") (report.repairs ||= []).push(entry);
+}
+
+export function compactDocument(document, report = null) {
   migrateDocument(document);
   recoverLegacyRecurrenceConstraints(document);
   recoverDanglingOverrideReplacements(document);
+  recoverOrphanedVirtualOverrides(document, report);
   for (const source of Object.values(document?.foreign?.ics?.sources || {})) {
     const calendar = source?.component;
     if (!Array.isArray(calendar?.components)) continue;
@@ -54,8 +93,11 @@ export function serializeDocument(document) {
   return JSON.stringify(compactDocument(document)) + "\n";
 }
 
-export function parseDocument(text) {
-  const document = compactDocument(JSON.parse(text));
+// `report` is optional and write-only: pass an array or an object to collect the
+// repairs compaction had to make, so a caller can warn about them without the
+// load itself failing.
+export function parseDocument(text, report = null) {
+  const document = compactDocument(JSON.parse(text), report);
   const validation = validateDocument(document);
   if (!validation.valid) throw new Error(validation.errors.join("\n"));
   return document;

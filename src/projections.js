@@ -14,6 +14,7 @@ import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthW
 import {
   MINIMAP_BUCKETS,
   MINIMAP_GRID_ROWS,
+  minimapColumnReach,
   minimapDotGrid,
   minimapEventMagnitude,
   minimapLabelGranularity,
@@ -1446,8 +1447,10 @@ export function renderMinimap(target, context) {
     fill: "url(#minimap-dot-unlit)",
     class: "minimap-dot-field"
   }));
-  // Every column owns a baseline dot, so the field always reads as a time axis
-  // even where nothing is scheduled. One rect covers the whole baseline row.
+  // Every column owns a baseline dot on the field's centre row, so the axis reads
+  // as a continuous line through the middle even where nothing is scheduled. One
+  // rect covers the whole baseline row, and activity never overdraws it — the axis
+  // stays the axis.
   svg.append(svgElement("rect", {
     x: 20,
     y: baselineTop,
@@ -1457,20 +1460,36 @@ export function renderMinimap(target, context) {
     class: "minimap-dot-field"
   }));
   // Runs of equal height collapse into one rect, which keeps a quiet field down
-  // to a handful of nodes and a saturated one down to a few hundred.
+  // to a handful of nodes and a saturated one down to a few hundred. Each run is
+  // two bands, above and below the axis, because a column grows outward from it.
   for (let column = 0; column < dotGrid.columns;) {
     const dots = dotGrid.columnDots[column];
     let end = column + 1;
     while (end < dotGrid.columns && dotGrid.columnDots[end] === dots) end += 1;
     if (dots) {
-      svg.append(svgElement("rect", {
-        x: 20 + column * columnWidth,
-        y: baselineTop - dots * rowHeight,
-        width: (end - column) * columnWidth,
-        height: dots * rowHeight,
-        fill: "url(#minimap-dot-lit)",
-        class: "minimap-dot-field"
-      }));
+      const reach = minimapColumnReach(dots, dotGrid.rows, dotGrid.baseline);
+      const x = 20 + column * columnWidth;
+      const width = (end - column) * columnWidth;
+      if (reach.above) {
+        svg.append(svgElement("rect", {
+          x,
+          y: baselineTop - reach.above * rowHeight,
+          width,
+          height: reach.above * rowHeight,
+          fill: "url(#minimap-dot-lit)",
+          class: "minimap-dot-field"
+        }));
+      }
+      if (reach.below) {
+        svg.append(svgElement("rect", {
+          x,
+          y: baselineTop + rowHeight,
+          width,
+          height: reach.below * rowHeight,
+          fill: "url(#minimap-dot-lit)",
+          class: "minimap-dot-field"
+        }));
+      }
     }
     column = end;
   }

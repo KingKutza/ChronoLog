@@ -1,5 +1,5 @@
 import { importICS, property } from "./ics.js";
-import { clone, createDocument, touch } from "./model.js";
+import { clone, createDocument, removeOverridesForPatterns, touch } from "./model.js";
 
 // Invariant: the reconciler only ever ASSIGNS or DELETES whole records in
 // `document` (document.events[id] = ..., delete document.events[id], and the
@@ -92,25 +92,39 @@ function removeDanglingEventReferences(document, eventId) {
   for (const [id, relation] of Object.entries(document.relations || {})) {
     if (relation.event === eventId || relation.member === eventId) delete document.relations[id];
   }
+  const removedPatterns = new Set();
   for (const [id, pattern] of Object.entries(document.patterns || {})) {
-    if (pattern.templateEvent === eventId) delete document.patterns[id];
+    if (pattern.templateEvent !== eventId) continue;
+    delete document.patterns[id];
+    removedPatterns.add(id);
   }
   for (const [id, override] of Object.entries(document.overrides || {})) {
     override.replacements = (override.replacements || []).filter((value) => value !== eventId);
     if (!override.replacements.length && override.suppress !== true) delete document.overrides[id];
   }
+  // Removing the template event removes its series, so the overrides that named
+  // occurrences of that series go too. Filtering `replacements` above is not
+  // enough: a plain suppression carries no replacement to filter, and would
+  // survive as a pointer to a pattern that no longer exists.
+  removeOverridesForPatterns(document, removedPatterns);
 }
 
 function removeSourceOwnedRecords(document, sourceId) {
   for (const [id, value] of Object.entries(document.relations || {})) {
     if (sourceOwned(value, sourceId)) delete document.relations[id];
   }
+  const removedPatterns = new Set();
   for (const [id, value] of Object.entries(document.patterns || {})) {
-    if (sourceOwned(value, sourceId)) delete document.patterns[id];
+    if (!sourceOwned(value, sourceId)) continue;
+    delete document.patterns[id];
+    removedPatterns.add(id);
   }
   for (const [id, value] of Object.entries(document.overrides || {})) {
     if (sourceOwned(value, sourceId)) delete document.overrides[id];
   }
+  // An override the owner authored by hand against an imported series is not
+  // source-owned, so the sweep above leaves it — but its pattern has just gone.
+  removeOverridesForPatterns(document, removedPatterns);
 }
 
 function removeSource(document, sourceId) {

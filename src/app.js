@@ -171,11 +171,15 @@ async function loadWorkspaceDocument() {
     const loadedName = response.headers.get("x-chronolog-file") || "chronolog.chronolog";
     // The server already replayed its journal, so this body is the current
     // materialized document and the sequence number it corresponds to.
-    replaceDocument(parseDocument(await response.text()), {
+    const repairs = [];
+    replaceDocument(parseDocument(await response.text(), repairs), {
       ...WORKSPACE_TARGET,
       seq: Number(response.headers.get("x-chronolog-seq") || 0)
     });
-    app.toast(`Auto-loaded ${loadedName}`);
+    // A repair is a warning, never a failure: the document opened. Say what was
+    // swept rather than letting it happen silently.
+    if (repairs.length) app.toast(repairs.map((repair) => repair.message).join(" · "));
+    else app.toast(`Auto-loaded ${loadedName}`);
   } catch (error) {
     app.store.attach(app.chronolog, LOCAL_WORKSPACE_TARGET);
     app.toast(`Workspace autoload unavailable: ${error.message}`, true);

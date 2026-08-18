@@ -75,6 +75,13 @@ export function createToolbar(app, dom) {
     });
   }
 
+  // Compaction repairs a document it had to change to make loadable. Say so on
+  // the way in — a silent repair is how the condition that caused it stays
+  // invisible until the next thing breaks.
+  function repairSuffix(repairs) {
+    return repairs.length ? ` · ${repairs.map((repair) => repair.message).join(" · ")}` : "";
+  }
+
   function closeDocumentMenu() {
     byId("document-menu").open = false;
   }
@@ -630,8 +637,9 @@ export function createToolbar(app, dom) {
         }]
       });
       const file = await handle.getFile();
-      app.replaceDocument(parseDocument(await file.text()), { handle, filename: file.name });
-      app.toast(`Opened ${file.name} · autosave attached`);
+      const repairs = [];
+      app.replaceDocument(parseDocument(await file.text(), repairs), { handle, filename: file.name });
+      app.toast(`Opened ${file.name} · autosave attached${repairSuffix(repairs)}`);
     } catch (error) {
       if (error.name !== "AbortError") app.toast(error.message, true);
     }
@@ -642,12 +650,13 @@ export function createToolbar(app, dom) {
     if (!file) return;
     try {
       if (!confirmDocumentReplacement()) return;
-      app.replaceDocument(parseDocument(await file.text()), LOCAL_WORKSPACE_TARGET);
+      const repairs = [];
+      app.replaceDocument(parseDocument(await file.text(), repairs), LOCAL_WORKSPACE_TARGET);
       // A different document replaces the workspace wholesale: it becomes the
       // new snapshot, and journaling continues from there. This is the one
       // remaining whole-document upload.
       if (LOCAL_WORKSPACE_TARGET.api) await app.store.uploadSnapshot();
-      app.toast(`Opened ${file.name} · autosave attached to the local workspace`);
+      app.toast(`Opened ${file.name} · autosave attached to the local workspace${repairSuffix(repairs)}`);
     } catch (error) {
       app.toast(error.message, true);
     } finally {
