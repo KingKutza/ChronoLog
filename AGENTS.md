@@ -129,19 +129,39 @@ GUI_Mockup images are live design references — never delete them.
 
 ### Persistence
 
-Current implementation: atomic temp-file-plus-rename writes, ETag `If-Match`
-compare-and-swap over HTTP, one rolling `.chronolog-recovery.chronolog`
-copy of the previous valid document, and a `409 Conflict` deterministic
-keep-both policy — the second writer gets a visible Conflict state and must
-download/reload rather than being silently overwritten or merged. This is
-being replaced by the ratified journal + snapshot design in
-[ROADMAP.md](ROADMAP.md): a snapshot file plus an appended JSONL journal,
-loaded as snapshot-plus-replay, with per-append sequence numbers replacing
-the whole-document hash CAS. That design deletes today's rolling recovery
-copy (recovery becomes journal replay) and deletes today's
-download/reload keep-both conflict flow (conflicts become per-op sequence
-collisions instead of whole-document collisions). Saves become updates,
-never whole-document overwrites, once that lands.
+Journal + snapshot. `chronolog.chronolog` is a snapshot loaded at boot;
+`chronolog.journal` is JSONL, one line per committed edit:
+`{seq, ts, label, ops:[{op:"put"|"del", map, id, value?}]}`. Ops are
+record-level and idempotent across all seven maps (`meta`/`foreign` keyed
+by top-level property), so the server applies and compacts them with zero
+domain knowledge. `src/ops.js` holds the one shared `applyOps` — client
+rebase and server replay must never diverge. The server
+(`tools/journal.js`, wired in `tools/serve.js`) keeps the materialized
+document in memory with a lazily invalidated response buffer;
+`.chronolog-journal-state.json` carries `currentSeq` across compaction,
+and a truncated final journal line is discarded with a warning, never
+fatal.
+
+API: `GET /api/document` returns the materialized document.
+`POST /api/journal` `{baseSeq, entries}` appends and returns `{seq}`; a
+stale `baseSeq` gets `409 {currentSeq, missed, truncated}` — the client
+rebases missed ops (record-level last-writer-wins) and reposts.
+`GET /api/journal?since=N` serves the tail. `PUT /api/snapshot` is the
+deliberate whole-document upload (first run, opening a different file) —
+seq advances so lagging windows reload. `GET/PUT /api/settings` carries
+`snapshotPeriodMinutes` (default 10) from `.chronolog-settings.json`.
+Compaction (apply journal, atomic snapshot rewrite, truncate) runs at
+boot, on the periodic timer, and on shutdown — SIGINT/SIGTERM on POSIX,
+stdin-close on Windows, where signals cannot be delivered.
+
+Client: edits are captured as ops at the `src/ui/transactions.js` helpers
+and the converted direct-delta sites; the store batches ops on the 350 ms
+debounce into one journal post. Undo/redo post inverse ops. The File
+System Access path (local file handle) still writes whole documents.
+There is no recovery copy and no download/reload conflict flow — recovery
+is journal replay, conflicts are per-op sequence collisions.
+`calendar-sync.js`'s reconciler assigns or deletes whole records, never
+mutates in place — the sync diff relies on that invariant.
 
 ### Frame model
 
@@ -232,8 +252,9 @@ conversion.
   ROADMAP.md). There is no LAN tier; don't reintroduce one.
 - Pure Node, zero external dependencies. Keep it that way.
 - Pre-alpha: break compatibility rather than accrete legacy shims.
-- `LEXICON.md` is the owner's voice — agents never edit it, even
+- `LEXICON.md` is the owner's voice — agents never edit it unprompted, even
   when it references something that has since moved or been deleted.
+  Additions happen only at the owner's direction, in his words.
 - `GUI_Mockup/` images are live design references — never delete them.
 - The doc set is exactly four files: this file, `README.md`,
   `ROADMAP.md`, and `LEXICON.md`. Don't create new `.md` files.

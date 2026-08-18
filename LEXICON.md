@@ -56,6 +56,47 @@ Empirical scale findings (Don, r4 field testing, intimate lens with free back/fw
 
 Instrument-side findings against the real export (2026-08-06): ~90% of the 34MB file is ATTENDEE noise; events carry hand-assigned CATEGORIES usable for honest color-coding; VTIMEZONE encodes DST as RRULEs anchored in 1601. **Diagnosed and fixed in r2:** 854 VEVENTs (31%) were silently dropped for lacking SUMMARY — 851 were Outlook recurrence *overrides* (moved/modified instances) that inherit their title from the parent series by UID; dropping them made moved meetings render at their default times (doctrine violation: those are the actuals). Fix: title inheritance + Z-stamp (UTC) → viewer-local conversion. All 2,710 now parse; 941 overrides live (was 90). Full TZID math remains open per the handoff.
 
+Rulings and additions (Don, 2026-08-17/18, KISS pass + dock/floats design):
+- **The staple axiom**: "there is no such thing as a time-native object, only
+  objects better or worse stapled to time." Ruled while rejecting a proposed
+  float gutter for todos/notes — a separate band "creates a false distinction
+  between time native and time non-native objects." Everything renders in the
+  one lens field; sigils and zones carry the differentiation.
+- **Floats live at their staples**: staples come from acts — date added, date
+  edited, date done, a due cycle, an event attached to. "If that staple is
+  date added, cool, that is where it lives." An object edited every day for
+  eleven days belongs to that span. Zero-staple objects are possible; most
+  carry one or more.
+- **Projection decays, data never does**: the deadliest documented todo
+  failure mode is "the build up of unimportant nonurgent todos — they cluster
+  around now and never resolve, only blocking window space. I don't want to
+  delete all the things I wrote down and never did, but I also can not afford
+  to keep them up." Resolution: unresolved todos/notes project forward from
+  their staple for an importance-scaled keep-range (high priority ≈ three
+  weeks, standard ≈ one week), then lapse from the present view while
+  remaining at their historical staple. Display work needed "in sigils and
+  zones to make that intuitive and informative without piling too much
+  information on the eye — but I think it is doable."
+- **Spiral and Radial are separate lenses** — supersedes r4's "Radial has two
+  variants." Seven lenses total: Intimate, Tactical, Strategic, Wall, Lines,
+  Spiral, Radial.
+- **Chrome vocabulary**: the three command bars are the **document bar**
+  (logo, save status, document actions), the **view bar** (navigation among
+  views — the lenses, and future views), and the **context bar** (controls of
+  the active view); together the **chrome stack**, one third wide, with the
+  minimap holding the other two thirds at full stack height.
+- **The dock**: one multi-function dock hosts editors as full-bleed cards,
+  paged one at a time — "switch and swap fast, without looking at the point I
+  am clicking on, by the 10th time." The stage hosts views; the dock hosts
+  editors; settings takes over the stage. No floating windows in the webapp;
+  the final native app may host persistent second windows on non-mobile
+  platforms.
+- **ICS is the interchange boundary** (partial answer to the r3 platform
+  question): the Graph API integration was stripped — "a spectacularly bad
+  way to implement" calendar sync; two-way sync with popular calendars,
+  Outlook first, remains a high-priority goal via ICS semantics. Provider
+  API clients are out.
+
 ## Vocabulary (time-traveler framing, from ReadMe.txt and the pr-2 mockup)
 
 - **Prime Line / PrimeLine** — the canonical timeline; the one currently displayed as primary.

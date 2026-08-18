@@ -1,4 +1,5 @@
 import { clone, migrateDocument, validateDocument } from "./model.js";
+import { OpLog, applyOps } from "./ops.js";
 
 function parsedRRule(value = "") {
   return Object.fromEntries(String(value).split(";").filter(Boolean).map((part) => {
@@ -70,53 +71,89 @@ export function downloadText(text, filename, type = "application/json") {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export class AutosaveStore {
-  constructor({ delay = 350, onStatus = () => {}, fetcher = globalThis.fetch?.bind(globalThis) } = {}) {
+const MAX_REBASE_ATTEMPTS = 5;
+
+// The journal client. Saving is no longer "write the document"; it is "append
+// the ops this window committed". A 350ms debounce batches the ops from a
+// burst of edits into one request, one entry per committed edit, so the
+// journal keeps each edit's own label.
+//
+// Two save targets exist and they behave differently on purpose:
+//
+//   * The server-backed workspace journals ops. Nothing whole-document ever
+//     moves during ordinary editing.
+//   * A File System Access handle (the owner picked a file with "Save as")
+//     still writes the whole document, because a plain file has no journal to
+//     append to.
+export class JournalStore {
+  constructor({ delay = 350, onStatus = () => {}, onRebase = () => {}, fetcher = globalThis.fetch?.bind(globalThis) } = {}) {
     this.delay = delay;
     this.onStatus = onStatus;
+    // Invoked after another window's ops land in this document, so the app can
+    // rebuild its engine and repaint.
+    this.onRebase = onRebase;
     this.handle = null;
-    this.remoteUrl = null;
+    this.api = null;
     this.filename = null;
     this.fetcher = fetcher;
     this.document = null;
     this.timer = null;
-    this.revision = 0;
-    this.savedRevision = 0;
+    this.log = new OpLog();
+    this.seq = 0;
+    this.deferred = 0;
     this.inFlight = null;
     this.queued = null;
     this.queuedForce = false;
-    this.deferred = 0;
-    this.remoteRevision = null;
-    this.conflict = null;
+    this.lastError = null;
   }
 
-  attach(document, { handle = null, remoteUrl = null, filename = null, remoteRevision = null } = {}) {
+  attach(document, { handle = null, api = null, filename = null, seq = 0 } = {}) {
     clearTimeout(this.timer);
     this.timer = null;
     this.handle = handle;
-    this.remoteUrl = remoteUrl;
+    this.api = api;
     this.filename = filename || handle?.name || null;
     this.document = document;
-    this.revision = 0;
-    this.savedRevision = 0;
+    this.log.clear();
+    this.seq = seq;
     this.deferred = 0;
-    this.remoteRevision = remoteRevision;
-    this.conflict = null;
+    this.lastError = null;
+    const writable = this.writable();
     this.status(
-      this.handle || this.remoteUrl ? "clean" : "detached",
-      this.handle || this.remoteUrl
-        ? `Autosave ready · ${this.filename || "Chronolog document"}`
-        : "No autosave target"
+      writable ? "clean" : "detached",
+      writable ? `Autosave ready · ${this.filename || "Chronolog document"}` : "No autosave target"
     );
   }
 
-  status(state, message, error = null) {
-    this.onStatus({ state, message, error, dirty: this.revision !== this.savedRevision, conflict: this.conflict });
+  writable() {
+    return Boolean(this.handle || this.api);
   }
 
-  markDirty() {
-    this.revision += 1;
-    const writable = this.handle || this.remoteUrl;
+  get pending() {
+    return this.log.length > 0;
+  }
+
+  status(state, message, error = null) {
+    this.lastError = error;
+    this.onStatus({ state, message, error, dirty: this.pending, seq: this.seq });
+  }
+
+  url(path) {
+    return `${this.api}/${path}`;
+  }
+
+  // Called for every committed change, with the ops that produced it. This is
+  // the only way a document mutation reaches the journal.
+  collect(label, ops) {
+    if (!Array.isArray(ops)) {
+      // Every mutation path is required to report its ops. A change arriving
+      // without them means a new bypass was added, and silently falling back
+      // to a whole-document write is exactly the behavior this design removed.
+      throw new Error(`Document change "${label}" reported no ops; every mutation must flow through op capture`);
+    }
+    this.log.collect(label, ops);
+    if (!this.log.length) return;
+    const writable = this.writable();
     if (this.deferred) {
       this.status("dirty", writable ? "Editing · autosave after close" : "Unsaved · choose Save as");
       clearTimeout(this.timer);
@@ -136,8 +173,8 @@ export class AutosaveStore {
 
   endDeferred() {
     this.deferred = Math.max(0, this.deferred - 1);
-    if (this.deferred || this.revision === this.savedRevision) return;
-    const writable = this.handle || this.remoteUrl;
+    if (this.deferred || !this.pending) return;
+    const writable = this.writable();
     this.status("dirty", writable ? "Autosave pending…" : "Unsaved · choose Save as");
     if (writable) this.timer = setTimeout(() => this.save(), this.delay);
   }
@@ -151,7 +188,7 @@ export class AutosaveStore {
         accept: { "application/x-chronolog": [".chronolog"] }
       }]
     });
-    this.remoteUrl = null;
+    this.api = null;
     this.filename = this.handle.name;
     await this.save(true);
     return true;
@@ -159,6 +196,10 @@ export class AutosaveStore {
 
   save(force = false) {
     if (this.inFlight) {
+      // Several callers can pile up behind one in-flight save; they share a
+      // single follow-up. If any of them asked for a forced save ("Save now",
+      // or a draft closing), the follow-up must carry that force — otherwise
+      // the explicit request is quietly downgraded to an ordinary autosave.
       this.queuedForce = this.queuedForce || force;
       if (!this.queued) {
         this.queued = this.inFlight.then(() => {
@@ -180,79 +221,122 @@ export class AutosaveStore {
   async write(force) {
     if (!this.document) return false;
     if (this.deferred && !force) return false;
-    if (!force && this.revision === this.savedRevision) return true;
-    const handle = this.handle;
-    const remoteUrl = this.remoteUrl;
-    const attachedDocument = this.document;
-    if (!handle && !remoteUrl) {
+    if (!this.writable()) {
       this.status("dirty", "Choose Save as to enable autosave");
       return false;
     }
-    const savingRevision = this.revision;
-    const text = serializeDocument(this.document);
-    this.status("saving", "Saving…");
+    if (!this.pending && !force) return true;
+    clearTimeout(this.timer);
+    this.timer = null;
     try {
-      if (handle) {
-        const writable = await handle.createWritable();
-        await writable.write(text);
-        await writable.close();
-      } else {
-        if (!this.fetcher) throw new Error("This browser cannot reach the local autosave service");
-        const response = await this.fetcher(remoteUrl, {
-          method: "PUT",
-          headers: {
-            "content-type": "application/x-chronolog",
-            ...(this.remoteRevision ? { "if-match": this.remoteRevision } : { "if-none-match": "*" })
-          },
-          body: text
-        });
-        if (response.status === 409) {
-          const currentRevision = response.headers?.get?.("etag") || null;
-          this.conflict = { localRevision: this.remoteRevision, remoteRevision: currentRevision, text };
-          this.status("conflict", "Conflict — local edits are safe; download a copy or reload latest");
-          return false;
-        }
-        if (!response.ok) throw new Error(await response.text() || `Autosave returned ${response.status}`);
-        this.remoteRevision = response.headers?.get?.("etag") || this.remoteRevision;
-      }
-      if (attachedDocument !== this.document || handle !== this.handle || remoteUrl !== this.remoteUrl) return true;
-      if (savingRevision > this.savedRevision) this.savedRevision = savingRevision;
-      this.status(
-        this.savedRevision === this.revision ? "clean" : "dirty",
-        this.savedRevision === this.revision
-          ? `Autosaved · ${this.filename || "Chronolog document"}`
-          : "New edits waiting…"
-      );
-      if (this.savedRevision !== this.revision && !this.deferred) {
-        clearTimeout(this.timer);
-        this.timer = setTimeout(() => this.save(), this.delay);
-      }
-      return true;
+      if (this.handle) await this.writeHandle();
+      else if (!await this.writeJournal()) return false;
     } catch (error) {
-      if (handle !== this.handle) return false;
       this.status("error", `Save failed: ${error.message}`, error);
       return false;
     }
+    this.status(
+      this.pending ? "dirty" : "clean",
+      this.pending ? "New edits waiting…" : `Autosaved · ${this.filename || "Chronolog document"}`
+    );
+    if (this.pending && !this.deferred) {
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.save(), this.delay);
+    }
+    return true;
   }
 
-  async readRemote() {
-    if (!this.remoteUrl || !this.fetcher) throw new Error("No local workspace is attached");
-    const response = await this.fetcher(this.remoteUrl, { method: "GET", cache: "no-store" });
-    if (!response.ok) throw new Error(await response.text() || `Open returned ${response.status}`);
-    return { text: await response.text(), remoteRevision: response.headers?.get?.("etag") || null };
+  // A plain file has no journal, so the handle path still writes the whole
+  // document. The pending ops are already applied to it; draining them just
+  // clears the dirty flag.
+  async writeHandle() {
+    // Drain and serialize as one step. An edit committed while the write is in
+    // flight is NOT in this text, so clearing its pending op would report it
+    // saved when it never reached the file — it has to stay pending for the
+    // follow-up write.
+    const entries = this.log.drain();
+    const text = serializeDocument(this.document);
+    this.status("saving", "Saving…");
+    try {
+      const writable = await this.handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+    } catch (error) {
+      this.log.restore(entries);
+      throw error;
+    }
   }
 
-  clearConflict() {
-    this.conflict = null;
+  async writeJournal() {
+    if (!this.fetcher) throw new Error("This browser cannot reach the local autosave service");
+    let entries = this.log.drain();
+    if (!entries.length) return true;
+    this.status("saving", "Saving…");
+    for (let attempt = 0; attempt < MAX_REBASE_ATTEMPTS; attempt += 1) {
+      const response = await this.fetcher(this.url("journal"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseSeq: this.seq, entries })
+      });
+      if (response.status === 409) {
+        const conflict = await response.json();
+        if (conflict.truncated) {
+          // The journal no longer reaches back to what this window last saw,
+          // so there is nothing to rebase onto. Hand the ops back and say so.
+          this.log.restore(entries);
+          throw new Error("The workspace was replaced in another window; reopen it to continue");
+        }
+        entries = this.rebase(conflict, entries);
+        continue;
+      }
+      if (!response.ok) {
+        this.log.restore(entries);
+        throw new Error(await response.text() || `Autosave returned ${response.status}`);
+      }
+      const result = await response.json();
+      this.seq = result.seq;
+      return true;
+    }
+    this.log.restore(entries);
+    throw new Error("Could not settle concurrent edits after several attempts");
+  }
+
+  // Record-level rebase. The other window's entries land first, then this
+  // window's own ops go on top — so where both touched the same record, the
+  // last writer wins, and where they touched different records, both survive.
+  rebase(conflict, entries) {
+    this.status("conflict-rebasing", "Merging edits from another window…");
+    for (const entry of conflict.missed || []) applyOps(this.document, entry.ops);
+    for (const entry of entries) applyOps(this.document, entry.ops);
+    this.seq = conflict.currentSeq;
+    this.onRebase(conflict.missed || []);
+    return entries;
+  }
+
+  // Whole-document upload. Two uses: establishing the snapshot on a data
+  // directory that has none, and the owner deliberately opening a different
+  // file into the workspace. Never part of autosave.
+  async uploadSnapshot() {
+    if (!this.api) throw new Error("No local workspace is attached");
+    if (!this.fetcher) throw new Error("This browser cannot reach the local autosave service");
+    this.status("saving", "Saving…");
+    const response = await this.fetcher(this.url("snapshot"), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: serializeDocument(this.document)
+    });
+    if (!response.ok) throw new Error(await response.text() || `Snapshot upload returned ${response.status}`);
+    const result = await response.json();
+    this.seq = result.seq;
+    this.log.drain();
+    this.status("clean", `Autosaved · ${this.filename || "Chronolog document"}`);
+    return result.seq;
   }
 
   download(filename = "chronolog.chronolog") {
     if (!this.document) return;
     downloadText(serializeDocument(this.document), filename);
-    this.status(
-      "downloaded",
-      this.revision === this.savedRevision ? "Downloaded" : "Downloaded a copy — unsaved changes remain"
-    );
+    this.status("downloaded", this.pending ? "Downloaded a copy — unsaved changes remain" : "Downloaded");
   }
 
   snapshot() {

@@ -2,40 +2,55 @@
 
 Ordered by priority.
 
-1. **Journal + snapshot persistence.** The document file becomes a load-time
-   snapshot; each committed edit appends one JSONL operation to
-   `chronolog.journal`; loading replays the journal over the snapshot.
-   Compaction rewrites the snapshot atomically on clean shutdown and on a
-   user-settable period. Per-append sequence numbers replace the
-   whole-document ETag CAS; the rolling recovery copy and the
-   download/reload conflict flow are deleted with it — recovery becomes
-   journal replay, conflicts become per-op collisions. Design settled, not
-   yet built.
-2. **Settings window** — theme, workspace defaults, and the
-   snapshot-compaction period.
+1. **Dock system.** One multi-function dock hosts every editor as a
+   full-bleed card, paged one at a time: handle strip (top in vertical
+   axis, right in horizontal), shift/ctrl-scroll cycles card-to-card with a
+   fast snap animation (220ms transform-only), click a handle to jump,
+   keyboard cycling. Side is a setting (right by default); width defaults
+   to a third, drags freely from 1/8 to 2/3 with snap points, and is
+   remembered. The stage owns the chrome: document bar, view bar, and
+   context bar stack on the left third with the minimap filling the right
+   two-thirds at full stack height; the dock fills the main-window vertical
+   below the chrome. The stage hosts views, the dock hosts editors;
+   settings takes over the stage; no floating windows. Lens resize
+   re-renders once at rest; whatever opened the panel stays visually
+   anchored through the reflow.
+2. **Settings window** — theme, workspace defaults, dock side, layout
+   presets, and the snapshot-compaction period (server endpoint already
+   live). Takes over the stage.
 3. **Two-way calendar sync, Outlook first** — through ICS import/export
-   semantics, never a provider API. Needs the per-op conflict resolution
-   that the journal work provides.
-4. **Dropdown z-order bug** — the new-item dropdown renders behind the
-   control bars.
+   semantics, never a provider API. The journal's per-op conflict
+   foundation now exists; provider-side conflict semantics for
+   recurring/edited events still need design.
+4. **No-op instance edits fork the series** — opening an occurrence of a
+   series for editing materializes it; closing without changes must revert
+   it to a projection of its series instead of leaving a separate instance.
 5. **Minimap tuning** — dots are too large and need too many events to
    register.
 6. **Intimate lens legibility** — base-increment lines are invisible inside
    colored zones.
 7. **Toolbar order** — swap "jump to today" and "reset lens".
-8. **ToDo and Notes** — make both genuinely usable in the instrument, and
-   give Notes an ICS path (VJOURNAL) so they round-trip like everything
-   else.
-9. **Control-bar aesthetics.**
-10. **New logo** — plain text until a better mark earns the spot.
-11. **More calendar subscriptions** — Google Calendar and other providers,
+8. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
+   2026-08-17/18 rulings): floats live at their staples, project forward
+   for an importance-scaled keep-range, lapse from present view without
+   deletion. Includes the sigils-and-zones display work and an ICS path
+   (VJOURNAL) so Notes round-trip.
+9. **Slim the retained ICS payload** — 93.8% of the owner's real document
+   is a per-event duplicate of its own parsed ICS node
+   (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
+   round-trip fidelity while storing the source once, not per event.
+10. **Control-bar aesthetics.**
+11. **New logo** — plain text until a better mark earns the spot.
+12. **More calendar subscriptions** — Google Calendar and other providers,
     each through its published ICS URL.
-12. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
+13. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
     web, built on the journal's per-op foundation.
-13. **Mobile version** — Android first.
-14. **Super-strategic band** — the lens beyond Strategic, which caps at 18
+14. **Mobile version** — Android first. The dock becomes a full-screen
+    sheet under a width breakpoint; card paging becomes swipe gestures.
+15. **Super-strategic band** — the lens beyond Strategic, which caps at 18
     months where this band would take over. Needs design.
-15. **Field-level merge** — real merging on top of per-op sequencing. Needs
+16. **Field-level merge** — real merging on top of per-op sequencing. Needs
     design.
-16. **Compiled native binaries** — the distribution end-state; the portable
-    Node bundles are interim.
+17. **Compiled native binaries** — the distribution end-state; the portable
+    Node bundles are interim. Native shells may pop dock cards out into
+    real second OS windows on desktop platforms.

@@ -67,7 +67,10 @@ export async function launch(argv = process.argv.slice(2), environment = process
       CHRONOLOG_DATA_DIR: dataDirectory,
       CHRONOLOG_PORT: String(options.port)
     },
-    stdio: ["ignore", "pipe", "pipe"]
+    // stdin is a live pipe the launcher simply holds open. Closing it (or
+    // dying) is how the server is asked to shut down cleanly and fold its
+    // journal into the snapshot — Windows has no signal that can do that.
+    stdio: ["pipe", "pipe", "pipe"]
   });
   const copy = (chunk) => { log.appendFile(chunk).catch(() => {}); };
   child.stdout.on("data", copy);

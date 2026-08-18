@@ -16,6 +16,7 @@ import {
   eventRelations
 } from "../model.js";
 import { OBJECT_KINDS, normalizeObjectKind, objectKindForEvent, traitsForObjectKind } from "../object-kinds.js";
+import { delOp, putOp } from "../ops.js";
 import { calendarFrames, groupFrames } from "../projections.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
 
@@ -233,6 +234,27 @@ export function createInspector(app, dom) {
     delete documentValue.events[prepared.event.id];
   }
 
+  // `prepared` is computed once, before the delta runs, and does not change
+  // across redo/undo, so the ops it implies are equally static — no need for
+  // the mutable-metadata capture the record-level helpers use elsewhere.
+  function materializationOps(prepared) {
+    const extraRelations = prepared.relations || [];
+    return {
+      ops: [
+        putOp("events", prepared.event.id, prepared.event),
+        putOp("relations", prepared.relation.id, prepared.relation),
+        ...extraRelations.map((relation) => putOp("relations", relation.id, relation)),
+        putOp("overrides", prepared.override.id, prepared.override)
+      ],
+      inverseOps: [
+        delOp("overrides", prepared.override.id),
+        ...[...extraRelations].reverse().map((relation) => delOp("relations", relation.id)),
+        delOp("relations", prepared.relation.id),
+        delOp("events", prepared.event.id)
+      ]
+    };
+  }
+
   function openVirtualInspector(virtualId) {
     const { chronolog, history } = app;
     const fact = findVisibleFact(virtualId);
@@ -265,7 +287,7 @@ export function createInspector(app, dom) {
         "Make generated fact explicit",
         (documentValue) => applyMaterialization(documentValue, prepared),
         (documentValue) => revertMaterialization(documentValue, prepared),
-        { preserveRecurrence: true }
+        { preserveRecurrence: true, ...materializationOps(prepared) }
       );
       openEventInspector(prepared.event.id);
     });
@@ -716,6 +738,7 @@ export function createInspector(app, dom) {
     prepareMaterialization,
     applyMaterialization,
     revertMaterialization,
+    materializationOps,
     openVirtualInspector,
     openEventInspector,
     createEventAt

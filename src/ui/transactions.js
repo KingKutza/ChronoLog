@@ -1,4 +1,5 @@
 import { clone } from "../model.js";
+import { bundleOps, recordOps } from "../ops.js";
 
 // Document-mutation-with-undo helpers shared by the inspector and Frames
 // panel. `app` carries the live `chronolog`/`history` references (they are
@@ -43,17 +44,23 @@ export function createTransactions(app) {
     Object.assign(documentValue.overrides, clone(bundle.overrides));
   }
 
+  // The before/after bundles are exactly the records this edit can reach, so
+  // they convert straight into the journal's op list. `metadata` is filled in
+  // from inside `apply`, which runs before `executeDelta` emits the change —
+  // and again on redo, which keeps the ops current for a replayed apply.
   function executeEventChange(label, eventId, mutate, preserveRecurrence = false) {
     const { chronolog, history } = app;
     const before = captureEventBundle(chronolog, eventId);
     let after = null;
+    const metadata = { preserveRecurrence };
     history.executeDelta(label, (documentValue) => {
       if (after) restoreEventBundle(documentValue, eventId, after);
       else {
         mutate(documentValue);
         after = captureEventBundle(documentValue, eventId, before.trackedOverrideIds);
       }
-    }, (documentValue) => restoreEventBundle(documentValue, eventId, before), { preserveRecurrence });
+      Object.assign(metadata, bundleOps(before, after, { eventId }));
+    }, (documentValue) => restoreEventBundle(documentValue, eventId, before), metadata);
   }
 
   function captureEventSetBundle(documentValue, eventIds) {
@@ -93,29 +100,33 @@ export function createTransactions(app) {
     const { chronolog, history } = app;
     const before = captureEventSetBundle(chronolog, eventIds);
     let after = null;
+    const metadata = {};
     history.executeDelta(label, (documentValue) => {
       if (after) restoreEventSetBundle(documentValue, eventIds, after);
       else {
         mutate(documentValue);
         after = captureEventSetBundle(documentValue, eventIds);
       }
-    }, (documentValue) => restoreEventSetBundle(documentValue, eventIds, before));
+      Object.assign(metadata, bundleOps(before, after));
+    }, (documentValue) => restoreEventSetBundle(documentValue, eventIds, before), metadata);
   }
 
   function executeRecordChange(label, mapName, recordId, mutate, metadata = {}) {
     const { chronolog, history } = app;
     const before = clone(chronolog[mapName][recordId]);
     let after = null;
+    const change = { preserveRecurrence: mapName !== "patterns", ...metadata };
     history.executeDelta(label, (documentValue) => {
       if (after) documentValue[mapName][recordId] = clone(after);
       else {
         mutate(documentValue);
         after = clone(documentValue[mapName][recordId]);
       }
+      Object.assign(change, recordOps(mapName, recordId, before, after));
     }, (documentValue) => {
       if (before === undefined) delete documentValue[mapName][recordId];
       else documentValue[mapName][recordId] = clone(before);
-    }, { preserveRecurrence: mapName !== "patterns", ...metadata });
+    }, change);
   }
 
   function captureFrameBundle(documentValue, frameId) {
@@ -147,13 +158,15 @@ export function createTransactions(app) {
     const { chronolog, history } = app;
     const before = captureFrameBundle(chronolog, frameId);
     let after = null;
+    const metadata = {};
     history.executeDelta(label, (documentValue) => {
       if (after) restoreFrameBundle(documentValue, frameId, after);
       else {
         mutate(documentValue);
         after = captureFrameBundle(documentValue, frameId);
       }
-    }, (documentValue) => restoreFrameBundle(documentValue, frameId, before));
+      Object.assign(metadata, bundleOps(before, after, { frameId }));
+    }, (documentValue) => restoreFrameBundle(documentValue, frameId, before), metadata);
   }
 
   return { executeEventChange, executeEventSetChange, executeRecordChange, executeFrameChange };

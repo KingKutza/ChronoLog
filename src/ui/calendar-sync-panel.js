@@ -2,6 +2,7 @@ import { daysToCivilCoordinate } from "../exact.js";
 import { applyICSSnapshot, calendarSyncConnections } from "../calendar-sync.js";
 import { exportICS, importICS } from "../ics.js";
 import { clone, stapleEvents } from "../model.js";
+import { delOp, mapSnapshot, opsFromMaps, putOp } from "../ops.js";
 import { downloadText } from "../store.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
 
@@ -66,9 +67,17 @@ export function createCalendarSyncPanel(app) {
     );
     const hadIcs = Object.prototype.hasOwnProperty.call(chronolog.foreign, "ics");
     const beforeSourceIds = new Set(Object.keys(chronolog.foreign.ics?.sources || {}));
+    // `foreign.ics` is small (sync metadata, not calendar content), so cloning
+    // it once here is cheap and gives the inverse op something real to carry
+    // — the import mutates `foreign.ics.sources` in place when the key already
+    // existed, so the live object can't be trusted to still hold its own
+    // "before" value once the import has run.
+    const beforeIcsValue = hadIcs ? clone(chronolog.foreign.ics) : undefined;
+    const before = mapSnapshot(chronolog);
     let additions = null;
     let addedSources = null;
     let result = null;
+    const metadata = {};
 
     const removeNewEntries = (documentValue) => {
       for (const name of IMPORT_MAPS) {
@@ -85,32 +94,62 @@ export function createCalendarSyncPanel(app) {
       }
     };
 
+    // `mapSnapshot`/`opsFromMaps` diff `foreign` by identity, but the import
+    // assigns into `foreign.ics.sources` rather than replacing `foreign.ics`
+    // whenever that key already existed, so a source being added or removed
+    // is otherwise invisible to the identity diff. Detect that case (identity
+    // unchanged, source set changed) and push the op by hand; when the key's
+    // identity DID change (first-ever ics import, or the retry/removal path
+    // deleting it outright) opsFromMaps already captured it, so skip to avoid
+    // a duplicate.
+    const captureIcsOps = (documentValue, ops, inverseOps) => {
+      if (before.foreign.ics !== documentValue.foreign.ics) return;
+      const afterHasIcs = Object.prototype.hasOwnProperty.call(documentValue.foreign, "ics");
+      const afterSourceIds = new Set(Object.keys(documentValue.foreign.ics?.sources || {}));
+      const sourcesChanged = afterSourceIds.size !== beforeSourceIds.size
+        || [...afterSourceIds].some((id) => !beforeSourceIds.has(id))
+        || [...beforeSourceIds].some((id) => !afterSourceIds.has(id));
+      if (!sourcesChanged) return;
+      ops.push(afterHasIcs ? putOp("foreign", "ics", documentValue.foreign.ics) : delOp("foreign", "ics"));
+      inverseOps.push(hadIcs ? putOp("foreign", "ics", beforeIcsValue) : delOp("foreign", "ics"));
+    };
+
+    const captureOps = (documentValue) => {
+      const after = mapSnapshot(documentValue);
+      const ops = opsFromMaps(before, after);
+      const inverseOps = opsFromMaps(after, before);
+      captureIcsOps(documentValue, ops, inverseOps);
+      Object.assign(metadata, { ops, inverseOps });
+    };
+
     const apply = (documentValue) => {
       if (additions) {
         for (const name of IMPORT_MAPS) Object.assign(documentValue[name], additions[name]);
         documentValue.foreign.ics ||= { sources: {} };
         documentValue.foreign.ics.sources ||= {};
         Object.assign(documentValue.foreign.ics.sources, addedSources);
-        return;
+      } else {
+        try {
+          result = importICS(text, documentValue, { label });
+          additions = Object.fromEntries(IMPORT_MAPS.map((name) => [
+            name,
+            Object.fromEntries(Object.entries(documentValue[name]).filter(([id]) => !beforeIds[name].has(id)))
+          ]));
+          addedSources = Object.fromEntries(Object.entries(documentValue.foreign.ics?.sources || {})
+            .filter(([id]) => !beforeSourceIds.has(id)));
+        } catch (error) {
+          removeNewEntries(documentValue);
+          throw error;
+        }
       }
-      try {
-        result = importICS(text, documentValue, { label });
-        additions = Object.fromEntries(IMPORT_MAPS.map((name) => [
-          name,
-          Object.fromEntries(Object.entries(documentValue[name]).filter(([id]) => !beforeIds[name].has(id)))
-        ]));
-        addedSources = Object.fromEntries(Object.entries(documentValue.foreign.ics?.sources || {})
-          .filter(([id]) => !beforeSourceIds.has(id)));
-      } catch (error) {
-        removeNewEntries(documentValue);
-        throw error;
-      }
+      captureOps(documentValue);
     };
 
     history.executeDelta(
       `Import ${label}`,
       apply,
-      (documentValue) => removeNewEntries(documentValue)
+      (documentValue) => removeNewEntries(documentValue),
+      metadata
     );
     return result;
   }
@@ -130,22 +169,56 @@ export function createCalendarSyncPanel(app) {
     return value;
   }
 
+  // Applies a captured op list to a live document: puts assign the whole
+  // record, deletes remove it. Used for both the undo (inverse ops) and redo
+  // (forward ops) paths below, so a sync pull never needs a second full
+  // document clone just to be reversible.
+  function applyOps(documentValue, ops) {
+    if (!ops) return;
+    for (const op of ops) {
+      const map = documentValue[op.map];
+      if (!map) continue;
+      if (op.op === "put") map[op.id] = op.value;
+      else delete map[op.id];
+    }
+  }
+
   function executeCalendarSync(label, options) {
     const { chronolog, history } = app;
-    const before = clone(chronolog);
-    let after = null;
+    const before = mapSnapshot(chronolog);
+    const hadIcs = Object.prototype.hasOwnProperty.call(chronolog.foreign || {}, "ics");
+    // See the identical note in `importCalendar`: `applyICSSnapshot` mutates
+    // `foreign.ics.sources` in place when a connection is already known
+    // (i.e. on every sync pull after the first), so `foreign.ics` keeps its
+    // identity and the record diff below would otherwise miss the change.
+    const beforeIcsValue = hadIcs ? clone(chronolog.foreign.ics) : undefined;
+    const beforeSourceIds = new Set(Object.keys(chronolog.foreign?.ics?.sources || {}));
+    let ops = null;
+    let inverseOps = null;
     let result = null;
-    const restore = (documentValue, snapshot) => {
-      for (const key of Object.keys(documentValue)) delete documentValue[key];
-      Object.assign(documentValue, clone(snapshot));
-    };
+    const metadata = {};
     history.executeDelta(label, (documentValue) => {
-      if (after) restore(documentValue, after);
-      else {
-        result = applyICSSnapshot(documentValue, options);
-        after = clone(documentValue);
+      if (ops) {
+        applyOps(documentValue, ops);
+        return;
       }
-    }, (documentValue) => restore(documentValue, before));
+      result = applyICSSnapshot(documentValue, options);
+      const after = mapSnapshot(documentValue);
+      ops = opsFromMaps(before, after);
+      inverseOps = opsFromMaps(after, before);
+      if (before.foreign.ics === documentValue.foreign.ics) {
+        const afterHasIcs = Object.prototype.hasOwnProperty.call(documentValue.foreign, "ics");
+        const afterSourceIds = new Set(Object.keys(documentValue.foreign.ics?.sources || {}));
+        const sourcesChanged = afterSourceIds.size !== beforeSourceIds.size
+          || [...afterSourceIds].some((id) => !beforeSourceIds.has(id))
+          || [...beforeSourceIds].some((id) => !afterSourceIds.has(id));
+        if (sourcesChanged) {
+          ops.push(afterHasIcs ? putOp("foreign", "ics", documentValue.foreign.ics) : delOp("foreign", "ics"));
+          inverseOps.push(hadIcs ? putOp("foreign", "ics", beforeIcsValue) : delOp("foreign", "ics"));
+        }
+      }
+      Object.assign(metadata, { ops, inverseOps });
+    }, (documentValue) => applyOps(documentValue, inverseOps), metadata);
     return result;
   }
 
