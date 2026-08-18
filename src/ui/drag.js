@@ -1,5 +1,5 @@
-import { Rational, daysToCivilCoordinate, durationMagnitudeDays, formatCivil } from "../exact.js";
-import { clone } from "../model.js";
+import { Rational, daysToCivilCoordinate, formatCivil } from "../exact.js";
+import { clone, durationMagnitudeDays } from "../model.js";
 import { minimapDragFocus, minimapDragState } from "../session.js";
 
 // Pointer/wheel/drag mapping onto the lens surfaces: wheel pan/zoom

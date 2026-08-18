@@ -15,8 +15,13 @@ export function defaultDataDirectory(environment = process.env) {
   return appRoot;
 }
 
+// Default to the same port `npm run dev` binds so the URL stays predictable
+// across both entry points. `--port 0` still asks the OS for an ephemeral
+// port, which is what tests use to run concurrent servers.
+export const DEFAULT_PORT = 4173;
+
 export function parseArguments(argv) {
-  const options = { open: true, port: 0, dataDirectory: null };
+  const options = { open: true, port: DEFAULT_PORT, dataDirectory: null };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--no-open") options.open = false;

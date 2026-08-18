@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { defaultDataDirectory, parseArguments } from "../bin/chronolog.js";
+import { DEFAULT_PORT, defaultDataDirectory, parseArguments } from "../bin/chronolog.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -20,6 +20,12 @@ test("parseArguments parses flags and rejects invalid values", () => {
     open: false, port: 4312, dataDirectory: join(process.cwd(), "data")
   });
   assert.throws(() => parseArguments(["--port", "wat"]), /--port/);
+});
+
+test("parseArguments defaults to the same port as npm run dev, and keeps --port 0 available", () => {
+  assert.equal(DEFAULT_PORT, 4173);
+  assert.equal(parseArguments([]).port, 4173);
+  assert.equal(parseArguments(["--port", "0"]).port, 0);
 });
 
 test("defaultDataDirectory defaults to the app's own root directory (portable, no per-OS profile dirs)", () => {

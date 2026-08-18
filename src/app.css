@@ -102,9 +102,14 @@ button {
   box-shadow: var(--shadow);
 }
 
+/* #app isolates one stacking context, so #hud competes directly with its
+   siblings: it must sit above the lens bars (21) so the document/create
+   dropdown panels nested inside it are not covered, but below #inspector (40),
+   which becomes full-width-overlapping between 781px and 1000px, and below
+   #toast (60). 30 would tie .projection-error. */
 #hud {
   position: absolute;
-  z-index: 20;
+  z-index: 35;
   top: var(--workspace-outer);
   left: var(--workspace-outer);
   right: auto;
