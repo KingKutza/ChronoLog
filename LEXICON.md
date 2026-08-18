@@ -77,6 +77,12 @@ Rulings and additions (Don, 2026-08-17/18, KISS pass + dock/floats design):
   remaining at their historical staple. Display work needed "in sigils and
   zones to make that intuitive and informative without piling too much
   information on the eye — but I think it is doable."
+- **Importance is a group affiliation, not a property**: "importances are
+  just group affiliations; how members are handled is a property [of the
+  group]. This makes importance composable — I can add and remove levels,
+  including ones of an irregular nature." The keep-range/decay behavior
+  above lives on the importance group, not on the object and not in a fixed
+  tier enum.
 - **Spiral and Radial are separate lenses** — supersedes r4's "Radial has two
   variants." Seven lenses total: Intimate, Tactical, Strategic, Wall, Lines,
   Spiral, Radial.

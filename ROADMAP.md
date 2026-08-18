@@ -32,9 +32,13 @@ Ordered by priority.
 7. **Toolbar order** — swap "jump to today" and "reset lens".
 8. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
    2026-08-17/18 rulings): floats live at their staples, project forward
-   for an importance-scaled keep-range, lapse from present view without
-   deletion. Includes the sigils-and-zones display work and an ICS path
-   (VJOURNAL) so Notes round-trip.
+   for a keep-range, lapse from present view without deletion. Importance
+   levels are groups whose handling (keep-range, decay, display weight) is
+   a group property — composable, addable, removable, including irregular
+   levels; the fixed standard/important/landmark enum retires into that
+   model. Includes the sigils-and-zones display work and an ICS path
+   (VJOURNAL) so Notes round-trip. Open questions remain — this is labeled
+   as work, not settled design.
 9. **Slim the retained ICS payload** — 93.8% of the owner's real document
    is a per-event duplicate of its own parsed ICS node
    (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
