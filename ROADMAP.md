@@ -91,7 +91,13 @@ Ordered by priority.
    breaking shape-carries-meaning. The engine collision is one condition
    (isOrdinaryGroup excluding importance frames); membership relations are
    already the same shape, so no schema change — but legacy trait strings
-   and additive kind-switching need cleanup.
+   and additive kind-switching need cleanup. Sequencing: the display-only
+   touchpoints (color cascade, sigil, minimap weight, Strategic gate) can
+   unify behind factImportance first, making importance-as-groups work
+   everywhere while legacy trait strings still exist — the persisted
+   migrations are what make this a wave rather than a patch. ICS
+   round-trips nothing importance-related, so the interchange boundary is
+   not a constraint.
 10. **Staple anchoring** (see LEXICON.md, staple anchoring entry) — retire
     the start-time-plus-duration assumption: a staple can anchor start,
     end, midpoint, or another named point of an event, paired with a
