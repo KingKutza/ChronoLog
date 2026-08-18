@@ -34,7 +34,7 @@ export function applyTheme(theme) {
 // the Frames panel (`app.selectLeadingFrame`) and the drag/wheel module
 // (`app.adjustWindow`).
 export function createToolbar(app, dom) {
-  const { projection, inspector, inspectorBody, lensControls, WORKSPACE_TARGET, LOCAL_WORKSPACE_TARGET } = dom;
+  const { projection, inspector, inspectorBody, lensControls, LOCAL_WORKSPACE_TARGET } = dom;
   let lensControlsSignature = "";
 
   function updateCalendarSelect() {
@@ -88,7 +88,7 @@ export function createToolbar(app, dom) {
 
   function confirmDocumentReplacement() {
     const { store } = app;
-    if (store.revision === store.savedRevision) return true;
+    if (!store.pending) return true;
     return globalThis.confirm("Open a different document? Unsaved changes in the current document are already recoverable through its autosave target, but this session will switch documents.");
   }
 
@@ -622,6 +622,10 @@ export function createToolbar(app, dom) {
     try {
       if (!confirmDocumentReplacement()) return;
       app.replaceDocument(parseDocument(await file.text()), LOCAL_WORKSPACE_TARGET);
+      // A different document replaces the workspace wholesale: it becomes the
+      // new snapshot, and journaling continues from there. This is the one
+      // remaining whole-document upload.
+      if (LOCAL_WORKSPACE_TARGET.api) await app.store.uploadSnapshot();
       app.toast(`Opened ${file.name} · autosave attached to the local workspace`);
     } catch (error) {
       app.toast(error.message, true);
@@ -634,11 +638,12 @@ export function createToolbar(app, dom) {
     const { store, chronolog } = app;
     closeDocumentMenu();
     try {
-      if (!store.handle && !store.remoteUrl && LOCAL_WORKSPACE_TARGET.remoteUrl) {
+      if (!store.handle && !store.api && LOCAL_WORKSPACE_TARGET.api) {
+        // Nothing was attached, so this document has never been journaled.
+        // Establish it as the workspace snapshot, then journal from there.
         store.attach(chronolog, LOCAL_WORKSPACE_TARGET);
-        store.markDirty();
-      }
-      if (store.handle || store.remoteUrl) await store.save(true);
+        await store.uploadSnapshot();
+      } else if (store.handle || store.api) await store.save(true);
       else if (globalThis.showSaveFilePicker) await store.chooseFile();
       else store.download("chronolog.chronolog");
     } catch (error) {
@@ -657,24 +662,10 @@ export function createToolbar(app, dom) {
     }
   });
 
-  byId("download-conflict").addEventListener("click", () => {
-    const { store } = app;
-    if (!store.conflict) return;
-    store.download(`chronolog-conflict-${new Date().toISOString().slice(0, 10)}.chronolog`);
-    app.toast("Downloaded your conflicting local copy. Reload latest only after keeping this copy.");
-  });
-
-  byId("reload-latest").addEventListener("click", async () => {
-    const { store } = app;
-    if (!store.conflict) return;
-    try {
-      const latest = await store.readRemote();
-      app.replaceDocument(parseDocument(latest.text), { ...WORKSPACE_TARGET, remoteRevision: latest.remoteRevision });
-      app.toast("Reloaded the latest workspace. Your conflicting local copy was not uploaded.");
-    } catch (error) {
-      app.toast(`Could not reload latest workspace: ${error.message}`, true);
-    }
-  });
+  // The download-a-copy / reload-latest pair is gone with the whole-document
+  // compare-and-swap that made it necessary. Concurrent edits now collide per
+  // record and merge in place, so there is no keep-both decision to put to the
+  // owner.
 
   window.addEventListener("keydown", (event) => {
     const { session, history } = app;
@@ -715,7 +706,7 @@ export function createToolbar(app, dom) {
 
   window.addEventListener("beforeunload", (event) => {
     const { store } = app;
-    if (store.revision !== store.savedRevision) {
+    if (store.pending) {
       event.preventDefault();
       event.returnValue = "";
     }

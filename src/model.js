@@ -4,6 +4,7 @@ import {
   coordinate,
   daysToCivilCoordinate
 } from "./exact.js";
+import { mapSnapshot, opsFromMaps, putOp } from "./ops.js";
 
 export const SCHEMA_VERSION = "chronolog/1";
 
@@ -592,8 +593,25 @@ export class CommandHistory {
     }
   }
 
+  // Every committed change reports the record-level ops that produced it, so
+  // the store can append them to the journal. The caller supplies the ops it
+  // knows about; the `meta.modified` bump that `touch` just applied is added
+  // here, because a replay that skipped it would drift from this document.
+  emit(label, metadata = {}, ops = null) {
+    const { ops: forward, inverseOps, ...rest } = metadata;
+    void forward;
+    void inverseOps;
+    this.onChange({
+      label,
+      document: this.document,
+      ...rest,
+      ...(ops ? { ops: [...ops, putOp("meta", "modified", this.document.meta.modified)] } : {})
+    });
+  }
+
   execute(label, mutate) {
     const before = JSON.stringify(this.document);
+    const beforeMaps = mapSnapshot(this.document);
     try {
       mutate(this.document);
     } catch (error) {
@@ -609,7 +627,9 @@ export class CommandHistory {
       this.undoStack.push(command);
       this.trim();
     }
-    this.onChange({ label, document: this.document, historyLimited });
+    // The whole-snapshot path cannot know which records the mutation touched,
+    // so it falls back to an identity diff over the maps.
+    this.emit(label, { historyLimited }, opsFromMaps(beforeMaps, mapSnapshot(this.document)));
   }
 
   executeDelta(label, apply, revert, metadata = {}) {
@@ -625,7 +645,7 @@ export class CommandHistory {
     this.undoStack.push({ label, apply, revert, metadata, bytes: 0 });
     this.redoStack = [];
     this.trim();
-    this.onChange({ label, document: this.document, ...metadata });
+    this.emit(label, metadata, metadata.ops || null);
   }
 
   replace(snapshot) {
@@ -634,31 +654,41 @@ export class CommandHistory {
     Object.assign(this.document, restored);
   }
 
+  // Undo and redo commit journal entries of their own: an undo is not a
+  // rewind of the file, it is a new edit that happens to restore earlier
+  // record values. The delta path already captured both directions, so undo
+  // simply commits the inverse ops it was handed.
   undo() {
     const command = this.undoStack.pop();
     if (!command) return false;
+    let ops = command.metadata?.inverseOps || null;
     if (command.revert) {
       command.revert(this.document);
       touch(this.document);
     } else {
+      const beforeMaps = mapSnapshot(this.document);
       this.replace(command.before);
+      ops = opsFromMaps(beforeMaps, mapSnapshot(this.document));
     }
     this.redoStack.push(command);
-    this.onChange({ label: `Undo ${command.label}`, document: this.document, ...command.metadata });
+    this.emit(`Undo ${command.label}`, command.metadata, ops);
     return true;
   }
 
   redo() {
     const command = this.redoStack.pop();
     if (!command) return false;
+    let ops = command.metadata?.ops || null;
     if (command.apply) {
       command.apply(this.document);
       touch(this.document);
     } else {
+      const beforeMaps = mapSnapshot(this.document);
       this.replace(command.after);
+      ops = opsFromMaps(beforeMaps, mapSnapshot(this.document));
     }
     this.undoStack.push(command);
-    this.onChange({ label: `Redo ${command.label}`, document: this.document, ...command.metadata });
+    this.emit(`Redo ${command.label}`, command.metadata, ops);
     return true;
   }
 }

@@ -23,10 +23,13 @@ test("save status is an accessible status badge", async () => {
   assert.match(html, /id="save-status"[^>]*aria-live="polite"/);
 });
 
-test("workspace conflict recovery controls exist and start disabled", async () => {
+// The whole-document conflict flow is gone: concurrent edits collide per
+// record and merge in place, so there is no keep-both choice to offer and no
+// control for making it.
+test("the whole-document conflict recovery controls are gone", async () => {
   const html = await readSource("pocket-instrument.html");
-  assert.match(html, /id="download-conflict"[^>]*disabled/);
-  assert.match(html, /id="reload-latest"[^>]*disabled/);
+  assert.doesNotMatch(html, /id="download-conflict"/);
+  assert.doesNotMatch(html, /id="reload-latest"/);
 });
 
 test("primary toolbar exposes undo/redo and a document menu with its actions", async () => {

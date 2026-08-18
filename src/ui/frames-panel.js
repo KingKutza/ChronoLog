@@ -2,6 +2,7 @@ import { Rational } from "../exact.js";
 import { buildFixedCalendarStructure, editableFixedCalendarStructure } from "../calendar-structure.js";
 import { additiveFrameTraits, frameAuthoringCapabilities, preservedFrameSchema } from "../frame-edit.js";
 import { addFrame, addPattern, clone, createId } from "../model.js";
+import { mapSnapshot, opsFromMaps } from "../ops.js";
 import { calendarFrames, groupFrames } from "../projections.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
 
@@ -62,15 +63,22 @@ export function createFramesPanel(app, dom) {
       appliesTo: pattern.appliesTo?.map((id) => id === frameId ? nextId : id),
       templateRelation: relationMap.get(pattern.templateRelation) || pattern.templateRelation
     }));
+    // The set of records a duplicate creates depends on how many relations and
+    // patterns reference the source frame, so an identity diff over the maps
+    // is more robust here than enumerating explicit ops by hand.
+    const before = mapSnapshot(chronolog);
+    const metadata = {};
     history.executeDelta("Duplicate frame", (documentValue) => {
       documentValue.frames[nextId] = clone(nextFrame);
       for (const relation of relations) documentValue.relations[relation.id] = clone(relation);
       for (const pattern of patterns) documentValue.patterns[pattern.id] = clone(pattern);
+      const after = mapSnapshot(documentValue);
+      Object.assign(metadata, { ops: opsFromMaps(before, after), inverseOps: opsFromMaps(after, before) });
     }, (documentValue) => {
       delete documentValue.frames[nextId];
       for (const relation of relations) delete documentValue.relations[relation.id];
       for (const pattern of patterns) delete documentValue.patterns[pattern.id];
-    });
+    }, metadata);
     openFrameInspector(nextId);
   }
 

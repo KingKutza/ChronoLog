@@ -2,7 +2,7 @@ import { ChronologEngine } from "./engine.js";
 import { CommandHistory, createEmptyWorkspaceDocument, validateDocument } from "./model.js";
 import { calendarFrames } from "./projections.js";
 import { ViewSession, sanitizeSessionParameters } from "./session.js";
-import { AutosaveStore, parseDocument } from "./store.js";
+import { JournalStore, parseDocument } from "./store.js";
 import { THEME_PRESETS } from "./visual-language.js";
 import { createTransactions } from "./ui/transactions.js";
 import { SESSION_STORAGE_KEY, createWorkspace } from "./ui/workspace.js";
@@ -29,13 +29,14 @@ const toastNode = byId("toast");
 const lensControls = byId("lens-controls");
 function workspaceTarget() {
   return {
-    remoteUrl: "/api/document",
+    api: "/api",
     filename: "chronolog.chronolog"
   };
 }
 
 const WORKSPACE_TARGET = workspaceTarget();
 const LOCAL_WORKSPACE_TARGET = /^https?:$/.test(location.protocol) ? WORKSPACE_TARGET : {};
+const WORKSPACE_DOCUMENT_URL = `${WORKSPACE_TARGET.api}/document`;
 
 function storedSession() {
   try {
@@ -76,15 +77,22 @@ function toast(message, error = false) {
 }
 app.toast = toast;
 
-app.store = new AutosaveStore({
+app.store = new JournalStore({
   onStatus(status) {
     const node = byId("save-status");
     node.dataset.state = status.state;
     node.textContent = status.message;
     node.title = status.message;
     node.setAttribute("aria-label", `Save status: ${status.message}`);
-    byId("download-conflict").disabled = !status.conflict;
-    byId("reload-latest").disabled = !status.conflict;
+  },
+  // Another window's records just landed in this document. There is no
+  // download/reload decision to make any more — the merge already happened at
+  // record level, so the engine just needs rebuilding around the new state.
+  onRebase(missed) {
+    app.engine.setDocument(app.chronolog);
+    reconcileSession();
+    app.scheduleRender();
+    if (missed.length) app.toast(`Merged ${missed.length} edit${missed.length === 1 ? "" : "s"} from another window.`);
   }
 });
 app.store.attach(app.chronolog, WORKSPACE_TARGET);
@@ -94,7 +102,10 @@ function makeHistory() {
     if (change.frameOnly) app.engine.refreshFrame(change.frameOnly);
     else if (!change.viewOnly) app.engine.setDocument(app.chronolog, { preserveRecurrence: change.preserveRecurrence });
     reconcileSession();
-    app.store.markDirty();
+    // Every committed change reports the records it touched. The store throws
+    // if a change arrives without ops, which is the assertion that keeps new
+    // mutation paths from quietly bypassing the journal.
+    app.store.collect(change.label, change.ops);
     app.scheduleRender();
     if (change.historyLimited) {
       app.toast("Change applied, but this large operation was not kept in undo history.");
@@ -136,28 +147,33 @@ Object.assign(app, createTransactions(app));
 Object.assign(app, createWorkspace(app, { projection, minimap }));
 Object.assign(app, createInspector(app, { inspector, inspectorBody, inspectorTitle }));
 Object.assign(app, createFramesPanel(app, { inspector, inspectorBody }));
-Object.assign(app, createToolbar(app, { projection, inspector, inspectorBody, lensControls, WORKSPACE_TARGET, LOCAL_WORKSPACE_TARGET }));
+Object.assign(app, createToolbar(app, { projection, inspector, inspectorBody, lensControls, LOCAL_WORKSPACE_TARGET }));
 Object.assign(app, createDragController(app, { projection, minimap }));
 createCalendarSyncPanel(app);
 
 async function loadWorkspaceDocument() {
   app.store.status("loading", "Loading workspace document…");
   try {
-    const response = await fetch(WORKSPACE_TARGET.remoteUrl, { cache: "no-store" });
+    const response = await fetch(WORKSPACE_DOCUMENT_URL, { cache: "no-store" });
     if (response.status === 404) {
+      // A data directory with no snapshot cannot be journaled onto, and the
+      // server has no idea what an empty chronolog document looks like — that
+      // is domain knowledge it deliberately lacks. So this window establishes
+      // the first snapshot before any op is appended.
       app.store.attach(app.chronolog, WORKSPACE_TARGET);
-      app.toast("No workspace document found; starting a new chronolog.chronolog file.");
+      await app.store.uploadSnapshot();
+      app.toast("No workspace document found; started a new chronolog.chronolog file.");
       return;
     }
     if (!response.ok) throw new Error(await response.text() || `Open returned ${response.status}`);
     const loadedName = response.headers.get("x-chronolog-file") || "chronolog.chronolog";
+    // The server already replayed its journal, so this body is the current
+    // materialized document and the sequence number it corresponds to.
     replaceDocument(parseDocument(await response.text()), {
       ...WORKSPACE_TARGET,
-      remoteRevision: response.headers.get("etag")
+      seq: Number(response.headers.get("x-chronolog-seq") || 0)
     });
-    app.toast(loadedName === "chronolog.json"
-      ? "Auto-loaded legacy chronolog.json · next autosave migrates to chronolog.chronolog"
-      : `Auto-loaded ${loadedName}`);
+    app.toast(`Auto-loaded ${loadedName}`);
   } catch (error) {
     app.store.attach(app.chronolog, LOCAL_WORKSPACE_TARGET);
     app.toast(`Workspace autoload unavailable: ${error.message}`, true);

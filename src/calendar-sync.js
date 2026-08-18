@@ -1,6 +1,20 @@
 import { importICS, property } from "./ics.js";
 import { clone, createDocument, touch } from "./model.js";
 
+// Invariant: the reconciler only ever ASSIGNS or DELETES whole records in
+// `document` (document.events[id] = ..., delete document.events[id], and the
+// same for the other maps) — it never mutates a record, or anything nested
+// inside one, in place. Op capture (see src/ops.js) diffs `before/after`
+// snapshots of each map by object identity: a record that keeps its old
+// identity is treated as untouched, even if something inside it changed. A
+// mutation-in-place would silently vanish from the op log and never reach
+// the journal, which for a subscribed calendar means a lost edit to the
+// owner's real data. When a change lives inside a nested structure (for
+// example an event's `foreign.stapled` array), shallow-copy every level from
+// the record root down to the piece being changed and reassign the whole
+// record; untouched deeper subtrees may still be shared by reference with
+// the old record, which is what keeps this cheap.
+
 function sourceFrame(document, sourceId) {
   return Object.values(document.frames || {}).find((frame) => frame?.foreign?.ics?.source === sourceId) || null;
 }
@@ -30,6 +44,32 @@ function replaceSourceReference(value, from, to) {
   if (next?.provenance?.source === from) next.provenance.source = to;
   if (next?.codec?.source === from) next.codec.source = to;
   return next;
+}
+
+// Replaces one entry of `event.foreign.stapled` (matched by identity) with
+// whatever `transform` returns, or drops it when `transform` returns a
+// falsy value — without mutating the event, its `foreign`, or the `stapled`
+// array in place. Reads the event fresh from `document` each call, so
+// repeated calls for the same event id (e.g. removing two stapled entries in
+// a row) compose correctly instead of clobbering each other through a stale
+// captured reference.
+function replaceStapledEntry(document, eventId, staple, transform) {
+  const event = document.events[eventId];
+  const stapled = event?.foreign?.stapled;
+  if (!stapled || !stapled.includes(staple)) return;
+  const nextStapled = stapled.map((entry) => entry === staple ? transform(entry) : entry).filter(Boolean);
+  const foreign = { ...event.foreign, stapled: nextStapled };
+  if (!nextStapled.length) delete foreign.stapled;
+  document.events[eventId] = { ...event, foreign };
+}
+
+// Drops every stapled entry attributed to `sourceId` from `event.foreign`,
+// returning a new `foreign` object rather than mutating the one passed in.
+function withoutStapleSource(event, sourceId) {
+  const stapled = event.foreign.stapled.filter((entry) => entry?.foreign?.ics?.source !== sourceId);
+  const foreign = { ...event.foreign, stapled };
+  if (!stapled.length) delete foreign.stapled;
+  return foreign;
 }
 
 function eventBindings(document, sourceId) {
@@ -83,8 +123,7 @@ function removeSource(document, sourceId) {
       continue;
     }
     if (event?.foreign?.stapled) {
-      event.foreign.stapled = event.foreign.stapled.filter((entry) => entry?.foreign?.ics?.source !== sourceId);
-      if (!event.foreign.stapled.length) delete event.foreign.stapled;
+      document.events[id] = { ...event, foreign: withoutStapleSource(event, sourceId) };
     }
   }
   if (frame) {
@@ -140,8 +179,11 @@ function reconcileSource(document, scratch, previousSourceId, incomingSourceId) 
       eventIdMap.set(incomingEvent.id, binding.targetId);
     } else if (binding?.kind === "staple") {
       const next = replaceSourceReference(incomingEvent, incomingSourceId, previousSourceId);
-      binding.staple.payload = clone(next.payload);
-      binding.staple.foreign = clone(next.foreign);
+      replaceStapledEntry(document, binding.targetId, binding.staple, (entry) => ({
+        ...entry,
+        payload: clone(next.payload),
+        foreign: clone(next.foreign)
+      }));
       eventIdMap.set(incomingEvent.id, binding.targetId);
     } else {
       const next = replaceSourceReference(incomingEvent, incomingSourceId, previousSourceId);
@@ -156,8 +198,7 @@ function reconcileSource(document, scratch, previousSourceId, incomingSourceId) 
       delete document.events[binding.targetId];
       removeDanglingEventReferences(document, binding.targetId);
     } else {
-      binding.event.foreign.stapled = binding.event.foreign.stapled.filter((entry) => entry !== binding.staple);
-      if (!binding.event.foreign.stapled.length) delete binding.event.foreign.stapled;
+      replaceStapledEntry(document, binding.targetId, binding.staple, () => null);
     }
   }
 

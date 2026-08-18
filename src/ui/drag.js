@@ -1,5 +1,6 @@
 import { Rational, daysToCivilCoordinate, formatCivil } from "../exact.js";
 import { clone, durationMagnitudeDays } from "../model.js";
+import { putOp } from "../ops.js";
 import { minimapDragFocus, minimapDragState } from "../session.js";
 
 // Pointer/wheel/drag mapping onto the lens surfaces: wheel pan/zoom
@@ -373,7 +374,7 @@ export function createDragController(app, dom) {
         "Move recurring occurrence",
         (documentValue) => app.applyMaterialization(documentValue, prepared),
         (documentValue) => app.revertMaterialization(documentValue, prepared),
-        { preserveRecurrence: true }
+        { preserveRecurrence: true, ...app.materializationOps(prepared) }
       );
       return;
     }
@@ -399,6 +400,8 @@ export function createDragController(app, dom) {
     }
     const previousCoordinate = clone(chronolog.relations[drag.relationId].coordinate);
     const previousParameters = clone(chronolog.relations[drag.relationId].parameters);
+    const previousRelation = clone(chronolog.relations[drag.relationId]);
+    const metadata = { preserveRecurrence: true };
     history.executeDelta("Move event", (documentValue) => {
       const relation = documentValue.relations[drag.relationId];
       if (!relation) throw new Error("The event placement no longer exists");
@@ -407,13 +410,17 @@ export function createDragController(app, dom) {
         relation.parameters ||= {};
         relation.parameters.dateOnly = false;
       }
+      Object.assign(metadata, {
+        ops: [putOp("relations", drag.relationId, relation)],
+        inverseOps: [putOp("relations", drag.relationId, previousRelation)]
+      });
     }, (documentValue) => {
       const relation = documentValue.relations[drag.relationId];
       if (!relation) return;
       relation.coordinate = clone(previousCoordinate);
       if (previousParameters === undefined) delete relation.parameters;
       else relation.parameters = clone(previousParameters);
-    }, { preserveRecurrence: true });
+    }, metadata);
   });
 
   projection.addEventListener("pointercancel", () => clearEventDrag());
