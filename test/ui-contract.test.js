@@ -79,10 +79,24 @@ test("primary toolbar exposes undo/redo and a document menu with its actions", a
   }
 });
 
-test("Frames triggers are accessible toggles for the same panel", async () => {
+// Both Frames triggers point at the dock now: the drawer they used to control is
+// gone, and an aria-controls naming a node that no longer exists is worse than
+// none at all.
+test("Frames triggers are accessible toggles for the dock", async () => {
   const html = await readSource("pocket-instrument.html");
-  assert.match(html, /id="new-frame"[^>]*aria-controls="inspector"[^>]*aria-expanded="false"/);
-  assert.match(html, /id="manage-frames"[^>]*aria-controls="inspector"[^>]*aria-expanded="false"/);
+  assert.match(html, /id="new-frame"[^>]*aria-controls="dock"[^>]*aria-expanded="false"/);
+  assert.match(html, /id="manage-frames"[^>]*aria-controls="dock"[^>]*aria-expanded="false"/);
+  assert.doesNotMatch(html, /id="inspector"/, "the inspector drawer is gone, not hidden");
+});
+
+test("the shell provides the dock's rail, pager strip, and resize separator", async () => {
+  const html = await readSource("pocket-instrument.html");
+  for (const id of ["workspace", "dock", "dock-resize", "dock-rail", "dock-viewport", "dock-strip"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `#${id} exists`);
+  }
+  // The resize grip has to be reachable without a pointer.
+  assert.match(html, /id="dock-resize"[^>]*role="separator"/);
+  assert.match(html, /id="dock-resize"[^>]*tabindex="0"/);
 });
 
 test("create menu exposes todo and note controls", async () => {

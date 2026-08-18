@@ -12,8 +12,11 @@ import { byId, escapeHTML } from "./dom-helpers.js";
 // document/session/engine/history plus `framesReturnTarget` (the toolbar
 // element to refocus when this panel closes), which `dismissInspector` in
 // inspector.js also reads and clears.
-export function createFramesPanel(app, dom) {
-  const { inspector, inspectorBody } = dom;
+export function createFramesPanel(app) {
+  // The Frames browser refreshes itself in place, so it reaches for its own card
+  // body rather than the single drawer body every panel used to take turns with.
+  // A null body simply means that card is not open.
+  const framesBody = () => app.dockCardBody("panel:frames-browser");
 
   function frameKind(frame) {
     if (frame?.traits?.includes("calendar")) return "calendar";
@@ -839,7 +842,8 @@ export function createFramesPanel(app, dom) {
   }
 
   function refreshFramesPanel() {
-    if (inspector.classList.contains("open") && inspector.dataset.panel === "frames-browser") {
+    const inspectorBody = framesBody();
+    if (inspectorBody) {
       const current = inspectorBody.querySelector(".frame-view-card");
       if (!current) return;
       const scrollTop = inspectorBody.scrollTop;
@@ -872,8 +876,10 @@ export function createFramesPanel(app, dom) {
   }
 
   function toggleFramesBrowser(returnTarget) {
-    if (inspector.classList.contains("open") && inspector.dataset.panel === "frames-browser") {
-      app.closeInspector();
+    // The trigger is a toggle: if its own card is already open, the second press
+    // closes it rather than re-rendering the same surface.
+    if (framesBody()) {
+      app.closeDockCard("panel:frames-browser");
       return;
     }
     app.framesReturnTarget = returnTarget;

@@ -24,18 +24,16 @@
   --workspace-outer: 12px;
   --workspace-inner: 8px;
   --workspace-inner-half: 4px;
-  --workspace-control-edge: min(720px, 50%);
   --workspace-primary-row: 44px;
   --workspace-control-row: 42px;
-  --workspace-stack-height: calc(
-    var(--workspace-primary-row) + var(--workspace-control-row) + var(--workspace-control-row)
-    + var(--workspace-inner) + var(--workspace-inner)
-  );
-  --workspace-minimap-height: var(--workspace-stack-height);
-  --workspace-minimap-top: var(--workspace-outer);
-  --workspace-projection-top: calc(
-    var(--workspace-minimap-top) + var(--workspace-minimap-height) + var(--workspace-inner)
-  );
+  /* Dock geometry. `--dock-width` is the fraction of the workspace the dock
+     occupies; ui/dock.js writes it from the view session, and src/dock-layout.js
+     owns the clamping and snapping that decide what it may be. A closed dock
+     contributes no track at all rather than a zero-width one, so the stage gets
+     the gap back too. */
+  --dock-width: 0.3333;
+  --dock-track: 0px;
+  --dock-rail: 34px;
 }
 
 :root[data-theme="night"] { color-scheme: dark; }
@@ -81,20 +79,76 @@ button {
   color: inherit;
 }
 
+/* The workspace is one named grid, not a stack of absolutely positioned pieces
+   measured against each other with calc(). The chrome bars stack down the left
+   third; the minimap fills the right two-thirds at the full height of that
+   stack; the stage and the dock share the whole row beneath.
+   `1fr 2fr` is literally the one-third / two-thirds split, so it stays true at
+   every width instead of needing a breakpoint to stay honest. */
 #app {
   position: relative;
   isolation: isolate;
-}
-
-#viewport {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  padding: var(--workspace-projection-top) var(--workspace-outer) var(--workspace-outer);
+  display: grid;
+  gap: var(--workspace-inner);
+  padding: var(--workspace-outer);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-rows:
+    var(--workspace-primary-row)
+    var(--workspace-control-row)
+    var(--workspace-control-row)
+    minmax(0, 1fr);
+  grid-template-areas:
+    "documentbar minimap"
+    "viewbar     minimap"
+    "contextbar  minimap"
+    "workspace   workspace";
   background:
     radial-gradient(circle at 50% 30%, rgba(255,255,255,.72), transparent 55%),
     var(--ground);
 }
+
+/* The stage and the dock share the main row. The dock's track is a length in
+   pixels rather than a fraction so the drag can be pixel-exact, and the side is
+   expressed by swapping the areas — the same two children, no reordering in the
+   DOM, so focus order and the tab sequence never depend on which edge the dock
+   is on. */
+#workspace {
+  grid-area: workspace;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: var(--workspace-inner);
+  grid-template-columns: minmax(0, 1fr) var(--dock-track);
+  grid-template-areas: "stage dock";
+}
+
+#app[data-dock-side="left"] #workspace {
+  grid-template-columns: var(--dock-track) minmax(0, 1fr);
+  grid-template-areas: "dock stage";
+}
+
+/* A closed dock takes no track and no gap. */
+#app:not([data-dock-open="true"]) #workspace {
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 0px;
+}
+
+#app:not([data-dock-open="true"])[data-dock-side="left"] #workspace {
+  grid-template-columns: 0px minmax(0, 1fr);
+}
+
+#viewport {
+  grid-area: stage;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#hud { grid-area: documentbar; }
+#lens-bar { grid-area: viewbar; }
+#lens-controls { grid-area: contextbar; }
+#minimap { grid-area: minimap; }
 
 #projection {
   position: relative;
@@ -127,20 +181,15 @@ button {
   height: 0;
 }
 
-/* #app isolates one stacking context, so #hud competes directly with its
-   siblings: it must sit above the lens bars (21) so the document/create
-   dropdown panels nested inside it are not covered, but below #inspector (40),
-   which becomes full-width-overlapping between 781px and 1000px, and below
-   #toast (60). 30 would tie .projection-error. */
+/* #app isolates one stacking context, so #hud competes directly with its grid
+   siblings: it must sit above the other bars (21) so the document/create dropdown
+   panels nested inside it are not covered, but below #toast (60). 30 would tie
+   .projection-error. The bars are grid items now, so they carry no coordinates —
+   only their own internals. */
 #hud {
-  position: absolute;
+  position: relative;
   z-index: 35;
-  top: var(--workspace-outer);
-  left: var(--workspace-outer);
-  right: auto;
-  width: calc(var(--workspace-control-edge) - var(--workspace-outer) - var(--workspace-inner-half));
-  height: var(--workspace-primary-row);
-  min-height: var(--workspace-primary-row);
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -253,14 +302,12 @@ button {
 #save-status[data-state="conflict"] { color: var(--now); }
 
 #lens-bar {
-  position: absolute;
+  position: relative;
   z-index: 21;
-  top: calc(var(--workspace-outer) + var(--workspace-primary-row) + var(--workspace-inner));
-  left: var(--workspace-outer);
-  width: calc(var(--workspace-control-edge) - var(--workspace-outer) - var(--workspace-inner-half));
-  height: var(--workspace-control-row);
+  min-width: 0;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--strong);
@@ -283,16 +330,9 @@ button {
 #lens-bar button.active { background: var(--ink); color: white; }
 
 #lens-controls {
-  position: absolute;
+  position: relative;
   z-index: 21;
-  top: calc(
-    var(--workspace-outer) + var(--workspace-primary-row) + var(--workspace-control-row)
-    + var(--workspace-inner) + var(--workspace-inner)
-  );
-  left: var(--workspace-outer);
-  right: auto;
-  width: calc(var(--workspace-control-edge) - var(--workspace-outer) - var(--workspace-inner-half));
-  height: var(--workspace-control-row);
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -341,10 +381,8 @@ button {
 #create-menu > summary:hover,
 #create-menu[open] > summary { background: color-mix(in srgb, var(--ink) 84%, var(--paper)); }
 .create-menu-panel {
-  position: absolute;
+  position: fixed;
   z-index: 82;
-  top: calc(100% + var(--workspace-inner));
-  left: 0;
   width: 220px;
   display: grid;
   gap: 6px;
@@ -382,9 +420,7 @@ button {
 .document-menu-panel {
   position: fixed;
   z-index: 80;
-  top: calc(var(--workspace-outer) + var(--workspace-primary-row) + var(--workspace-inner));
-  left: var(--workspace-outer);
-  width: min(310px, calc(100vw - var(--workspace-outer) - var(--workspace-outer)));
+  width: min(310px, calc(100vw - 24px));
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
@@ -458,11 +494,11 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 .lens-control-overflow[open] > summary,
 .lens-control-overflow > summary:hover { border-color: var(--ink); background: var(--paper); }
 
+/* Coordinates come from toolbar.js's measured placement, not from a pinned edge
+   here — that pinning is what pushed this panel off the window. */
 .lens-control-overflow-panel {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
+  z-index: 70;
   width: min(300px, calc(100vw - 24px));
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
@@ -489,14 +525,13 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   flex: 1 1 54px;
 }
 
+/* The minimap spans the full height of the chrome stack because it occupies all
+   three chrome rows of the grid, not because anyone measured the stack. */
 #minimap {
-  position: absolute;
+  position: relative;
   z-index: 17;
-  left: calc(var(--workspace-control-edge) + var(--workspace-inner-half));
-  right: var(--workspace-outer);
-  top: var(--workspace-minimap-top);
-  bottom: auto;
-  height: var(--workspace-minimap-height);
+  grid-row: 1 / 4;
+  min-width: 0;
   border: 1px solid var(--strong);
   border-radius: 12px;
   background: color-mix(in srgb, var(--paper) 92%, transparent);
@@ -507,52 +542,176 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 
 #minimap svg { width: 100%; height: 100%; display: block; }
 
-#inspector {
-  position: absolute;
-  z-index: 40;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(390px, 94vw);
+/* The dock. Unlike the drawer it replaces, it is a participant in the layout
+   rather than an overlay: it takes a real grid track, so opening it narrows the
+   stage instead of covering it. No floating windows. */
+#dock {
+  grid-area: dock;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+#app[data-dock-side="left"] #dock { flex-direction: row-reverse; }
+
+/* The resize grip lives on the dock's inner edge, whichever side the dock is on.
+   It is a real focusable separator so the width is reachable without a pointer. */
+#dock-resize {
+  flex: none;
+  width: 9px;
+  margin: 0 -2px;
+  border-radius: 5px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+#dock-resize::after {
+  content: "";
+  display: block;
+  width: 3px;
+  height: 34px;
+  margin: calc(50% - 17px) auto 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--strong) 70%, transparent);
+}
+
+#dock-resize:hover,
+#dock-resize:focus-visible,
+#dock-resize[data-dragging="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+#dock-resize:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#dock-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--strong);
-  background: var(--paper);
-  box-shadow: -16px 0 44px rgba(43, 35, 25, .18);
-  /* The drawer is an overlay, never a participant in the workspace layout.
-     Keeping its layout and paint contained prevents its long Frames list (and
-     its own scrollbar) from perturbing the projection behind it. */
-  contain: layout paint;
-  will-change: transform;
-  transform: translateX(102%);
-  transition: transform 160ms ease;
-}
-
-#inspector.open { transform: translateX(0); }
-
-.inspector-head {
-  min-height: 54px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--hair);
-}
-
-.inspector-head h2 {
-  min-width: 0;
-  flex: 1;
   overflow: hidden;
-  margin: 0;
-  font-size: 14px;
+  border: 1px solid var(--strong);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  /* The dock's contents must never perturb the stage beside it: a long Frames
+     list and its scrollbar stay entirely this side of the boundary. */
+  contain: layout paint;
+}
+
+/* Handle rail: the dock is a vertical panel, so its handle strip is on top. */
+#dock-rail {
+  flex: none;
+  min-height: var(--dock-rail);
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 4px;
+  border-bottom: 1px solid var(--hair);
+  background: color-mix(in srgb, var(--surface) 60%, var(--paper));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#dock-rail::-webkit-scrollbar { height: 0; }
+
+.dock-handle {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 190px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--muted);
   white-space: nowrap;
+  font: 700 10px/1 var(--data);
+  letter-spacing: .03em;
+}
+
+.dock-handle-label {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
-#inspector-body {
+.dock-handle:hover { background: var(--surface); color: var(--ink); }
+.dock-handle[aria-selected="true"] {
+  border-color: var(--strong);
+  background: var(--paper);
+  color: var(--ink);
+}
+.dock-handle[data-dragging="true"] { opacity: .45; }
+.dock-handle[data-drop="true"] { border-color: var(--accent); }
+
+.dock-handle-close {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dock-handle-close:hover { background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--ink); }
+
+/* The pager. One card is visible; the strip is translated horizontally and
+   nothing else about it changes, so paging is a compositor-only animation. */
+#dock-viewport {
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+
+#dock-strip {
+  height: 100%;
+  display: flex;
+  will-change: transform;
+}
+
+#dock-strip[data-animating="true"] {
+  transition: transform 220ms cubic-bezier(.25, .9, .25, 1);
+}
+
+.dock-card {
+  flex: 0 0 100%;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* An off-screen card must not be reachable by Tab, or the pager would hand focus
+   to something nobody can see. */
+.dock-card[aria-hidden="true"] { visibility: hidden; }
+
+.dock-card-body {
+  min-height: 0;
+  flex: 1;
   overflow: auto;
+  overflow-x: hidden;
   padding: 14px;
+}
+
+.dock-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 20px;
+  color: var(--faint);
+  text-align: center;
+  font: 500 12px/1.5 var(--data);
 }
 
 .field {
@@ -1320,23 +1479,30 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 .theme-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
 .frame-lens-checks { gap: 5px; }
 .frame-lens-checks .check-chip { text-transform: capitalize; }
-#inspector-body { overflow-x: hidden; }
-
 @media (max-width: 1400px) {
   #brand { gap: 0; margin-right: 0; }
 }
 
+/* Below the split's usable width the minimap stops being a right-hand companion
+   and becomes its own full-width row under the chrome stack. One grid
+   redefinition says that; nothing has to be re-measured. */
 @media (max-width: 1000px) {
-  :root {
-    --workspace-minimap-height: 86px;
-    --workspace-minimap-top: calc(
-      var(--workspace-outer) + var(--workspace-stack-height) + var(--workspace-inner)
-    );
+  #app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows:
+      var(--workspace-primary-row)
+      var(--workspace-control-row)
+      var(--workspace-control-row)
+      86px
+      minmax(0, 1fr);
+    grid-template-areas:
+      "documentbar"
+      "viewbar"
+      "contextbar"
+      "minimap"
+      "workspace";
   }
-  #hud,
-  #lens-bar,
-  #lens-controls { left: var(--workspace-outer); right: var(--workspace-outer); width: auto; }
-  #minimap { left: var(--workspace-outer); right: var(--workspace-outer); }
+  #minimap { grid-row: auto; }
 }
 
 @media (max-width: 780px) {
@@ -1345,21 +1511,29 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
     --workspace-inner: 6px;
     --workspace-inner-half: 3px;
     --workspace-primary-row: 42px;
-    --workspace-minimap-height: 78px;
   }
-  #hud { right: var(--workspace-outer); padding: 4px 6px; }
+  #app { grid-template-rows: var(--workspace-primary-row) var(--workspace-control-row) var(--workspace-control-row) 78px minmax(0, 1fr); }
+  #hud { padding: 4px 6px; }
   #brand { font-size: 10px; }
   #hud .optional { display: none; }
   #lens-bar button { font-size: 8px; }
-  #inspector {
-    top: auto;
-    width: 100%;
-    height: min(62vh, 560px);
-    border-top: 1px solid var(--strong);
-    border-left: 0;
-    transform: translateY(102%);
+  /* Under this width the dock stops sharing the row and becomes a full-width
+     sheet over the stage — the mobile shape, arriving early because it is also
+     the right shape for a narrow desktop window. */
+  #workspace,
+  #app[data-dock-side="left"] #workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "stage";
   }
-  #inspector.open { transform: translateY(0); }
+  #app[data-dock-open="true"] #dock {
+    position: absolute;
+    z-index: 40;
+    left: var(--workspace-outer);
+    right: var(--workspace-outer);
+    bottom: var(--workspace-outer);
+    height: min(62vh, 560px);
+  }
+  #dock-resize { display: none; }
   .wall-grid { grid-template-columns: 1fr; }
 }
 
@@ -1385,7 +1559,8 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
   #lens-bar,
   #lens-controls,
   #minimap,
-  #inspector { display: none !important; }
-  #viewport { position: static; padding: 0; }
+  #dock { display: none !important; }
+  #app { display: block; padding: 0; }
+  #viewport { position: static; }
   html, body, #app, #projection { height: auto; overflow: visible; }
 }

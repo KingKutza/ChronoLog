@@ -32,30 +32,57 @@ import { byId, escapeHTML } from "./dom-helpers.js";
 // `app` carries the live document/engine/session/history/store plus the
 // small `framesReturnTarget` focus-return slot that the Frames panel also
 // writes when it reopens this same panel.
-export function createInspector(app, dom) {
-  const { inspector, inspectorBody, inspectorTitle } = dom;
+export function createInspector(app) {
   let provisionalEvent = null;
+  // Which panel the editor last opened, so `dismissInspector` knows which card to
+  // close. The drawer only ever had one surface, so it did not need this.
+  let lastPanel = "object";
 
+  // Every editor in the app funnels through `openInspector`, which is why the
+  // drawer could become the dock without touching a single form: this one
+  // function is the seam. The `panel` argument becomes the card's identity, so
+  // the object editor, the Frames workspace and the calendar-sync panel are
+  // separate cards rather than one surface they take turns overwriting.
+  //
+  // A card id of "object" is shared by the event/frame/pattern editors on
+  // purpose for now — Stage 2 gives each open object its own card and its own
+  // provisional draft, which is the point at which this becomes plural.
   function openInspector(title, body, panel = "object") {
-    inspectorTitle.textContent = title;
-    inspectorBody.replaceChildren(body);
-    inspector.dataset.panel = panel;
-    inspector.classList.add("open");
+    const cardId = `panel:${panel}`;
+    lastPanel = panel;
+    app.openDockCard({
+      id: cardId,
+      title,
+      body,
+      onClose: () => handleCardClosed(panel)
+    });
+  }
+
+  // The dock closed a card on its own (its handle was clicked). Anything the
+  // editor was holding for that surface has to be released, or a discarded draft
+  // would linger in a card nobody can see.
+  function handleCardClosed(panel) {
+    if (panel === "object") {
+      discardProvisionalDraft();
+      app.session.inspector = null;
+    }
+    if (!app.dockIsOpen()) restoreFramesFocus(panel);
+  }
+
+  function restoreFramesFocus(panel) {
+    const returnTarget = app.framesReturnTarget;
+    app.framesReturnTarget = null;
+    if (panel !== "frames-browser") return;
+    const visibleToolbarTrigger = byId("new-frame").getClientRects().length ? byId("new-frame") : null;
+    (returnTarget || visibleToolbarTrigger || byId("document-menu").querySelector("summary"))?.focus();
   }
 
   function dismissInspector() {
     const { session } = app;
-    const wasFramesBrowser = inspector.dataset.panel === "frames-browser";
-    const returnTarget = app.framesReturnTarget;
-    inspector.classList.remove("open");
-    delete inspector.dataset.panel;
+    const panel = lastPanel;
     session.inspector = null;
-    for (const id of ["new-frame", "manage-frames"]) byId(id).setAttribute("aria-expanded", "false");
-    app.framesReturnTarget = null;
-    if (wasFramesBrowser) {
-      const visibleToolbarTrigger = byId("new-frame").getClientRects().length ? byId("new-frame") : null;
-      (returnTarget || visibleToolbarTrigger || byId("document-menu").querySelector("summary")).focus();
-    }
+    app.closeDockCard(`panel:${panel}`);
+    restoreFramesFocus(panel);
   }
 
   function closeInspector() {
@@ -110,7 +137,8 @@ export function createInspector(app, dom) {
   function focusInspectorEditor(eventId) {
     requestAnimationFrame(() => {
       if (app.session.inspector?.type !== "event" || app.session.inspector.id !== eventId) return;
-      const title = inspectorBody.querySelector('input[name="title"]');
+      const body = app.dockCardBody("panel:object");
+      const title = body?.querySelector('input[name="title"]');
       if (!(title instanceof HTMLInputElement)) return;
       title.focus({ preventScroll: true });
       title.select();
@@ -807,7 +835,9 @@ export function createInspector(app, dom) {
     }
   }
 
-  byId("close-inspector").addEventListener("click", () => closeInspector());
+  // The drawer had one close button in its header. A card is closed from its own
+  // handle in the rail, which the dock owns, so there is no global close control
+  // to wire here any more.
 
   return {
     openInspector,

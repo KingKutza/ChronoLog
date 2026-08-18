@@ -4,7 +4,10 @@ import {
   daysFromCivil,
   daysToCivilCoordinate
 } from "./exact.js";
+import { clampDockWidth, normalizeDockSide } from "./dock-layout.js";
 import { normalizeRadialGuideValues, positiveRadialCycle } from "./radial.js";
+
+const DEFAULT_DOCK_WIDTH = 1 / 3;
 
 const DETENTS = [
   { name: "Intimate", scale: 0, span: 5 },
@@ -189,6 +192,13 @@ export class ViewSession {
     this.selection = input.selection || null;
     this.inspector = input.inspector || null;
     this.minimapDrag = null;
+    // Dock geometry is view state, never document state: which edge a panel sits
+    // on and how wide it is says nothing about the timeline, so it lives in the
+    // browser-local session and never travels with the file.
+    this.dockSide = normalizeDockSide(input.dockSide);
+    this.dockWidth = clampDockWidth(input.dockWidth ?? DEFAULT_DOCK_WIDTH);
+    // Append-only card order, rearranged only by the user dragging a handle.
+    this.dockOrder = Array.isArray(input.dockOrder) ? [...input.dockOrder] : [];
   }
 
   currentFocus() {
@@ -384,7 +394,10 @@ export class ViewSession {
       strategicRecordSlashes: this.strategicRecordSlashes,
       wallRecordSlashes: this.wallRecordSlashes,
       radialLabels: this.radialLabels,
-      selection: this.selection
+      selection: this.selection,
+      dockSide: this.dockSide,
+      dockWidth: this.dockWidth,
+      dockOrder: [...this.dockOrder]
     };
   }
 }

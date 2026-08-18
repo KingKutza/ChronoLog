@@ -19,7 +19,7 @@
           <button class="instrument-button" id="new-note" type="button"><strong>Note</strong><small>A note pinned in time</small></button>
         </div>
       </details>
-      <button class="instrument-button optional" id="new-frame" type="button" aria-controls="inspector" aria-expanded="false">Frames</button>
+      <button class="instrument-button optional" id="new-frame" type="button" aria-controls="dock" aria-expanded="false">Frames</button>
       <select class="select-control" id="active-calendar" aria-label="Active calendar"></select>
       <div class="history-controls" aria-label="Edit history">
         <button class="icon-button" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
@@ -29,9 +29,10 @@
       <details id="document-menu">
         <summary title="Document actions" aria-label="Document actions"><span class="responsive-label-long">Document</span><span class="responsive-label-short" aria-hidden="true">⋮</span></summary>
         <div class="document-menu-panel">
-          <button class="instrument-button" id="manage-frames" type="button" aria-controls="inspector" aria-expanded="false">Frames workspace</button>
+          <button class="instrument-button" id="manage-frames" type="button" aria-controls="dock" aria-expanded="false">Frames workspace</button>
           <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
           <button class="instrument-button" id="lens-settings" type="button">Configure lenses</button>
+          <button class="instrument-button" id="dock-side" type="button" title="Move the dock to the other edge">Dock side</button>
           <button class="instrument-button" id="new-pattern" type="button">Advanced patterns</button>
           <label class="status-chip" title="Keep one focus coordinate between projections"><input id="shared-focus" type="checkbox" checked>shared date</label>
           <button class="instrument-button" id="open-document" type="button">Open document</button>
@@ -56,19 +57,26 @@
 
     <section id="lens-controls" aria-label="Lens window controls"></section>
 
-    <section id="viewport" aria-live="polite">
-      <div id="projection"></div>
-    </section>
-
     <div id="minimap" title="Drag the outlined view window. The dot field shows activity per bucket; red is now and the thin dark line is the view centre."></div>
 
-    <aside id="inspector" aria-label="Object inspector">
-      <header class="inspector-head">
-        <h2 id="inspector-title">Inspector</h2>
-        <button class="icon-button" id="close-inspector" type="button" aria-label="Close inspector">×</button>
-      </header>
-      <div id="inspector-body"></div>
-    </aside>
+    <!-- The stage and the dock share the main row. The stage hosts views; the
+         dock hosts editors, one full-bleed card at a time. -->
+    <div id="workspace">
+      <section id="viewport" aria-live="polite">
+        <div id="projection"></div>
+      </section>
+
+      <section id="dock" aria-label="Dock" data-open="false" hidden>
+        <div id="dock-resize" role="separator" aria-orientation="vertical" tabindex="0"
+          aria-label="Dock width: drag, or use arrow keys" title="Drag to resize the dock"></div>
+        <div id="dock-panel">
+          <div id="dock-rail" role="tablist" aria-label="Dock cards"></div>
+          <div id="dock-viewport">
+            <div id="dock-strip"></div>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <input id="document-file" type="file" accept=".chronolog,.json,application/x-chronolog,application/json" hidden>
     <input id="ics-file" type="file" accept=".ics,text/calendar" multiple hidden>
