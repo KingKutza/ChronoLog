@@ -14,7 +14,13 @@ the archive.
    accumulate. The stage-takeover settings window is cut: settings
    arrive incrementally in existing surfaces and dock cards (still
    pending exposure: series projection horizon, snapshot-compaction
-   period — the server endpoint is live).
+   period — the server endpoint is live). Parked from the 8.19 wave:
+   ToDo-tailored editor fields (recurrence rows, location, and
+   calendar-vs-list framing are still event-shaped); exposing
+   many-to-many event↔frame attachment in the editor (the session-level
+   multi-frame selector landed; the editor and companion-frame rendering
+   did not); transaction-aware Apply for undo-tracked surfaces (the
+   event editor and frame forms need more than a button).
 2. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
    2026-08-17/18 rulings): floats live at their staples, project forward
    for a keep-range, lapse from present view without deletion. Importance
