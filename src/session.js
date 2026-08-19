@@ -6,6 +6,7 @@ import {
   nowDays
 } from "./exact.js";
 import { clampDockWidth, normalizeDockSide } from "./dock-layout.js";
+import { FrameSelection } from "./frame-selection.js";
 import { normalizeRadialGuideValues, positiveRadialCycle } from "./radial.js";
 
 const DEFAULT_DOCK_WIDTH = 1 / 3;
@@ -191,15 +192,24 @@ export class ViewSession {
     this.localFocus = Object.fromEntries(
       Object.entries(input.localFocus || {}).map(([key, value]) => [key, Rational.parse(value)])
     );
-    this.activeFrame = input.activeFrame || "calendar:personal";
-    // Companions to the leading frame (AGENTS.md's frame model, point 4: "a
-    // lens projects a leading frame and optional companions"). `activeFrame`
-    // stays the one leading frame; this list is everything else checked in
-    // the Frame drop. Selecting/displaying a frame never creates a mapping —
-    // this is pure view state, like activeFrame itself.
-    this.companionFrames = Array.isArray(input.companionFrames)
-      ? [...new Set(input.companionFrames.filter((id) => typeof id === "string" && id))].filter((id) => id !== this.activeFrame)
+    // One selection class backs both `activeFrame` (the primary — see the
+    // getters below) and `companionFrames` (everything else selected), so
+    // every frame-selection surface reads and writes one thing instead of
+    // parallel state (AGENTS.md's frame model, point 4: "a lens projects a
+    // leading frame and optional companions"; selecting/displaying a frame
+    // never creates a mapping, so this stays pure view state). The getters
+    // keep the ~30 existing call sites that only know one leading frame
+    // working unchanged. Backward-compatible with the persisted
+    // `{activeFrame, companionFrames}` shape.
+    const primaryId = input.activeFrame || "calendar:personal";
+    const companionIds = Array.isArray(input.companionFrames)
+      ? input.companionFrames.filter((id) => typeof id === "string" && id && id !== primaryId)
       : [];
+    this.frameSelection = new FrameSelection([primaryId, ...companionIds], primaryId);
+    // Set once true by `seedOverlaysOnce`, below — never persisted, so a
+    // fresh page load may bridge again, but by then the selection is no
+    // longer empty of companions so the bridge is a no-op in practice.
+    this._overlaysBridged = false;
     this.activeCycle = input.activeCycle || "cycle:lunar";
     this.radialMode = input.radialMode || "spiral";
     this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? LENS_VIEW_DEFAULTS.spiral.radialPast)));
@@ -266,18 +276,34 @@ export class ViewSession {
     else this.localFocus[this.projection] = next;
   }
 
+  // `activeFrame` (the primary) and `companionFrames` (everything else
+  // selected) are derived from the one FrameSelection — see its constructor
+  // comment. Nothing outside this class writes `frameSelection` directly
+  // except through the delegates below, so every surface stays in sync.
+  get activeFrame() {
+    return this.frameSelection.primary();
+  }
+
+  get companionFrames() {
+    const primary = this.frameSelection.primary();
+    return this.frameSelection.selected().filter((id) => id !== primary);
+  }
+
+  // Reassigns the primary marker. Per the ruling this fixes (the 8.19 field
+  // report's item 1), this must NOT change which frames are selected — an
+  // id already in the selection just gets the marker moved to it; an id
+  // outside the selection is added and put in charge, never a silent drop
+  // of what was already selected.
   setLeadingFrame(frameId) {
-    if (typeof frameId === "string" && frameId) this.activeFrame = frameId;
-    this.companionFrames = this.companionFrames.filter((id) => id !== this.activeFrame);
+    if (typeof frameId === "string" && frameId) this.frameSelection.setPrimary(frameId);
   }
 
   // The leading frame first, then its companions — what the Frame drop shows
-  // checked. Rendering still only consumes `activeFrame`; carrying the full
-  // selection is the chrome/session half of multi-select, ahead of
-  // projections.js actually projecting the companions (parked — see the
-  // 8.19 field report).
+  // checked, and what the calendar projection now overlays in full: multi-
+  // select means every selected frame overlays, from every surface, no
+  // exceptions.
   selectedFrames() {
-    return [this.activeFrame, ...this.companionFrames];
+    return this.frameSelection.selected();
   }
 
   // Ids from a multi-select control, in whatever order the control reports
@@ -286,11 +312,14 @@ export class ViewSession {
   // which frame supplies primary coordinates — and only falls back to the
   // first id offered when the previous leader was itself unchecked.
   setFrameSelection(ids) {
-    const unique = [...new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id))];
-    if (!unique.length) return;
-    const leading = unique.includes(this.activeFrame) ? this.activeFrame : unique[0];
-    this.activeFrame = leading;
-    this.companionFrames = unique.filter((id) => id !== leading);
+    this.frameSelection.setSelection(ids);
+  }
+
+  // Toggles one frame's membership in the selection (a single companion
+  // checkbox), without disturbing the primary unless the primary itself is
+  // the one being unchecked — see FrameSelection.toggle.
+  toggleFrameSelection(id) {
+    this.frameSelection.toggle(id);
   }
 
   // Drops companions (and, if necessary, reassigns the leading frame) that no
@@ -298,12 +327,26 @@ export class ViewSession {
   // it is selected, and a stale id here must not silently poison
   // `selectedFrames()` for whoever renders the Frame drop.
   pruneFrameSelection(validFrameIds) {
-    const valid = new Set(validFrameIds);
-    this.companionFrames = this.companionFrames.filter((id) => valid.has(id));
-    if (valid.size && !valid.has(this.activeFrame)) {
-      this.activeFrame = this.companionFrames[0] || [...valid][0];
-      this.companionFrames = this.companionFrames.filter((id) => id !== this.activeFrame);
-    }
+    this.frameSelection.prune(validFrameIds);
+  }
+
+  // One-time bridge off a document already carrying
+  // `frames[primary].display.overlays` (the old, document-side overlay
+  // mechanism this fixes retires). Runs once per session lifetime and only
+  // when the selection has never gained a companion of its own — an
+  // explicit choice the user has since made (including clearing every
+  // companion) always wins over stale document data. After this call,
+  // nothing reads or writes `display.overlays` again: overlay configuration
+  // has moved from document state to session view state.
+  seedOverlaysOnce(chronologDocument) {
+    if (this._overlaysBridged) return;
+    this._overlaysBridged = true;
+    if (this.companionFrames.length) return;
+    const primaryFrame = chronologDocument?.frames?.[this.activeFrame];
+    const overlays = Array.isArray(primaryFrame?.display?.overlays)
+      ? primaryFrame.display.overlays.filter((id) => typeof id === "string" && id)
+      : [];
+    if (overlays.length) this.setFrameSelection([this.activeFrame, ...overlays]);
   }
 
   move(days) {

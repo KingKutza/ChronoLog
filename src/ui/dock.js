@@ -189,13 +189,21 @@ export function createDock(app, dom) {
   // Opening a card that is already open focuses it rather than duplicating it.
   // Identity is the caller's `id`, which is how "open this event" twice lands on
   // one card instead of two views of the same object.
-  function openCard({ id, title, body, closable = true, onClose = null }) {
+  //
+  // `refresh` is how a card opts into staying live: pass a handler and it is
+  // called every time `refreshDockCards()` runs (see below), so the caller is
+  // responsible for reconciling its own body against the document rather than
+  // this module rebuilding it. Omit it and the card is left alone, which is the
+  // right answer for a card holding a provisional draft or an in-progress form
+  // that a naive rebuild would destroy.
+  function openCard({ id, title, body, closable = true, onClose = null, refresh = null }) {
     const existing = cards.get(id);
     if (existing) {
       existing.title = title || existing.title;
       if (body) {
         existing.body.replaceChildren(body);
       }
+      if (refresh) existing.refresh = refresh;
       cards.set(id, existing);
       setOrder(appendCard(order(), id));
       render();
@@ -211,12 +219,23 @@ export function createDock(app, dom) {
     bodyNode.className = "dock-card-body";
     if (body) bodyNode.append(body);
     element.append(bodyNode);
-    const card = { id, title: title || "Card", element, body: bodyNode, closable, onClose };
+    const card = { id, title: title || "Card", element, body: bodyNode, closable, onClose, refresh };
     cards.set(id, card);
     setOrder(appendCard(order(), id));
     render();
     focusCard(id, { animate: false });
     return card;
+  }
+
+  // The one place every open card is asked to notice the document changed
+  // underneath it. This replaces what used to be a hand-maintained list of
+  // per-card calls in the render loop (one for the roster cards, none for the
+  // Frames browser, and nothing stopping the next card from being forgotten the
+  // same way) with a mechanism: a card registers its own reactivity by passing
+  // `refresh` to `openDockCard`, and that is the only way a card gets touched
+  // here. A card that never registered one is left exactly alone.
+  function refreshDockCards() {
+    for (const card of cards.values()) card.refresh?.();
   }
 
   function closeCard(id) {
@@ -418,6 +437,7 @@ export function createDock(app, dom) {
     openDockCard: openCard,
     closeDockCard: closeCard,
     closeAllDockCards: closeAllCards,
+    refreshDockCards,
     focusDockCard: focusCard,
     dockCardIds: () => order(),
     hasDockCard: (id) => cards.has(id),

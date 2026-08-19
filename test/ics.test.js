@@ -59,9 +59,25 @@ test("ICS import keeps recurrence structural and task times distinct", () => {
   assert.equal(storedCalendar.components.some(
     (component) => ["VEVENT", "VTODO"].includes(component.name)
   ), false);
-  assert.ok(result.events.every(
-    (eventId) => ["VEVENT", "VTODO"].includes(document.events[eventId].foreign.ics.component.name)
-  ));
+  // Each event only holds a {source, key} reference now -- the retained
+  // component data itself lives once, shared, under the source.
+  assert.ok(result.events.every((eventId) => {
+    const event = document.events[eventId];
+    assert.equal(event.foreign.ics.source, sourceId);
+    assert.equal(event.foreign.ics.component, undefined);
+    const shared = document.foreign.ics.sources[sourceId].components[event.foreign.ics.key];
+    return ["VEVENT", "VTODO"].includes(shared.name);
+  }));
+  // UID/SUMMARY/DESCRIPTION/LOCATION are fully reconstructible from
+  // event.payload at export time, so the shared copy never carries them --
+  // that is the whole fix for the retained-payload ~2x duplication.
+  for (const eventId of result.events) {
+    const event = document.events[eventId];
+    const shared = document.foreign.ics.sources[sourceId].components[event.foreign.ics.key];
+    for (const name of ["UID", "SUMMARY", "DESCRIPTION", "LOCATION"]) {
+      assert.ok(!shared.properties.some((item) => item.name === name), `${name} should not be retained`);
+    }
+  }
   const task = Object.values(document.events).find((event) => event.traits.includes("task"));
   const roles = Object.values(document.relations)
     .filter((relation) => relation.event === task.id)

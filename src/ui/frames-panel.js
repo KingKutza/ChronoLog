@@ -156,6 +156,10 @@ export function createFramesPanel(app) {
       ], kind)}</select><small>This adds a capability; it never removes the frame's existing traits.</small></label>
       <label class="field"><span>Color</span><input name="color" type="color" value="${escapeHTML(value.color || "#2e8b57")}"></label>
     </div>
+    <div class="form-row">
+      <label class="field"><span>Display weight</span><input name="displayWeight" type="number" min="0" step="0.1" value="${escapeHTML(String(value.display?.weight ?? 1))}"></label>
+    </div>
+    <p class="field-note">A frame is a group: this multiplies the derived Strategic-promotion/importance weight of every event that belongs to it -- calendars, groups, and importance sets alike. 1 is neutral and changes nothing. Set it higher (for example 4) to promote a whole calendar wholesale into Strategic's named view -- for example, giving an imported "US holidays" calendar a weight of 4 promotes every one of its events -- or lower it (down to 0) to demote. It composes multiplicatively with every other frame the same event belongs to, including nested group membership.</p>
     ${kind === "group" ? `<div class="form-row">
       <label class="field"><span>Strategic</span><select name="strategic">${options([
         ["auto", "Automatic"], ["show", "Promote to name"], ["hide", "Demote / hide"]
@@ -188,15 +192,16 @@ export function createFramesPanel(app) {
     </details>` : ""}
     ${capabilities.observedBoundaries ? `<details class="calendar-structure observed-calendar-structure" ${observedCalendar ? "open" : ""}>
       <summary>Observed boundary series</summary>
+      <p class="field-note">Defines a cycle whose length is <em>measured</em>, not computed — for example a lunar month, authored from a series of observed new moons, rather than a fixed 29.5-day approximation. Each authored boundary marks where one interval ends and the next begins; there is no cycle outside this series.</p>
       <label class="check-chip calendar-structure-toggle"><input type="checkbox" name="useObservedCalendar" ${observedCalendar ? "checked" : ""}>Use explicitly observed boundaries</label>
-      <small>For irregular cycles such as lunar observations or story-time jumps. Each adjacent pair is one authored interval. ChronoLog never averages, fills gaps, or extrapolates this series.</small>
+      <small>For irregular cycles such as lunar observations or story-time jumps. Each adjacent pair is one authored interval, in strictly increasing order. ChronoLog never averages, fills gaps, or extrapolates past the last authored boundary.</small>
       <div class="observed-calendar-fields" data-observed-calendar-fields>
         <label class="field"><span>Boundary measurement frame</span><select name="observedBoundaryFrame">
           ${Object.values(chronolog.frames).filter((item) => item.id !== recordId).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === observedCalendar?.frame ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}
         </select></label>
         <div class="observed-boundary-heading"><span>Coordinate</span><span>Label / ID</span><span>Observed event ID (optional)</span><span></span></div>
         <div class="observed-boundaries" data-observed-boundaries>${observedRows}</div>
-        <div class="inspector-actions observed-boundary-actions"><button class="instrument-button" type="button" data-add-observed-boundary>Add boundary</button><button class="instrument-button" type="button" data-import-observed-boundaries>Import timestamps</button></div>
+        <div class="inline-actions observed-boundary-actions"><button class="instrument-button" type="button" data-add-observed-boundary>Add boundary</button><button class="instrument-button" type="button" data-import-observed-boundaries>Import timestamps</button></div>
         <label class="field observed-import"><span>Import text</span><textarea name="observedImport" placeholder="One boundary per line: coordinate, label (optional), event ID (optional)"></textarea></label>
         <output class="calendar-period-preview" data-observed-calendar-preview></output>
       </div>
@@ -324,6 +329,15 @@ export function createFramesPanel(app) {
           const selectedLenses = data.getAll("frameLenses").map(String);
           if (selectedLenses.length === frameLenses.length) delete display.lenses;
           else display.lenses = selectedLenses;
+          const weightInput = String(data.get("displayWeight") || "").trim();
+          if (weightInput) {
+            const weight = Number(weightInput);
+            if (!Number.isFinite(weight) || weight < 0) throw new Error("Display weight must be zero or greater.");
+            if (weight === 1) delete display.weight;
+            else display.weight = weight;
+          } else {
+            delete display.weight;
+          }
           if (data.has("importanceLevel")) {
             display.importance = String(data.get("importanceLevel") || "important");
             if (String(data.get("radialMinDays") || "").trim()) display.radialMinDays = Number(data.get("radialMinDays"));
@@ -399,6 +413,26 @@ export function createFramesPanel(app) {
     const frame = frameId ? chronolog.frames[frameId] : null;
     session.inspector = { type: "frame", id: frameId };
     app.openInspector(frame?.title || `New ${presetKind}`, frameForm(frame, presetKind));
+  }
+
+  // The New menu's "Frame" entry, mirroring the create-then-edit order the
+  // create-menu's Event/ToDo/Note entries already use (create the real record
+  // first, then open it for editing) rather than the Frames workspace's own
+  // "+ Calendar"/"+ Group" buttons, which open a blank form and create nothing
+  // until it is submitted. This still creates through the same two primitives
+  // that form's submit handler uses — `addFrame` (model.js) inside one
+  // `executeRecordChange` transaction (transactions.js) — so there is no second
+  // frame-creation mechanism, only a second caller of the shared one. The
+  // payload is deliberately bare: a plain default title and whatever traits
+  // `addFrame` itself defaults to, so nothing about the frame's kind or
+  // meaning is guessed on the user's behalf — that is authored afterward, in
+  // the same frame-editing form every other frame goes through.
+  function createFrame() {
+    const frameId = createId("frame");
+    app.executeRecordChange("Create frame", "frames", frameId, (documentValue) => {
+      addFrame(documentValue, { id: frameId, title: "New frame" });
+    });
+    openFrameInspector(frameId);
   }
 
   function patternForm(pattern = null) {
@@ -533,8 +567,9 @@ export function createFramesPanel(app) {
   function frameRelevantToLens(frame) {
     const { chronolog, session, engine } = app;
     if (!frame.traits.includes("calendar")) return true;
-    if (frame.id === session.activeFrame
-      || chronolog.frames[session.activeFrame]?.display?.overlays?.includes(frame.id)) return true;
+    // The primary and every companion are one selection now (src/frame-
+    // selection.js) — frames[leading].display.overlays is retired.
+    if (session.frameSelection.isSelected(frame.id)) return true;
     const window = session.window();
     if (engine.indexedExplicitFacts(frame.id).some((entry) =>
       entry.day.compare(window.start) >= 0 && entry.day.compare(window.end) <= 0
@@ -624,7 +659,14 @@ export function createFramesPanel(app) {
       leadingContent.append(create);
     }
     viewCard.append(toolbar, heading, note, section("leading", "Leading frame", leadingContent));
-    const included = new Set(display.overlays || []);
+    // Companion membership lives in session.frameSelection now, not
+    // frames[activeFrameId].display.overlays — overlay configuration is view
+    // state, exactly like the leading frame itself, not a document edit.
+    // This was the one surface that used to write the field the renderer
+    // actually read (the 8.19 field report: "the only way to overlay frames
+    // is to use the frame dock active frame window"); every surface now
+    // reads and writes the same selection instead.
+    const included = new Set(session.frameSelection.selected());
     const related = active ? Object.values(chronolog.frames).filter((frame) => frame.id !== activeFrameId
       && (frame.traits.includes("calendar") || frame.traits.includes("line") || frame.traits.includes("timeline"))) : [];
     {
@@ -639,13 +681,9 @@ export function createFramesPanel(app) {
         input.type = "checkbox";
         input.checked = included.has(frame.id);
         input.addEventListener("change", () => {
-          app.executeRecordChange("Change calendar view", "frames", activeFrameId, (documentValue) => {
-            const target = documentValue.frames[activeFrameId];
-            const overlays = new Set(target.display?.overlays || []);
-            if (input.checked) overlays.add(frame.id);
-            else overlays.delete(frame.id);
-            target.display = { ...(target.display || {}), overlays: [...overlays] };
-          }, { viewOnly: true });
+          session.toggleFrameSelection(frame.id);
+          refreshFramesPanel();
+          app.scheduleRender();
         });
         const name = document.createElement("span");
         name.className = "frame-choice-name";
@@ -831,7 +869,36 @@ export function createFramesPanel(app) {
     scope.addEventListener("change", paint);
     paint();
     const isFramesBrowser = kind === "frame";
-    app.openInspector(kind === "frame" ? "Frames" : "Patterns", wrapper, isFramesBrowser ? "frames-browser" : "object-browser");
+    // This is the card the owner's field report named: a frame added elsewhere
+    // (import, sync pull) has to show up here as a selectable row without the
+    // card being closed and reopened. `refreshObjectBrowser` is this card's own
+    // registration with the dock's card-refresh mechanism (src/ui/dock.js), not
+    // a bespoke hook in the render loop -- see AGENTS.md/the dock refresh note.
+    //
+    // The list is rebuilt by the same `paint()` the search/scope controls
+    // already call on every keystroke, so this causes no new class of loss: an
+    // embedded frame editor (a `<details>` row's inline form, opened from this
+    // same list) holds live typed values with no dirty-tracking of its own, and
+    // that risk already exists today -- typing in the filter box while one is
+    // expanded already discards it. The one thing this guard adds is declining
+    // the rebuild while focus is actually inside that inline form, so a refresh
+    // triggered by an unrelated document change (not the user's own typing)
+    // never interrupts a keystroke.
+    function refreshObjectBrowser() {
+      if (kind === "frame") refreshFramesPanel();
+      const active = document.activeElement;
+      if (active && list.contains(active) && active.closest(".frame-form")) return;
+      const scrollTop = list.scrollTop;
+      paint();
+      list.scrollTop = scrollTop;
+    }
+    app.openInspector(
+      kind === "frame" ? "Frames" : "Patterns",
+      wrapper,
+      isFramesBrowser ? "frames-browser" : "object-browser",
+      null,
+      refreshObjectBrowser
+    );
     if (isFramesBrowser) {
       for (const id of ["new-frame", "manage-frames"]) byId(id).setAttribute("aria-expanded", "true");
       // Opening Frames is intentionally passive for the workspace.  Focusing
@@ -863,6 +930,11 @@ export function createFramesPanel(app) {
     }
   }
 
+  // The one place a frame becomes primary from a UI action — the leading
+  // select here, the toolbar Frame drop's per-row marker, and the ICS-import
+  // call site all route through this (or `session.setLeadingFrame`
+  // directly), so cycle-matching and the panel refresh happen exactly once
+  // regardless of which surface triggered the reassignment.
   function selectLeadingFrame(frameId) {
     const { chronolog, session } = app;
     if (!calendarFrames(chronolog).some((frame) => frame.id === frameId)) return;
@@ -896,5 +968,5 @@ export function createFramesPanel(app) {
   });
   byId("new-pattern").addEventListener("click", () => openObjectBrowser("pattern"));
 
-  return { openFrameInspector, openObjectBrowser, selectLeadingFrame };
+  return { openFrameInspector, openObjectBrowser, selectLeadingFrame, createFrame };
 }

@@ -5,8 +5,13 @@ import { aggregateLinePoints, lineFramePlan, lineProgress, lineTopologyPlan, lin
 
 const fixture = JSON.parse(await readFile("fixtures/lines-baseline.json", "utf8"));
 
+// Companion ids are now the caller's session selection (src/frame-selection.js),
+// not frames[leading].display.overlays — the fixture still carries that field
+// as a plain data value, unread, and this test passes the equivalent ids
+// explicitly the way projections.js now does via `session.companionFrames`.
 test("Lines resolves the active terrestrial frame and explicitly selected calendar companions", () => {
-  const plan = lineFramePlan(fixture.document, "calendar:terrestrial");
+  const companionIds = fixture.document.frames["calendar:terrestrial"].display.overlays;
+  const plan = lineFramePlan(fixture.document, "calendar:terrestrial", companionIds);
   assert.equal(plan.supported, true);
   assert.equal(plan.leading.title, "Terrestrial");
   assert.deepEqual(plan.companions.map((frame) => frame.title), ["Companion"]);
@@ -14,9 +19,7 @@ test("Lines resolves the active terrestrial frame and explicitly selected calend
 });
 
 test("Lines does not infer companions when none are selected", () => {
-  const documentValue = structuredClone(fixture.document);
-  delete documentValue.frames["calendar:terrestrial"].display;
-  const plan = lineFramePlan(documentValue, "calendar:terrestrial");
+  const plan = lineFramePlan(fixture.document, "calendar:terrestrial", []);
   assert.deepEqual(plan.companions, []);
 });
 

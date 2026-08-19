@@ -13,6 +13,7 @@ import {
   daysToCoordinate,
   durationMagnitude,
   durationMagnitudeDays,
+  seriesEndStaple,
   stableVirtualId,
   validateDocument
 } from "./model.js";
@@ -110,6 +111,32 @@ function monthDayCandidates(rule, year, month, baseDay) {
   return [...new Set(candidates)].sort(compareBigInt);
 }
 
+// The one derivation of an ics-rrule series' effective stop: the earlier of
+// the rule's own written extent (UNTIL; COUNT is a separate, independent
+// bound checked per-occurrence in `occurrenceFacts` below) and any end-staple
+// authored on that series (LEXICON.md's staple anchoring / Rob-and-John
+// scenario). The staple is never written into `rrule.UNTIL` -- the rule keeps
+// saying what it says, so removing the staple restores the full projection
+// for free. `occurrenceFacts` uses this directly; `src/ics.js` reuses it so an
+// exported RRULE's UNTIL can reflect the staple at serialization time without
+// the staple ever being stored in the rule. Comparison is exact Rational days
+// throughout (`compactIcsDay`, `coordinateDays`), never string equality --
+// ICS writes month "01" where the generator writes "1".
+export function seriesEffectiveUntilDays(engine, pattern) {
+  const ruleUntil = compactIcsDay(pattern?.rrule?.UNTIL);
+  const staple = seriesEndStaple(engine.document, pattern?.id);
+  if (!staple) return ruleUntil;
+  let stapleDays;
+  try {
+    stapleDays = engine.coordinateDays(staple.frame, staple.coordinate);
+  } catch {
+    return ruleUntil;
+  }
+  if (!stapleDays) return ruleUntil;
+  if (!ruleUntil) return stapleDays;
+  return ruleUntil.compare(stapleDays) <= 0 ? ruleUntil : stapleDays;
+}
+
 function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
   const document = engine.document;
   const relation = document.relations[pattern.templateRelation];
@@ -126,7 +153,7 @@ function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
   if (count !== null && count > MAX_RRULE_COUNT) {
     throw new RangeError(`RRULE COUNT exceeds the safe limit of ${MAX_RRULE_COUNT}`);
   }
-  const until = compactIcsDay(rule.UNTIL);
+  const until = seriesEffectiveUntilDays(engine, pattern);
   const excluded = new Set(pattern.exdates || []);
   const days = [];
   let counted = 0n;

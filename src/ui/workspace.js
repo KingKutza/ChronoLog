@@ -6,8 +6,8 @@ export const SESSION_STORAGE_KEY = "chronolog:view-session:1";
 // session plus the small bag of transient view state (scroll memory,
 // Intimate rebase/zoom requests, the scroll guard) that render() and the
 // toolbar's chrome-sync functions (`app.updateCalendarSelect`,
-// `app.updateChrome`, `app.updateLensControls`, `app.reconcileRadialCycle`)
-// both read and write.
+// `app.updateChrome`, `app.updateLensControls`, `app.reconcileRadialCycle`,
+// `app.refreshDockCards`) both read and write.
 export function createWorkspace(app, dom) {
   const { projection, minimap } = dom;
   let renderQueued = false;
@@ -37,9 +37,16 @@ export function createWorkspace(app, dom) {
     }
     app.updateCalendarSelect();
     app.updateChrome();
-    // An open roster card is a live list of the document's todos or notes, so it is
-    // rebuilt with the rest of the chrome rather than going stale until reopened.
-    app.refreshRosters();
+    // Every open dock card gets one chance to notice the document changed
+    // underneath it. This used to be a hand-maintained list of per-card calls
+    // right here (the roster cards had one; the Frames browser card did not,
+    // which is why importing a calendar while it was open left the new frame
+    // invisible until the card was closed and reopened). `refreshDockCards`
+    // (src/ui/dock.js) is a registry instead: a card asks to stay live once, by
+    // passing `refresh` to `openDockCard` when it opens, and this is the one
+    // place that registry is walked — so a future card can forget to add a line
+    // here, because there is no line here to add.
+    app.refreshDockCards();
     app.updateLensControls();
     renderProjection(projection, context());
     const nextScroll = projection.querySelector("[data-scroll-key]");

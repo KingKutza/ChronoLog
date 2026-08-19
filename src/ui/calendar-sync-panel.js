@@ -67,11 +67,14 @@ export function createCalendarSyncPanel(app) {
     );
     const hadIcs = Object.prototype.hasOwnProperty.call(chronolog.foreign, "ics");
     const beforeSourceIds = new Set(Object.keys(chronolog.foreign.ics?.sources || {}));
-    // `foreign.ics` is small (sync metadata, not calendar content), so cloning
-    // it once here is cheap and gives the inverse op something real to carry
-    // — the import mutates `foreign.ics.sources` in place when the key already
+    // The import mutates `foreign.ics.sources` in place when the key already
     // existed, so the live object can't be trusted to still hold its own
-    // "before" value once the import has run.
+    // "before" value once the import has run — this one clone up front is
+    // what gives the inverse op something real to carry. It costs one pass
+    // over every already-retained source's shared ICS data (see ics.js's
+    // `eventComponentKey`/`residualEventComponent`), not per event, so it
+    // scales with how much calendar content this document already holds,
+    // not with the size of the import underway.
     const beforeIcsValue = hadIcs ? clone(chronolog.foreign.ics) : undefined;
     const before = mapSnapshot(chronolog);
     let additions = null;

@@ -9,11 +9,14 @@ import {
   addEvent,
   addPattern,
   addRelation,
+  clearSeriesEndStaple,
   clone,
   createId,
   durationMagnitude,
   durationMagnitudeDays,
-  eventRelations
+  eventRelations,
+  setSeriesEndStaple,
+  seriesEndStaple
 } from "../model.js";
 import { OBJECT_KINDS, normalizeObjectKind, objectKindForEvent, traitsForObjectKind } from "../object-kinds.js";
 import { delOp, putOp } from "../ops.js";
@@ -70,14 +73,22 @@ export function createInspector(app) {
     return `object:${objectId}`;
   }
 
-  function openInspector(title, body, panel = "object", key = null) {
+  // `refresh`, if given, is threaded straight to the dock's card-refresh
+  // registry (src/ui/dock.js's `openDockCard`/`refreshDockCards`): the card
+  // opts into staying live by handing over its own reconciler here, once, at
+  // open time. Omitting it (every caller that edits one specific record with a
+  // live form) leaves the card exactly as stale as it always was, which is the
+  // safe default for a surface that cannot be rebuilt out from under an
+  // in-progress edit.
+  function openInspector(title, body, panel = "object", key = null, refresh = null) {
     const cardId = key ? objectCardId(key) : `panel:${panel}`;
     if (!key) lastPanel = panel;
     app.openDockCard({
       id: cardId,
       title,
       body,
-      onClose: () => handleCardClosed(panel, key)
+      onClose: () => handleCardClosed(panel, key),
+      refresh
     });
   }
 
@@ -395,7 +406,7 @@ export function createInspector(app) {
   // The mode toggle. It is deliberately two buttons rather than a checkbox: the two
   // modes edit two different objects, and a checkbox would imply one object with a
   // property. There is no stop-repeating affordance on either side — ending a series
-  // is an end-staple on its body (ROADMAP #10), not a command on whichever
+  // is an end-staple on its body (staple anchoring), not a command on whichever
   // occurrence happened to be open.
   function seriesModeToggle(mode, occurrenceLabel) {
     const series = mode === "series";
@@ -433,6 +444,13 @@ export function createInspector(app) {
     );
     const originalRecurrenceChoice = recurrenceFormChoice(recurrence);
     const recurrenceEnd = recurrenceEndMode(recurrence?.rrule);
+    // The end-staple is a separate authored record from the rule above (LEXICON's
+    // staple anchoring / Rob-and-John scenario): "Ends" is what the rule itself
+    // says (its own extent, still honoured); the staple is where the owner
+    // stapled an inflection point onto the series' body. src/engine.js projects
+    // the intersection of the two without either one rewriting the other.
+    const endStaple = recurrence ? seriesEndStaple(chronolog, recurrence.id) : null;
+    const endStapleParts = relationDateParts(endStaple);
     const completedParts = relationDateParts(completed);
     // The display-side union (engine.isDisplayGroup) already includes
     // importance-frame membership, direct or nested, so the manual union this
@@ -535,6 +553,15 @@ export function createInspector(app) {
         <input name="until" type="date" value="${escapeHTML(recurrenceUntilDate(recurrence?.rrule?.UNTIL))}">
       </label>
     </div>
+    ${recurrence ? `<div class="form-row recurrence-options" data-end-staple-row>
+      <label class="field"><span>End staple</span>
+        <input name="endStapleDate" type="date" value="${escapeHTML(endStapleParts.date)}">
+      </label>
+      <label class="field"><span>Time (optional)</span>
+        <input name="endStapleTime" type="time" step="60" value="${escapeHTML(endStapleParts.time)}">
+      </label>
+    </div>
+    <p class="field-note recurrence-options end-staple-note">A staple placed on the series body stops its projection there, without changing what "Ends" above says — the rule keeps its own extent; the staple is a separate, removable inflection point. Clear the date and save to remove the staple and resume the full projection.</p>` : ""}
     <div class="form-row" data-completed-field>
       <label class="field"><span>Completed date (optional)</span>
         <input name="completedDate" type="date" value="${escapeHTML(completedParts.date)}">
@@ -798,6 +825,7 @@ export function createInspector(app) {
           const existingPattern = Object.values(documentValue.patterns).find(
             (pattern) => pattern.kind === "ics-rrule" && pattern.templateEvent === eventId
           );
+          let activePatternId = null;
           if (!repeat && existingPattern) {
             delete documentValue.patterns[existingPattern.id];
           } else if (repeat) {
@@ -818,8 +846,9 @@ export function createInspector(app) {
               existingPattern.appliesTo = [chosenFrame];
               existingPattern.frame = chosenFrame;
               existingPattern.templateRelation = existing?.id;
+              activePatternId = existingPattern.id;
             } else {
-              addPattern(documentValue, {
+              const createdPattern = addPattern(documentValue, {
                 title: `${target.payload.title} recurrence`,
                 language: "chronolog-formula/1",
                 kind: "ics-rrule",
@@ -831,6 +860,36 @@ export function createInspector(app) {
                 source: "export fn state(ctx) = {};\nexport fn facts(ctx) = [];",
                 exports: { state: "state", facts: "facts" }
               });
+              activePatternId = createdPattern.id;
+            }
+          }
+          // The end-staple is separate authored data on the series, not a rewrite
+          // of the rule above (LEXICON's staple anchoring / Rob-and-John scenario:
+          // "ending a series is an end-staple, not a command"). It is only ever
+          // read/written while a series still exists; turning "Repeats" off
+          // deletes the pattern above, and `cascadeRemovedPatterns`
+          // (src/ui/transactions.js) takes any staple on it with it, in this same
+          // undoable transaction.
+          if (activePatternId) {
+            const stapleDate = String(data.get("endStapleDate") || "").trim();
+            if (stapleDate) {
+              // A date with no time means through the whole of that day, exactly
+              // like "Ends on a date" above (recurrenceUntilForDate) -- otherwise
+              // a bare date would default to midnight and silently exclude that
+              // same day's own occurrence, reading as an off-by-one bug. Recorded
+              // as `parameters.dateOnly` (the same flag the start-date field
+              // uses) so reopening the editor shows the time field blank again
+              // rather than a misleading 23:59.
+              const stapleTimeText = String(data.get("endStapleTime") || "").trim();
+              setSeriesEndStaple(
+                documentValue,
+                activePatternId,
+                chosenFrame,
+                parseDateText(`${stapleDate} ${stapleTimeText || "23:59:59"}`),
+                stapleTimeText ? null : { dateOnly: true }
+              );
+            } else {
+              clearSeriesEndStaple(documentValue, activePatternId);
             }
           }
         });

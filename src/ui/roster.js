@@ -111,12 +111,18 @@ export function createRoster(app) {
   }
 
   // The roster is a live list, so an open card is rebuilt in place when the
-  // document changes underneath it rather than going stale until it is reopened.
+  // document changes underneath it rather than going stale until it is
+  // reopened. This is registered per card at open time (the `refresh` handed to
+  // `app.openInspector` below) rather than called by name from the render loop
+  // -- `refreshAll` survives only as a convenience for anything that wants to
+  // force both kinds at once.
+  function refreshCard(kind) {
+    const body = app.dockCardBody(cardId(kind));
+    if (body) body.replaceChildren(render(kind));
+  }
+
   function refreshAll() {
-    for (const kind of ["todo", "note"]) {
-      const body = app.dockCardBody(cardId(kind));
-      if (body) body.replaceChildren(render(kind));
-    }
+    for (const kind of ["todo", "note"]) refreshCard(kind);
   }
 
   function open(kind) {
@@ -127,7 +133,7 @@ export function createRoster(app) {
       app.closeDockCard(cardId(kind));
       return;
     }
-    app.openInspector(`${definition.label}s`, render(kind), `roster-${kind}`);
+    app.openInspector(`${definition.label}s`, render(kind), `roster-${kind}`, null, () => refreshCard(kind));
   }
 
   return { openRoster: open, refreshRosters: refreshAll };

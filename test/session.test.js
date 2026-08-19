@@ -206,12 +206,30 @@ test("setFrameSelection only reassigns the leading frame when it drops out of th
   assert.equal(session.activeFrame, "calendar:work", "unchanged");
 });
 
-test("setLeadingFrame keeps the promoted frame out of its own companion list", () => {
+// This is the 8.19 field report's item 1, reproduced directly against
+// setLeadingFrame: promoting an already-selected companion used to drop
+// every other selected frame instead of merely moving the marker. Reassigning
+// the primary must never change which frames are selected.
+test("setLeadingFrame reassigns only the marker — promoting an existing companion keeps the rest of the selection", () => {
   const session = new ViewSession({ activeFrame: "calendar:personal" });
   session.setFrameSelection(["calendar:personal", "calendar:work"]);
   session.setLeadingFrame("calendar:work");
-  assert.equal(session.activeFrame, "calendar:work");
-  assert.deepEqual(session.companionFrames, [], "the new leader is not also listed as its own companion");
+  assert.equal(session.activeFrame, "calendar:work", "the marker moved to the promoted frame");
+  assert.deepEqual(session.companionFrames, ["calendar:personal"],
+    "the previous primary is not dropped — it is demoted to a companion, still selected");
+  assert.deepEqual(session.selectedFrames(), ["calendar:work", "calendar:personal"]);
+});
+
+// setLeadingFrame can also be handed a frame outside the current selection
+// (the Frames panel's leading select lists every calendar frame, not only
+// the checked ones) — that frame is added and put in charge, not swapped in
+// for a selection wipe.
+test("setLeadingFrame adds an unselected frame to the selection rather than replacing it", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.setFrameSelection(["calendar:personal", "calendar:work"]);
+  session.setLeadingFrame("calendar:family");
+  assert.equal(session.activeFrame, "calendar:family");
+  assert.deepEqual(new Set(session.selectedFrames()), new Set(["calendar:family", "calendar:personal", "calendar:work"]));
 });
 
 test("pruneFrameSelection drops companions, and reassigns the leader, when a frame no longer exists", () => {
@@ -228,4 +246,69 @@ test("companion frames survive a session round trip and never include the leadin
   const restored = new ViewSession(session.toJSON());
   assert.equal(restored.activeFrame, "calendar:personal");
   assert.deepEqual(restored.companionFrames, ["calendar:work"]);
+});
+
+// toggleFrameSelection is what a single companion checkbox now calls — see
+// the ruling: unchecking the primary promotes the next selected frame, and
+// the selection may never become empty.
+test("toggleFrameSelection adds and drops companions without disturbing the primary", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.toggleFrameSelection("calendar:work");
+  assert.equal(session.activeFrame, "calendar:personal");
+  assert.deepEqual(session.companionFrames, ["calendar:work"]);
+  session.toggleFrameSelection("calendar:work");
+  assert.deepEqual(session.companionFrames, [], "unchecking a plain companion just removes it");
+  assert.equal(session.activeFrame, "calendar:personal", "the primary is untouched");
+});
+
+test("toggleFrameSelection promotes the next selected frame when the primary itself is unchecked", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.setFrameSelection(["calendar:personal", "calendar:work", "calendar:family"]);
+  session.toggleFrameSelection("calendar:personal");
+  assert.equal(session.activeFrame, "calendar:work", "the next selected frame in order is promoted");
+  assert.deepEqual(session.companionFrames, ["calendar:family"]);
+});
+
+test("toggleFrameSelection refuses to empty the selection", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.toggleFrameSelection("calendar:personal");
+  assert.deepEqual(session.selectedFrames(), ["calendar:personal"], "the only selected frame cannot be unchecked away");
+});
+
+// A document authored before this fix carries its overlay choice on
+// frames[leading].display.overlays. Rather than losing a user's existing
+// configuration, the session seeds its own selection from it exactly once,
+// then never reads or writes the field again — overlay configuration has
+// moved from document state to session view state.
+test("seedOverlaysOnce bridges a legacy display.overlays field into the selection, exactly once", () => {
+  const chronolog = {
+    frames: {
+      "calendar:personal": { id: "calendar:personal", display: { overlays: ["calendar:work", "calendar:family"] } },
+      "calendar:work": { id: "calendar:work" },
+      "calendar:family": { id: "calendar:family" }
+    }
+  };
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.seedOverlaysOnce(chronolog);
+  assert.deepEqual(session.companionFrames, ["calendar:work", "calendar:family"]);
+
+  // The user then clears every companion by hand — a later reconciliation
+  // pass (reconcileSession runs on every committed edit) must not re-import
+  // the stale field and silently undo that choice.
+  session.setFrameSelection(["calendar:personal"]);
+  session.seedOverlaysOnce(chronolog);
+  assert.deepEqual(session.companionFrames, [], "already bridged once; a cleared selection stays cleared");
+});
+
+test("seedOverlaysOnce is a no-op when the session already has its own companions", () => {
+  const chronolog = {
+    frames: {
+      "calendar:personal": { id: "calendar:personal", display: { overlays: ["calendar:family"] } },
+      "calendar:work": { id: "calendar:work" },
+      "calendar:family": { id: "calendar:family" }
+    }
+  };
+  const session = new ViewSession({ activeFrame: "calendar:personal", companionFrames: ["calendar:work"] });
+  session.seedOverlaysOnce(chronolog);
+  assert.deepEqual(session.companionFrames, ["calendar:work"], "an explicit selection is never overwritten by legacy document data");
 });

@@ -154,6 +154,11 @@ function reconcileSession() {
     ? app.session.activeFrame
     : calendarFrames(app.chronolog)[0]?.id || "";
   app.session.setLeadingFrame(leadingFrame);
+  // One-time bridge off a document that still carries the retired
+  // frames[leading].display.overlays field (see session.js's
+  // seedOverlaysOnce) — a no-op once the session has its own companions,
+  // including "the user cleared them all."
+  app.session.seedOverlaysOnce(app.chronolog);
   app.reconcileRadialCycle();
   const open = app.session.inspector;
   if (!open?.id) return;

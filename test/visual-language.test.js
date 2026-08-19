@@ -5,6 +5,7 @@ import {
   SIGIL_VOCABULARY,
   THEME_PRESETS,
   factImportance,
+  factImportanceWeight,
   normalizeTheme,
   resolveObjectColor,
   sigilForFact
@@ -99,6 +100,117 @@ test("factImportance reads legacy traits first, then group/importance-frame memb
   // entirely by group/importance-frame membership.
   assert.equal(importanceOf("event:group-important"), "important");
   assert.equal(importanceOf("event:group-landmark"), "landmark");
+});
+
+// Item #5, "frames are groups": display weight is a handling property of the
+// group/frame, composed multiplicatively into one weight that `factImportance`
+// derives its verdict from by threshold. These fixtures stub `eventFrames`
+// (direct attachment, how a calendar frame reaches its own events) alongside
+// `eventDisplayGroupMemberships` (group/importance membership, nested
+// included) exactly as `factImportanceWeight` reads them.
+function weightFixture({ frames = {}, attachedFrames = [], memberships = [] } = {}) {
+  const document = { events: {}, patterns: {}, frames };
+  const engine = {
+    eventFrames: () => attachedFrames,
+    eventDisplayGroupMemberships: () => memberships.map((group) => ({ group }))
+  };
+  return { document, engine };
+}
+
+test("a frame weight of 1 is neutral -- it changes neither the composed weight nor the verdict", () => {
+  const event = { id: "event:plain", traits: ["event"] };
+  const { document, engine } = weightFixture({
+    frames: { "calendar:weighted": { id: "calendar:weighted", traits: ["set", "calendar"], display: { weight: 1 } } },
+    attachedFrames: ["calendar:weighted"]
+  });
+  const context = { document, engine };
+  const fact = { event };
+  assert.equal(factImportanceWeight(context, fact), 1, "base standard weight (1) times a neutral frame weight (1) is 1");
+  assert.equal(factImportance(context, fact), "standard");
+});
+
+// The owner's literal question: setting a weight on a frame -- any frame, not
+// only an "importance" one -- promotes every event that belongs to it,
+// without any importance trait or importance-frame membership at all.
+test("a plain frame's display weight alone promotes its member events, wholesale, with no importance trait involved", () => {
+  const event = { id: "event:plain", traits: ["event"] };
+  const { document, engine } = weightFixture({
+    frames: { "calendar:us-holidays": { id: "calendar:us-holidays", traits: ["set", "calendar"], display: { weight: 4 } } },
+    attachedFrames: ["calendar:us-holidays"]
+  });
+  const context = { document, engine };
+  const fact = { event };
+  assert.equal(factImportanceWeight(context, fact), 4, "1 (standard base) * 4 (frame weight)");
+  assert.equal(factImportance(context, fact), "landmark");
+});
+
+// A weight below 1 demotes exactly the way a weight above 1 promotes --
+// "modified by everything that touches it" cuts both directions.
+test("a frame weight below 1 demotes an otherwise-important event", () => {
+  const event = { id: "event:legacy-important", traits: ["event", "important"] };
+  const { document, engine } = weightFixture({
+    frames: { "group:muted": { id: "group:muted", traits: ["set", "group"], display: { weight: 0.25 } } },
+    attachedFrames: ["group:muted"],
+    memberships: ["group:muted"]
+  });
+  const context = { document, engine };
+  const fact = { event };
+  assert.equal(factImportanceWeight(context, fact), 0.5, "2 (legacy 'important' base) * 0.25 (frame weight)");
+  assert.equal(factImportance(context, fact), "standard");
+});
+
+test("an importance frame's base verdict and a frame weight compose multiplicatively through the one shared function", () => {
+  const event = { id: "event:one", traits: ["event"] };
+  const { document, engine } = weightFixture({
+    frames: {
+      "frame:important": {
+        id: "frame:important", traits: ["set", "group", "importance"], display: { importance: "important", weight: 2.5 }
+      }
+    },
+    memberships: ["frame:important"]
+  });
+  const context = { document, engine };
+  const fact = { event };
+  // 2 (the "important" base weight) * 2.5 (that same frame's own display
+  // weight) = 5, which crosses the landmark threshold (4) even though the
+  // frame only ever declared "important".
+  assert.equal(factImportanceWeight(context, fact), 5);
+  assert.equal(factImportance(context, fact), "landmark");
+});
+
+// A frame reached both as a direct attachment (`eventFrames`) and as a
+// display-group membership (`eventDisplayGroupMemberships`, e.g. an
+// importance frame the event is also attached to) must contribute its
+// weight exactly once, not twice.
+test("a frame reached through both eventFrames and display-group membership contributes its weight once, not twice", () => {
+  const event = { id: "event:one", traits: ["event"] };
+  const { document, engine } = weightFixture({
+    frames: { "frame:double": { id: "frame:double", traits: ["set", "group"], display: { weight: 3 } } },
+    attachedFrames: ["frame:double"],
+    memberships: ["frame:double"]
+  });
+  const context = { document, engine };
+  const fact = { event };
+  assert.equal(factImportanceWeight(context, fact), 3, "1 (standard base) * 3 (frame weight), counted once");
+});
+
+// A frame with no authored weight, or a nonsensical one, contributes nothing
+// -- meaning is authored, never inferred, so a missing or invalid knob must
+// not silently change the answer.
+test("a frame with no display.weight, or an invalid one, does not affect the composed weight", () => {
+  const event = { id: "event:one", traits: ["event"] };
+  const { document, engine } = weightFixture({
+    frames: {
+      "calendar:unweighted": { id: "calendar:unweighted", traits: ["set", "calendar"] },
+      "group:negative": { id: "group:negative", traits: ["set", "group"], display: { weight: -3 } },
+      "group:nan": { id: "group:nan", traits: ["set", "group"], display: { weight: "not-a-number" } }
+    },
+    attachedFrames: ["calendar:unweighted", "group:negative", "group:nan"]
+  });
+  const context = { document, engine };
+  const fact = { event };
+  assert.equal(factImportanceWeight(context, fact), 1);
+  assert.equal(factImportance(context, fact), "standard");
 });
 
 test("controlled themes always produce a complete valid palette", () => {

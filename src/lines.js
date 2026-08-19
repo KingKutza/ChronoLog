@@ -1,6 +1,6 @@
 import { Rational } from "./exact.js";
 
-export function lineFramePlan(documentValue, activeFrameId) {
+export function lineFramePlan(documentValue, activeFrameId, companionIds = []) {
   const leading = documentValue.frames?.[activeFrameId] || null;
   const isLine = leading?.traits?.includes("line") || leading?.traits?.includes("timeline");
   if (!leading?.traits?.includes("calendar") && !isLine) {
@@ -10,11 +10,13 @@ export function lineFramePlan(documentValue, activeFrameId) {
     const topology = lineTopologyPlan(documentValue, activeFrameId);
     return { supported: true, leading, companions: topology.frames.filter((frame) => frame.id !== leading.id), unsupportedCompanions: [], topology };
   }
-  const selected = Array.isArray(leading.display?.overlays) ? leading.display.overlays : [];
+  // Overlay membership comes from the one selection (src/frame-selection.js,
+  // plumbed in by the caller) — frames[leading].display.overlays is retired,
+  // this lens no longer reads it either.
   const companions = [];
   const unsupportedCompanions = [];
   const seen = new Set([leading.id]);
-  for (const id of selected) {
+  for (const id of companionIds) {
     if (seen.has(id)) continue;
     seen.add(id);
     const frame = documentValue.frames?.[id];
