@@ -9,8 +9,7 @@ import {
   recurrenceEndMode,
   recurrenceUntilDate,
   recurrenceUntilForCoordinate,
-  recurrenceUntilForDate,
-  truncateRecurrenceAt
+  recurrenceUntilForDate
 } from "../src/recurrence-end.js";
 import { createStructuralDocument } from "./helpers/sample-document.js";
 
@@ -127,18 +126,15 @@ test("'ends on a date' covers the whole of that day, whatever time the series ru
   assert.equal(recurrenceUntilForDate("bad"), "");
 });
 
-// There is no longer a button that does this — ending a series will arrive as an
-// end-staple on the series body, not an imperative command. The arithmetic stays
-// because the "Ends on a date" control uses it and the staple model will too.
 test("an inclusive UNTIL cap lands exactly on the occurrence it names", () => {
   // A timed occurrence needs its own instant, or an inclusive cap is impossible.
   assert.deepEqual(
-    truncateRecurrenceAt({ FREQ: "WEEKLY", COUNT: "40" }, civil(2026, 10, 5, 9, 30)),
+    applyRecurrenceEnd({ FREQ: "WEEKLY", COUNT: "40" }, { mode: "until", until: recurrenceUntilForCoordinate(civil(2026, 10, 5, 9, 30)) }),
     { FREQ: "WEEKLY", UNTIL: "20261005T093000" }
   );
   // A date-only occurrence keeps the plain date form, matching its own value type.
   assert.deepEqual(
-    truncateRecurrenceAt({ FREQ: "DAILY" }, civil(2026, 10, 5)),
+    applyRecurrenceEnd({ FREQ: "DAILY" }, { mode: "until", until: recurrenceUntilForCoordinate(civil(2026, 10, 5)) }),
     { FREQ: "DAILY", UNTIL: "20261005" }
   );
   assert.equal(recurrenceUntilForCoordinate(civil(2026, 1, 2, 0, 0, 7)), "20260102T000007");
@@ -152,7 +148,10 @@ test("an inclusive cap keeps the occurrence it names and drops every later one",
   assert.equal(occurrences(context).length, 8);
 
   const pattern = rulePattern(context.document);
-  pattern.rrule = truncateRecurrenceAt(pattern.rrule, civil(2026, 1, 19, 9, 0));
+  pattern.rrule = applyRecurrenceEnd(pattern.rrule, {
+    mode: "until",
+    until: recurrenceUntilForCoordinate(civil(2026, 1, 19, 9, 0))
+  });
   assert.deepEqual(occurrences(context), ["2026-01-05", "2026-01-12", "2026-01-19"]);
   assert.equal(pattern.rrule.COUNT, undefined, "the old COUNT cannot survive alongside UNTIL");
 });

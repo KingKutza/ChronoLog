@@ -87,11 +87,3 @@ export function applyRecurrenceEnd(rrule = {}, input = {}) {
   }
   return next;
 }
-
-// Truncate a series so `coordinate` is its last occurrence. Deliberately
-// inclusive: the occurrence you are looking at when you ask the series to stop
-// is the one you can see, and losing it would make the action feel like a
-// deletion rather than an ending.
-export function truncateRecurrenceAt(rrule = {}, coordinate) {
-  return applyRecurrenceEnd(rrule, { mode: "until", until: recurrenceUntilForCoordinate(coordinate) });
-}

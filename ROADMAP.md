@@ -100,6 +100,9 @@ the archive.
    labels) and Wall the same; no artificial Now line on a calendar with
    no now-mapping; jump-to-date must exist. Epochs/ages need handling —
    BCE/CE, or first/second/third ages — as part of the same model.
+   Observed-boundary cycles need a computed sibling: a cycle derived
+   from formula or ephemeris — the moon by Newton, not by a list of
+   observations — with observation as the override, not the definition.
 7. **Intimate overlap and create-in-place** — overlap is indicated
    locally, not globally: a 30-minute collision must not lane both
    events full-height. Events stay rectangles — no key-shaped blocks.
