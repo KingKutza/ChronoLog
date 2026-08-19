@@ -13,6 +13,9 @@ function event(document, id, traits = ["event"]) {
 function member(document, id, groupId, memberId) {
   return addRelation(document, { id, type: "membership", group: groupId, member: memberId });
 }
+function attach(document, id, frameId, eventId) {
+  return addRelation(document, { id, type: "attachment", event: eventId, frame: frameId, role: "member" });
+}
 
 test("group membership preserves authored, query, and union provenance", () => {
   const document = createStructuralDocument();
@@ -44,6 +47,83 @@ test("positive nested, self, mutual, and deeper group cycles terminate at the le
   const engine = new ChronologEngine(document);
   for (const id of [a.id, b.id, c.id]) assert.ok(engine.groupMembers(id).some((item) => item.member === leaf.id));
   assert.ok(engine.eventGroupMemberships(leaf.id).every((item) => [a.id, b.id, c.id].includes(item.group)));
+  assert.equal(validateDocument(document).valid, true);
+});
+
+// Stage D (ROADMAP #9's display-only half): an importance frame is authored
+// exactly like a group (attach an event to it the same way), but
+// `isOrdinaryGroup` deliberately excludes it so persisted authoring/
+// validation semantics never see the union. `isDisplayGroup` and its
+// `eventDisplayGroupMemberships`/`displayGroupEventMembers` companions are
+// the ONLY things that see it -- this pins that split.
+test("isDisplayGroup unions importance frames into display membership without touching the persisted group index", () => {
+  const document = createStructuralDocument();
+  const plain = event(document, "event:plain");
+  const importanceFrame = addFrame(document, {
+    id: "frame:important", title: "Important", traits: ["set", "group", "importance"], color: "#663399"
+  });
+  attach(document, "attachment:plain", importanceFrame.id, plain.id);
+  const engine = new ChronologEngine(document);
+
+  // Persisted-facing: isOrdinaryGroup and everything built from it stay blind
+  // to the importance frame, exactly as before this stage.
+  assert.equal(engine.isOrdinaryGroup(importanceFrame.id), false);
+  assert.equal(engine.eventGroupFrame(plain.id), null);
+  assert.deepEqual(engine.eventGroupMemberships(plain.id), []);
+  assert.deepEqual(engine.groupEventMembers(importanceFrame.id), []);
+
+  // Display-facing: the union sees it.
+  assert.equal(engine.isDisplayGroup(importanceFrame.id), true);
+  assert.equal(engine.eventDisplayGroupFrame(plain.id), importanceFrame.id);
+  assert.deepEqual(
+    engine.eventDisplayGroupMemberships(plain.id).map((item) => item.group),
+    [importanceFrame.id]
+  );
+  assert.deepEqual(engine.displayGroupEventMembers(importanceFrame.id), [plain.id]);
+});
+
+// The exact field-report symptom: converting a group's kind to importance is
+// additive (frame-edit.js keeps the "group" trait), so the persisted
+// attachment relation never changes -- only engine-side display bookkeeping
+// used to drop it.
+test("a group that gains the importance trait keeps its display membership (the field-report regression)", () => {
+  const document = createStructuralDocument();
+  const member1 = event(document, "event:member");
+  const plainGroup = addFrame(document, { id: "frame:was-plain", title: "Was plain", traits: ["set", "group"], color: "#2e8b57" });
+  attach(document, "attachment:member", plainGroup.id, member1.id);
+  const engine = new ChronologEngine(document);
+  assert.deepEqual(engine.displayGroupEventMembers(plainGroup.id), [member1.id]);
+  assert.deepEqual(engine.groupEventMembers(plainGroup.id), [member1.id]);
+
+  // Additive kind-switching: "importance" is added, "group" stays.
+  document.frames[plainGroup.id].traits = ["set", "group", "importance"];
+  engine.refreshFrame(plainGroup.id);
+
+  assert.deepEqual(engine.groupEventMembers(plainGroup.id), [], "persisted-facing group index excludes it now, by design");
+  assert.deepEqual(
+    engine.displayGroupEventMembers(plainGroup.id),
+    [member1.id],
+    "display-facing index still has it -- this is what keeps it coloring its events"
+  );
+});
+
+// This stage is display-only: no accessor added here may mutate the document,
+// and validation must not change its mind about an importance frame just
+// because display bookkeeping now looks at it differently.
+test("the display-side unification changes no persisted document shape", () => {
+  const document = createStructuralDocument();
+  const member1 = event(document, "event:member");
+  const importanceFrame = addFrame(document, {
+    id: "frame:important2", title: "Important", traits: ["set", "group", "importance"]
+  });
+  attach(document, "attachment:member2", importanceFrame.id, member1.id);
+  const before = structuredClone(document);
+  const engine = new ChronologEngine(document);
+  engine.isDisplayGroup(importanceFrame.id);
+  engine.eventDisplayGroupMemberships(member1.id);
+  engine.displayGroupEventMembers(importanceFrame.id);
+  engine.eventDisplayGroupFrame(member1.id);
+  assert.deepEqual(document, before, "reading the display-group accessors must not mutate the document");
   assert.equal(validateDocument(document).valid, true);
 });
 

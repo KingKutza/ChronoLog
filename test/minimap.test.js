@@ -14,6 +14,9 @@ import {
   minimapLabelTicks,
   minimapMagnitudeCeiling
 } from "../src/minimap.js";
+import { ChronologEngine } from "../src/engine.js";
+import { addEvent, addFrame, addRelation, createDocument, durationMagnitude } from "../src/model.js";
+import { factImportance } from "../src/visual-language.js";
 
 const DAY_2026_08_18 = new Rational(daysFromCivil(2026n, 8n, 18n));
 
@@ -32,6 +35,34 @@ test("minimap magnitude uses a fixed event, staple, duration, and importance sca
   assert.equal(minimapEventMagnitude({ durationDays: 2, stapleCount: 2 }), 5);
   assert.equal(minimapEventMagnitude({ durationDays: 2, stapleCount: 2, importance: "important" }), 8);
   assert.equal(minimapEventMagnitude({ durationDays: 2, stapleCount: 2, importance: "landmark" }), 12.5);
+});
+
+// Stage D (ROADMAP #9's display-only half): the minimap itself never changed
+// -- `importance` was always one of its inputs. What changed is what feeds
+// it: `factImportance` (src/visual-language.js) now sees group/importance-
+// frame affiliation, not just the two legacy trait strings. This pins that an
+// event made important purely by group membership earns the same minimap
+// weight a legacy-trait event does, over a real engine/document rather than a
+// hand-built "importance" string.
+test("an event made important by group affiliation earns the same minimap weight as a legacy trait", () => {
+  const document = createDocument();
+  addFrame(document, { id: "frame:important", title: "Important", traits: ["set", "group", "importance"], display: { importance: "important" } });
+  const standard = addEvent(document, { traits: ["event"], magnitudes: { duration: durationMagnitude("0") }, payload: { title: "Standard" } });
+  const legacy = addEvent(document, { traits: ["event", "important"], magnitudes: { duration: durationMagnitude("0") }, payload: { title: "Legacy important" } });
+  const grouped = addEvent(document, { traits: ["event"], magnitudes: { duration: durationMagnitude("0") }, payload: { title: "Grouped important" } });
+  addRelation(document, { type: "attachment", event: grouped.id, frame: "frame:important", role: "member" });
+  const engine = new ChronologEngine(document);
+  const context = { document, engine };
+  const magnitudeFor = (event) => minimapEventMagnitude({ importance: factImportance(context, { event }) });
+
+  assert.equal(magnitudeFor(standard), minimapEventMagnitude());
+  assert.equal(magnitudeFor(legacy), minimapEventMagnitude({ importance: "important" }));
+  assert.equal(
+    magnitudeFor(grouped),
+    minimapEventMagnitude({ importance: "important" }),
+    "group-based importance must weigh the same as the legacy trait, not fall back to standard"
+  );
+  assert.ok(magnitudeFor(grouped) > magnitudeFor(standard));
 });
 
 test("the field is one baseline row plus 24 activity rows at 288 buckets", () => {

@@ -2,7 +2,8 @@ import {
   Rational,
   coordinate,
   daysFromCivil,
-  daysToCivilCoordinate
+  daysToCivilCoordinate,
+  nowDays
 } from "./exact.js";
 import { clampDockWidth, normalizeDockSide } from "./dock-layout.js";
 import { normalizeRadialGuideValues, positiveRadialCycle } from "./radial.js";
@@ -30,14 +31,52 @@ const PROJECTIONS = ["calendar", "wall", "lines", "radial"];
 // cases in the toolbar.  A future lens needs one entry here plus a renderer;
 // persisted workspaces then get its default position without losing a user's
 // existing ordering.
+// `description` is a one-line, owner-voiced explanation of what the lens
+// shows — it joins the capability tags in the Configure-lenses workspace so a
+// lens is recognizable by more than a jargon list of its capabilities.
 export const LENS_CATALOG = Object.freeze({
-  intimate: Object.freeze({ title: "Intimate", projection: "calendar", capabilities: ["continuous-scroll", "vertical-zoom", "time-window", "zones"] }),
-  tactical: Object.freeze({ title: "Tactical", projection: "calendar", capabilities: ["grid-window", "zones"] }),
-  strategic: Object.freeze({ title: "Strategic", projection: "calendar", capabilities: ["month-window", "density", "zones"] }),
-  wall: Object.freeze({ title: "Wall", projection: "wall", capabilities: ["month-window", "record-slashes", "zones"] }),
-  lines: Object.freeze({ title: "Lines", projection: "lines", capabilities: ["topology", "time-window"] }),
-  spiral: Object.freeze({ title: "Spiral", projection: "radial", capabilities: ["cycle", "radial-guides", "labels"] }),
-  radial: Object.freeze({ title: "Radial", projection: "radial", capabilities: ["cycle", "radial-guides", "labels"] })
+  intimate: Object.freeze({
+    title: "Intimate",
+    description: "Hour-by-hour continuous scroll — the closest view, a day or a week at a time.",
+    projection: "calendar",
+    capabilities: ["continuous-scroll", "vertical-zoom", "time-window", "zones"]
+  }),
+  tactical: Object.freeze({
+    title: "Tactical",
+    description: "A grid of days — the working week and the weeks around it.",
+    projection: "calendar",
+    capabilities: ["grid-window", "zones"]
+  }),
+  strategic: Object.freeze({
+    title: "Strategic",
+    description: "Months at a glance — density and shape over a season, up to 18 months.",
+    projection: "calendar",
+    capabilities: ["month-window", "density", "zones"]
+  }),
+  wall: Object.freeze({
+    title: "Wall",
+    description: "A normal wall calendar — month sheets, a quarter or a month at a time.",
+    projection: "wall",
+    capabilities: ["month-window", "record-slashes", "zones"]
+  }),
+  lines: Object.freeze({
+    title: "Lines",
+    description: "Prime Line and Party Lines side by side — one line per group, glyphs along each.",
+    projection: "lines",
+    capabilities: ["topology", "time-window"]
+  }),
+  spiral: Object.freeze({
+    title: "Spiral",
+    description: "One ring outward per cycle — natural units as ticks, events as arcs across them.",
+    projection: "radial",
+    capabilities: ["cycle", "radial-guides", "labels"]
+  }),
+  radial: Object.freeze({
+    title: "Radial",
+    description: "One cycle, one band per group — events as arcs overlapping around the same circle.",
+    projection: "radial",
+    capabilities: ["cycle", "radial-guides", "labels"]
+  })
 });
 export const DEFAULT_LENS_ORDER = Object.freeze(Object.keys(LENS_CATALOG));
 export const LENS_VIEW_DEFAULTS = Object.freeze({
@@ -140,16 +179,6 @@ export function minimapDragFocus(drag, fraction) {
   return drag.start.add(drag.span.mul(String(clamped)));
 }
 
-function todayDays() {
-  const date = new Date();
-  return new Rational(daysFromCivil(
-    BigInt(date.getFullYear()),
-    BigInt(date.getMonth() + 1),
-    BigInt(date.getDate())
-  )).add(Rational.parse(date.getHours()).div(24))
-    .add(Rational.parse(date.getMinutes()).div(1440));
-}
-
 export class ViewSession {
   constructor(input = {}) {
     const lensWorkspace = normalizeLensWorkspace(input);
@@ -158,11 +187,19 @@ export class ViewSession {
     this.enabledLenses = lensWorkspace.enabledLenses;
     this.scale = Number(input.scale ?? 1);
     this.sharedFocus = input.sharedFocus !== false;
-    this.focusDays = Rational.parse(input.focusDays || todayDays());
+    this.focusDays = Rational.parse(input.focusDays || nowDays());
     this.localFocus = Object.fromEntries(
       Object.entries(input.localFocus || {}).map(([key, value]) => [key, Rational.parse(value)])
     );
     this.activeFrame = input.activeFrame || "calendar:personal";
+    // Companions to the leading frame (AGENTS.md's frame model, point 4: "a
+    // lens projects a leading frame and optional companions"). `activeFrame`
+    // stays the one leading frame; this list is everything else checked in
+    // the Frame drop. Selecting/displaying a frame never creates a mapping —
+    // this is pure view state, like activeFrame itself.
+    this.companionFrames = Array.isArray(input.companionFrames)
+      ? [...new Set(input.companionFrames.filter((id) => typeof id === "string" && id))].filter((id) => id !== this.activeFrame)
+      : [];
     this.activeCycle = input.activeCycle || "cycle:lunar";
     this.radialMode = input.radialMode || "spiral";
     this.radialPast = Math.max(0, Math.floor(Number(input.radialPast ?? LENS_VIEW_DEFAULTS.spiral.radialPast)));
@@ -231,6 +268,42 @@ export class ViewSession {
 
   setLeadingFrame(frameId) {
     if (typeof frameId === "string" && frameId) this.activeFrame = frameId;
+    this.companionFrames = this.companionFrames.filter((id) => id !== this.activeFrame);
+  }
+
+  // The leading frame first, then its companions — what the Frame drop shows
+  // checked. Rendering still only consumes `activeFrame`; carrying the full
+  // selection is the chrome/session half of multi-select, ahead of
+  // projections.js actually projecting the companions (parked — see the
+  // 8.19 field report).
+  selectedFrames() {
+    return [this.activeFrame, ...this.companionFrames];
+  }
+
+  // Ids from a multi-select control, in whatever order the control reports
+  // them. The already-leading frame stays leading as long as it is still
+  // among them — so checking one more companion does not silently reassign
+  // which frame supplies primary coordinates — and only falls back to the
+  // first id offered when the previous leader was itself unchecked.
+  setFrameSelection(ids) {
+    const unique = [...new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id))];
+    if (!unique.length) return;
+    const leading = unique.includes(this.activeFrame) ? this.activeFrame : unique[0];
+    this.activeFrame = leading;
+    this.companionFrames = unique.filter((id) => id !== leading);
+  }
+
+  // Drops companions (and, if necessary, reassigns the leading frame) that no
+  // longer name a real frame in the document — a frame can be deleted while
+  // it is selected, and a stale id here must not silently poison
+  // `selectedFrames()` for whoever renders the Frame drop.
+  pruneFrameSelection(validFrameIds) {
+    const valid = new Set(validFrameIds);
+    this.companionFrames = this.companionFrames.filter((id) => valid.has(id));
+    if (valid.size && !valid.has(this.activeFrame)) {
+      this.activeFrame = this.companionFrames[0] || [...valid][0];
+      this.companionFrames = this.companionFrames.filter((id) => id !== this.activeFrame);
+    }
   }
 
   move(days) {
@@ -380,6 +453,7 @@ export class ViewSession {
         Object.entries(this.localFocus).map(([key, value]) => [key, value.toJSON()])
       ),
       activeFrame: this.activeFrame,
+      companionFrames: [...this.companionFrames],
       activeCycle: this.activeCycle,
       radialMode: this.radialMode,
       radialPast: this.radialPast,

@@ -36,6 +36,35 @@ test("duration magnitudes convert human units to exact days", () => {
   assert.equal(durationMagnitudeDays(null).toJSON(), "0");
 });
 
+// The melt stage reconciled two forked duration-in-days helpers
+// (model.js's durationMagnitudeDays, which used to throw on a malformed level
+// and could return a negative total, and engine.js's private eventDurationDays,
+// which tolerated malformed input and clamped negatives to zero) onto one
+// behavior: tolerant and clamped, because callers -- overlap/lookback windows,
+// a drag span, a duration shown in a form -- all want 0 rather than a thrown
+// error or a negative span, and the owner's own ~169 MB of imported ICS makes
+// malformed magnitudes plausible rather than hypothetical. These two tests pin
+// that reconciled behavior so it cannot regress back to either fork.
+test("a malformed duration magnitude yields zero rather than throwing", () => {
+  const malformed = {
+    frame: "measure:human-time",
+    value: coordinate([{ level: "hour", value: "not-a-number" }])
+  };
+  assert.doesNotThrow(() => durationMagnitudeDays(malformed));
+  assert.equal(durationMagnitudeDays(malformed).toJSON(), "0");
+});
+
+test("a negative-summing duration magnitude clamps to zero rather than going negative", () => {
+  const negative = {
+    frame: "measure:human-time",
+    value: coordinate([
+      { level: "day", value: "1" },
+      { level: "hour", value: "-36" }
+    ])
+  };
+  assert.equal(durationMagnitudeDays(negative).compare(0), 0);
+});
+
 test("generated pattern state and cycle facts exist at remote dates", () => {
   const engine = new ChronologEngine(createSampleDocument({ includeEvents: false }));
   for (const year of ["1026", "3026", "100002026", "-99997974"]) {

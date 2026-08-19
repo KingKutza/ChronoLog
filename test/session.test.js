@@ -182,3 +182,50 @@ test("dock geometry is view state and survives a session round trip", () => {
   assert.equal(fallback.dockSide, "right");
   assert.equal(fallback.dockWidth, 1 / 3);
 });
+
+// A lens projects a leading frame and optional companions (AGENTS.md's frame
+// model, point 4). The Frame drop needs to check several frames at once
+// while `activeFrame` keeps meaning "the leading one" for every renderer
+// that only knows about a single frame.
+test("selectedFrames puts the leading frame first, then its companions", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  assert.deepEqual(session.selectedFrames(), ["calendar:personal"], "no companions yet");
+  session.setFrameSelection(["calendar:personal", "calendar:work", "calendar:family"]);
+  assert.equal(session.activeFrame, "calendar:personal", "the already-leading frame stays leading");
+  assert.deepEqual(session.selectedFrames(), ["calendar:personal", "calendar:work", "calendar:family"]);
+});
+
+test("setFrameSelection only reassigns the leading frame when it drops out of the selection", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.setFrameSelection(["calendar:work", "calendar:family"]);
+  assert.equal(session.activeFrame, "calendar:work", "the first offered id becomes leading");
+  assert.deepEqual(session.companionFrames, ["calendar:family"]);
+  // An empty selection is refused outright — a frame drop with nothing
+  // checked is a trap, not a valid state.
+  session.setFrameSelection([]);
+  assert.equal(session.activeFrame, "calendar:work", "unchanged");
+});
+
+test("setLeadingFrame keeps the promoted frame out of its own companion list", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.setFrameSelection(["calendar:personal", "calendar:work"]);
+  session.setLeadingFrame("calendar:work");
+  assert.equal(session.activeFrame, "calendar:work");
+  assert.deepEqual(session.companionFrames, [], "the new leader is not also listed as its own companion");
+});
+
+test("pruneFrameSelection drops companions, and reassigns the leader, when a frame no longer exists", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal" });
+  session.setFrameSelection(["calendar:personal", "calendar:work", "calendar:family"]);
+  session.pruneFrameSelection(["calendar:work", "calendar:family"]);
+  assert.equal(session.activeFrame, "calendar:work", "the deleted leader is replaced by a surviving companion");
+  assert.deepEqual(session.companionFrames, ["calendar:family"]);
+});
+
+test("companion frames survive a session round trip and never include the leading frame twice", () => {
+  const session = new ViewSession({ activeFrame: "calendar:personal", companionFrames: ["calendar:work", "calendar:personal"] });
+  assert.deepEqual(session.companionFrames, ["calendar:work"], "the leading frame is not duplicated into its own companions");
+  const restored = new ViewSession(session.toJSON());
+  assert.equal(restored.activeFrame, "calendar:personal");
+  assert.deepEqual(restored.companionFrames, ["calendar:work"]);
+});

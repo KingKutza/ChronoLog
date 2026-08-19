@@ -42,19 +42,29 @@ export function objectKindForEvent(event) {
 // at their staples, projecting forward for a keep-range and lapsing from the
 // present view is ROADMAP #9 and is not decided yet; showing every object of a
 // kind is the honest placeholder, because it invents no lifecycle rule that would
-// later have to be unwound.
+// later have to be unwound. A completed ToDo is still one of these entries --
+// completion is a fact about the object, never a reason to stop listing it.
 export function rosterEntries(chronologDocument, requestedKind) {
   const kind = normalizeObjectKind(requestedKind);
   const events = Object.values(chronologDocument?.events || {})
     .filter((event) => objectKindForEvent(event) === kind);
   const placements = new Map();
+  const completions = new Map();
   for (const relation of Object.values(chronologDocument?.relations || {})) {
-    if (!relation?.event || placements.has(relation.event)) continue;
-    if (relation.coordinate) placements.set(relation.event, relation);
+    if (!relation?.event) continue;
+    // A "completed" relation marks when the object was finished, not where it is
+    // stapled -- it must never stand in for the scheduled/observed placement a
+    // row displays, so the two are tracked separately from the same pass.
+    if (relation.role === "completed") {
+      if (relation.coordinate && !completions.has(relation.event)) completions.set(relation.event, relation);
+      continue;
+    }
+    if (relation.coordinate && !placements.has(relation.event)) placements.set(relation.event, relation);
   }
   return events
     .map((event) => {
       const relation = placements.get(event.id) || null;
+      const completion = completions.get(event.id) || null;
       return {
         id: event.id,
         title: event.payload?.title || "(untitled)",
@@ -62,7 +72,13 @@ export function rosterEntries(chronologDocument, requestedKind) {
         frame: relation?.frame || null,
         // A roster row has to be able to say "this one has no staple yet" rather
         // than inventing a date for it.
-        anchored: Boolean(relation?.coordinate)
+        anchored: Boolean(relation?.coordinate),
+        // Whether a "completed" temporal attachment relation exists for this
+        // object, and the coordinate it carries -- the same relation shape the
+        // inspector's Completed date field reads and writes, so the roster's
+        // checkbox and the editor's field are two views of one fact.
+        completed: Boolean(completion),
+        completedAt: completion?.coordinate || null
       };
     })
     .sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));

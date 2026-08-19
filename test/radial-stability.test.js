@@ -4,8 +4,10 @@ import { readFile } from "node:fs/promises";
 import { ViewSession } from "../src/session.js";
 import {
   FIXED_RADIAL_CYCLES,
+  arcPath,
   cyclePeriodHint,
   normalizeRadialGuideValues,
+  polar,
   radialGuideSettings,
   radialRenderState,
   resolveRadialCycle,
@@ -95,5 +97,69 @@ test("unbounded formula, event-defined, and invalid cycle selections remain expl
 test("empty, ordinary, and truncated Radial datasets have explicit deterministic states", () => {
   for (const reproduction of fixture.datasets) {
     assert.equal(radialRenderState(reproduction.factCount, reproduction.truncated), reproduction.state);
+  }
+});
+
+// Stage C (8.19 field report, owner item 6): "Spiral Still has rounded edges,
+// at the ends of the spirals, where it should terminate along the vertical
+// ray according to its start or stop date." arcPath (the Radial ring lens's
+// per-event geometry) already computes exact endpoints -- this pins that the
+// date-correctness half of the bug was never in the geometry. The visible cap
+// (round/square bulging past the endpoint vs. butt sitting flush) is a
+// rendering choice, proven separately below and pinned end to end against a
+// rendered arc in test/roster-lenses.test.js.
+test("arcPath's own endpoints already sit exactly on the radial ray of their start and stop angle", () => {
+  const cx = 450;
+  const cy = 360;
+  const normalize = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
+  for (const { radius, start, end } of [
+    { radius: 60, start: -Math.PI / 2, end: 0 },
+    { radius: 278, start: 0, end: Math.PI },
+    { radius: 150, start: Math.PI / 4, end: Math.PI * 1.9 },
+    { radius: 326, start: -3, end: 3 }
+  ]) {
+    const d = arcPath(cx, cy, radius, start, end);
+    const [, mx, my] = /^M ([\d.-]+) ([\d.-]+)/.exec(d);
+    const [, ex, ey] = /A [\d.-]+ [\d.-]+ 0 \d 1 ([\d.-]+) ([\d.-]+)/.exec(d);
+    const startAngleFromPath = Math.atan2(Number(my) - cy, Number(mx) - cx);
+    const endAngleFromPath = Math.atan2(Number(ey) - cy, Number(ex) - cx);
+    assert.ok(
+      Math.abs(normalize(startAngleFromPath - start)) < 1e-3,
+      `start endpoint at radius ${radius} must sit on the ${start} ray, not overshoot or undershoot it`
+    );
+    assert.ok(
+      Math.abs(normalize(endAngleFromPath - end)) < 1e-3,
+      `end endpoint at radius ${radius} must sit on the ${end} ray, not overshoot or undershoot it`
+    );
+  }
+});
+
+// The other half of the proof: on a circle, the tangent at any point is
+// exactly perpendicular to that point's own radius. A stroke's `butt`
+// linecap draws its flat edge perpendicular to the path's tangent direction
+// at the endpoint -- so on a circular arc that flat edge is parallel to the
+// radius, and passing through a point on the radius line through the center
+// makes it colinear with the radial ray itself. `round` and `square` both
+// extend the visible mark past this same endpoint along the tangent, which
+// is the rounded-edge/overshoot bug the owner reported; only `butt` draws no
+// such extension. This is what licenses the renderer to fix Stage C purely
+// with a linecap choice rather than by changing arcPath's already-exact
+// endpoint geometry.
+test("a circle's tangent at any point is exactly perpendicular to that point's radius", () => {
+  const cx = 450;
+  const cy = 360;
+  const radius = 200;
+  const epsilon = 1e-5;
+  for (const angle of [0, Math.PI / 6, Math.PI / 2, 2.3, -1.1, Math.PI]) {
+    const [x0, y0] = polar(cx, cy, radius, angle);
+    const [x1, y1] = polar(cx, cy, radius, angle + epsilon);
+    const tangent = [x1 - x0, y1 - y0];
+    const tangentLength = Math.hypot(...tangent);
+    const radial = [Math.cos(angle), Math.sin(angle)];
+    const cosineBetween = (tangent[0] * radial[0] + tangent[1] * radial[1]) / tangentLength;
+    assert.ok(
+      Math.abs(cosineBetween) < 1e-3,
+      `the tangent at angle ${angle} must be perpendicular to the radius there (cos ${cosineBetween})`
+    );
   }
 });

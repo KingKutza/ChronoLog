@@ -11,7 +11,7 @@
   <main id="app">
     <header id="hud" aria-label="ChronoLog controls">
       <div id="brand" aria-label="ChronoLog: a timeline instrument">ChronoLog</div>
-      <details id="create-menu">
+      <details id="create-menu" data-bar-dropdown>
         <summary aria-label="Create an object"><span class="responsive-label-long">New</span><span class="responsive-label-short" aria-hidden="true">+</span></summary>
         <div class="create-menu-panel">
           <button class="instrument-button" id="new-event" type="button"><strong>Event</strong><small>A scheduled point or span</small></button>
@@ -20,20 +20,23 @@
         </div>
       </details>
       <button class="instrument-button optional" id="new-frame" type="button" aria-controls="dock" aria-expanded="false">Frames</button>
-      <select class="select-control" id="active-calendar" aria-label="Active calendar"></select>
+      <details id="frame-select" data-bar-dropdown>
+        <summary aria-label="Frame"><span class="responsive-label-long">Frame:</span> <span class="frame-select-summary-value"></span></summary>
+        <div class="frame-select-panel" role="group" aria-label="Frame selection"></div>
+      </details>
       <div class="history-controls" aria-label="Edit history">
         <button class="icon-button" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
         <button class="icon-button" id="redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo (Ctrl+Shift+Z)">↷</button>
       </div>
       <span id="save-status" data-state="clean" role="status" aria-live="polite" aria-label="Save status: Saved" title="Saved"></span>
-      <details id="document-menu">
+      <details id="document-menu" data-bar-dropdown>
         <summary title="Document actions" aria-label="Document actions"><span class="responsive-label-long">Document</span><span class="responsive-label-short" aria-hidden="true">⋮</span></summary>
         <div class="document-menu-panel">
           <button class="instrument-button" id="manage-frames" type="button" aria-controls="dock" aria-expanded="false">Frames workspace</button>
           <button class="instrument-button" id="settings" type="button">Settings</button>
           <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
           <button class="instrument-button" id="lens-settings" type="button">Configure lenses</button>
-          <button class="instrument-button" id="dock-side" type="button" title="Move the dock to the other edge">Dock side</button>
+          <button class="instrument-button" id="dock-side" type="button" title="Move the dock to the other edge">Dock side: Right</button>
           <button class="instrument-button" id="new-pattern" type="button">Advanced patterns</button>
           <label class="status-chip" title="Keep one focus coordinate between projections"><input id="shared-focus" type="checkbox" checked>shared date</label>
           <button class="instrument-button" id="open-document" type="button">Open document</button>
@@ -59,7 +62,7 @@
            what the stage projects. -->
       <button class="view-bar-card" type="button" id="open-todos" aria-controls="dock"><span class="responsive-label-long">ToDo</span><span class="responsive-label-short" aria-hidden="true">Do</span></button>
       <button class="view-bar-card" type="button" id="open-notes" aria-controls="dock"><span class="responsive-label-long">Notes</span><span class="responsive-label-short" aria-hidden="true">Note</span></button>
-      <details id="hidden-lenses" hidden>
+      <details id="hidden-lenses" data-bar-dropdown hidden>
         <summary title="Hidden lenses" aria-label="Hidden lenses">⋯</summary>
         <div class="hidden-lens-panel"></div>
       </details>
@@ -87,6 +90,14 @@
         </div>
       </section>
     </div>
+
+    <!-- Every bar dropdown's panel portals in here while open (see
+         src/ui/toolbar.js's registerBarDropdown and src/app.css's
+         #dropdown-layer) — a plain sibling of the bars, not nested in any of
+         them, so its one z-index sits above all of #hud/#lens-bar/
+         #lens-controls at once instead of only the bar a panel happens to
+         live in. -->
+    <div id="dropdown-layer"></div>
 
     <input id="document-file" type="file" accept=".chronolog,.json,application/x-chronolog,application/json" hidden>
     <input id="ics-file" type="file" accept=".ics,text/calendar" multiple hidden>

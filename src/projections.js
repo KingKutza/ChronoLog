@@ -5,9 +5,10 @@ import {
   daysInMonth,
   daysToCivilCoordinate,
   floorMod,
-  formatCivil
+  formatCivil,
+  nowDays
 } from "./exact.js";
-import { radialCycleWindow, radialGuideSettings, radialRenderState } from "./radial.js";
+import { arcPath, polar, radialCycleWindow, radialGuideSettings, radialRenderState } from "./radial.js";
 import { objectKindForEvent } from "./object-kinds.js";
 import { factMatchesSelection } from "./session.js";
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
@@ -22,7 +23,7 @@ import {
   minimapLabelGranularity,
   minimapLabelTicks
 } from "./minimap.js";
-import { SIGIL_VOCABULARY, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
+import { SIGIL_VOCABULARY, factImportance, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -70,12 +71,16 @@ function layeredCalendarFrames(context, requestedFrame) {
     .filter(Boolean).map((frame) => [frame.id, frame])).values()];
 }
 
+// Display-facing: uses the isDisplayGroup union so a group's per-lens display
+// settings (Strategic promote/demote, per-calendar presence) and its color
+// still apply once it also carries the "importance" trait. Nothing that
+// authors or validates the document reads this.
 function factGroupFrame(context, fact) {
-  const direct = context.engine.eventGroupFrame(fact.event.id);
+  const direct = context.engine.eventDisplayGroupFrame(fact.event.id);
   if (direct) return direct;
   const pattern = context.document.patterns[fact.event.provenance?.pattern];
   return pattern?.templateEvent
-    ? context.engine.eventGroupFrame(pattern.templateEvent)
+    ? context.engine.eventDisplayGroupFrame(pattern.templateEvent)
     : null;
 }
 
@@ -125,18 +130,6 @@ function factColor(context, fact) {
   });
 }
 
-function factImportance(context, fact) {
-  const pattern = context.document.patterns[fact.event.provenance?.pattern];
-  const sourceId = pattern?.templateEvent || fact.event.id;
-  const source = context.document.events[sourceId] || fact.event;
-  if (source.traits?.includes("landmark")) return "landmark";
-  if (source.traits?.includes("important")) return "important";
-  const frame = context.engine.eventFrames(sourceId)
-    .map((id) => context.document.frames[id])
-    .find((candidate) => candidate?.traits?.includes("importance"));
-  return frame?.display?.importance || "standard";
-}
-
 function queryFacts(context, frame, startDays, endDays, limit = 800) {
   const { engine } = context;
   const frames = layeredCalendarFrames(context, frame);
@@ -146,7 +139,11 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
     if (mode !== "show") continue;
     // Group membership is composable (authored, queried, and recursively
     // inherited), so inclusion cannot be inferred from legacy attachments.
-    for (const eventId of engine.groupEventMembers(groupId)) {
+    // `groupId` may name an importance frame -- the Frames panel's per-
+    // calendar presence control offers one row per isDisplayGroup frame, so
+    // this must read the same union or an importance frame's "Include all"
+    // silently does nothing.
+    for (const eventId of engine.displayGroupEventMembers(groupId)) {
       for (const calendarId of engine.eventCalendarFrames(eventId)) {
         const calendar = context.document.frames[calendarId];
         if (!calendar) continue;
@@ -291,8 +288,8 @@ function bindFact(node, fact) {
   return node;
 }
 
-function applySigil(node, fact) {
-  const sigil = sigilForFact(fact, durationMinutes(fact.event));
+function applySigil(node, fact, context) {
+  const sigil = sigilForFact(fact, durationMinutes(fact.event), factImportance(context, fact));
   const vocabulary = SIGIL_VOCABULARY[sigil];
   node.dataset.sigil = sigil;
   node.dataset.sigilGlyph = vocabulary.glyph;
@@ -310,7 +307,7 @@ function eventChip(context, fact, compact = false) {
   const chip = element("button", `event-chip${compact ? " compact" : ""}${zoneClass}`);
   chip.type = "button";
   bindFact(chip, fact);
-  applySigil(chip, fact);
+  applySigil(chip, fact, context);
   chip.style.setProperty("--event-color", factColor(context, fact));
   chip.textContent = fact.event.payload?.title || "(untitled)";
   const frame = context.document.frames[fact.displayFrame || fact.relation?.frame || context.session.activeFrame];
@@ -472,7 +469,7 @@ function renderIntimate(target, context) {
       const button = element("button", `intimate-event${included ? " included-event" : ""}${float ? " float-event" : ""}${important ? " important-event" : ""}${continuation ? " continuation-event" : ""}`);
       button.type = "button";
       bindFact(button, item.fact);
-      applySigil(button, item.fact);
+      applySigil(button, item.fact, context);
       button.style.setProperty("--event-color", factColor(context, item.fact));
       button.style.top = `${item.start / 60 * hourPixels}px`;
       button.style.height = `${Math.max(13, (item.end - item.start) / 60 * hourPixels)}px`;
@@ -480,8 +477,15 @@ function renderIntimate(target, context) {
         button.style.right = `${3 + item.lane * 9}px`;
         button.style.width = `${Math.max(18, 36 - item.lane * 5)}%`;
       } else if (float) {
-        button.style.right = `${3 + item.lane * 7}px`;
-        button.style.width = `${Math.max(22, 42 - item.lane * 6)}%`;
+        // Right-edge anchoring is the ruling (ROADMAP #9: floats read as
+        // marginalia down the right of the day); it is not a reason to
+        // narrow one. Absent a genuine overlapping float, a float claims the
+        // full column, same as a lone timed event would -- only a real
+        // neighbour (item.laneCount, computed above for the float group same
+        // as it is for the timed group) may divide the width, mirrored from
+        // the right instead of the left.
+        button.style.right = `${item.lane / item.laneCount * 100}%`;
+        button.style.width = `calc(${100 / item.laneCount}% - 3px)`;
       } else {
         button.style.left = `${item.lane / item.laneCount * 100}%`;
         button.style.width = `calc(${100 / item.laneCount}% - 3px)`;
@@ -633,7 +637,7 @@ function monthCard(context, year, month, facts, detailed = false) {
         const pip = element("button", "event-pip");
         pip.type = "button";
         bindFact(pip, fact);
-        applySigil(pip, fact);
+        applySigil(pip, fact, context);
         pip.style.background = factColor(context, fact);
         pip.title = fact.event.payload?.title || "(untitled)";
         pips.append(pip);
@@ -690,7 +694,7 @@ function fixedMonthCard(context, frame, start, span, facts, detailed = false) {
         const pip = element("button", "event-pip");
         pip.type = "button";
         bindFact(pip, fact);
-        applySigil(pip, fact);
+        applySigil(pip, fact, context);
         pip.style.background = factColor(context, fact);
         pip.title = fact.event.payload?.title || "(untitled)";
         pips.append(pip);
@@ -787,7 +791,7 @@ function renderStrategic(target, context) {
           const pip = element("button", "event-pip");
           pip.type = "button";
           bindFact(pip, fact);
-          applySigil(pip, fact);
+          applySigil(pip, fact, context);
           pip.style.background = factColor(context, fact);
           pip.title = fact.event.payload?.title || "(untitled)";
           pips.append(pip);
@@ -912,7 +916,7 @@ function renderSimpleLines(target, context) {
     const y = primeY + point.offset;
     const dot = svgElement("circle", { cx: x, cy: y, r: point.clusterSize > 1 ? 5 : 4.5, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
     bindFact(dot, fact);
-    applySigil(dot, fact);
+    applySigil(dot, fact, context);
     const title = svgElement("title");
     title.textContent = `${fact.event.payload?.title || "(untitled)"}${point.clusterSize > 1 ? ` · ${point.clusterSize} nearby events` : ""}`;
     dot.append(title);
@@ -943,7 +947,7 @@ function renderSimpleLines(target, context) {
       if (shared) svg.append(svgElement("line", { x1: x, y1: primeY, x2: x, y2: y, stroke: "#51483d", "stroke-width": 1.5, "stroke-dasharray": "3 3" }));
       const dot = svgElement("circle", { cx: x, cy: y, r: shared ? 7 : 4.5, fill: frame.color || "#497bc1", stroke: shared ? "#2a2620" : "none", "stroke-width": 2, class: "line-event", tabindex: 0 });
       bindFact(dot, fact);
-      applySigil(dot, fact);
+      applySigil(dot, fact, context);
       const title = svgElement("title");
       title.textContent = `${fact.event.payload?.title || "(untitled)"}${shared ? " · staple" : ""}${point.clusterSize > 1 ? ` · ${point.clusterSize} nearby events` : ""}`;
       dot.append(title);
@@ -1017,7 +1021,7 @@ function renderTopologyLines(target, context, topology) {
     for (const point of positions) {
       const fact = { event: context.document.events[eventId], relation: point.attachment, coordinate: point.attachment.coordinate };
       const dot = svgElement("circle", { cx: xForEvent.get(eventId), cy: lane.get(point.attachment.frame) + point.offset, r: 6, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
-      bindFact(dot, fact); applySigil(dot, fact); const title = svgElement("title"); title.textContent = `${sigilDescription(fact, durationMinutes(fact.event))} · ${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
+      bindFact(dot, fact); applySigil(dot, fact, context); const title = svgElement("title"); title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact))} · ${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
     }
   }
   const status = svgElement("text", { x: width / 2, y: height - 18, "text-anchor": "middle", class: "lines-state" });
@@ -1025,24 +1029,32 @@ function renderTopologyLines(target, context, topology) {
   svg.dataset.linesState = orderedEvents.length ? "ordinary" : "empty"; target.append(svg);
 }
 
-function polar(cx, cy, radius, angle) {
-  return [cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius];
-}
-
-function arcPath(cx, cy, radius, startAngle, endAngle) {
-  const [x1, y1] = polar(cx, cy, radius, startAngle);
-  const [x2, y2] = polar(cx, cy, radius, endAngle);
-  const large = endAngle - startAngle > Math.PI ? 1 : 0;
-  return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius.toFixed(2)} ${radius.toFixed(2)} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
-}
-
-function radialEventPath(fact, attributes) {
-  const path = svgElement("path", { class: "radial-event-arc", tabindex: 0, pathLength: 1, ...attributes });
+// The arc's own endpoints (from arcPath, or from the per-sample spiral path
+// built in renderRadial) are already exact -- they sit exactly on the radial
+// ray of the start/stop date. A round stroke-linecap would bulge the rendered
+// mark past that exact endpoint along the path's tangent direction: on a
+// circular arc (Radial) the bulge is tangential, so the arc visually overshoots
+// its true start/stop angle; on the spiral it overshoots in the mixed
+// radial+angular travel direction.
+//
+// So this renderer deliberately sets NO stroke-linecap. The cap is decided once,
+// in `.radial-event-arc` in app.css, which is `butt` for exactly this reason.
+// Note the sibling paths in this file do set "stroke-linecap": "round" as an
+// attribute -- do not copy that here, and do not re-add a cap override: an
+// author style or attribute here would silently outrank the stylesheet and make
+// that CSS rule a dead letter.
+function radialEventPath(context, fact, attributes) {
+  const path = svgElement("path", {
+    class: "radial-event-arc",
+    tabindex: 0,
+    pathLength: 1,
+    ...attributes
+  });
   bindFact(path, fact);
-  const sigil = applySigil(path, fact);
+  const sigil = applySigil(path, fact, context);
   path.classList.add(`sigil-${sigil}`);
   const title = svgElement("title");
-  title.textContent = `${sigilDescription(fact, durationMinutes(fact.event))} · ${fact.event.payload?.title || "(untitled)"}`;
+  title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact))} · ${fact.event.payload?.title || "(untitled)"}`;
   path.append(title);
   return path;
 }
@@ -1057,17 +1069,8 @@ function radialEventLabel(layer, fact, x, y, labels, anchor = "start") {
   layer.append(label);
 }
 
-function currentDays() {
-  const now = new Date();
-  return new Rational(daysFromCivil(
-    BigInt(now.getFullYear()), BigInt(now.getMonth() + 1), BigInt(now.getDate())
-  )).add(Rational.parse(now.getHours()).div(24))
-    .add(Rational.parse(now.getMinutes()).div(1440))
-    .add(Rational.parse(now.getSeconds()).div(86400));
-}
-
 function radialNowLine(svg, start, end, turns = 1) {
-  const now = currentDays();
+  const now = nowDays();
   if (now.compare(start) < 0 || now.compare(end) > 0) return;
   const progress = now.sub(start).div(end.sub(start)).toNumber();
   const angle = -Math.PI / 2 + progress * turns * Math.PI * 2;
@@ -1219,7 +1222,7 @@ function renderRadial(target, context) {
         const [x, y] = polar(cx, cy, radius, angle);
         eventPath += `${sample ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
       }
-      svg.append(radialEventPath(fact, {
+      svg.append(radialEventPath(context, fact, {
         d: eventPath,
         stroke: factColor(context, fact),
         "stroke-width": durationMinutes(fact.event)
@@ -1302,7 +1305,7 @@ function renderRadial(target, context) {
         const radius = ringRadius(ring) + (item.lane - (laneCount - 1) / 2) * laneStep;
         const startAngle = -Math.PI / 2 + item.progress * Math.PI * 2;
         const endAngle = -Math.PI / 2 + item.end * Math.PI * 2;
-        svg.append(radialEventPath(item.fact, {
+        svg.append(radialEventPath(context, item.fact, {
           d: arcPath(cx, cy, radius, startAngle, endAngle),
           stroke: factColor(context, item.fact),
           "stroke-width": Math.max(factImportance(context, item.fact) === "landmark" ? 5 : 3, laneStep * 0.72)
@@ -1552,7 +1555,7 @@ export function renderMinimap(target, context) {
     x1: focusX, y1: gridTop - 4, x2: focusX, y2: gridTop + gridHeight + 4,
     class: "minimap-focus-line"
   }));
-  const now = currentDays();
+  const now = nowDays();
   if (now.compare(outerStart) >= 0 && now.compare(outerEnd) <= 0) {
     const nowX = positionFor(now);
     svg.append(svgElement("line", {
@@ -1566,4 +1569,9 @@ export function renderMinimap(target, context) {
 // Exposed for tests only: importance deciding whether an object renders at all is
 // exactly the kind of rule that must be pinned, and it cannot be reached through
 // renderProjection without a DOM.
-export { calendarFrames, groupFrames, strategicPresentation as strategicPresentationForTest };
+export {
+  calendarFrames,
+  groupFrames,
+  queryFacts as queryFactsForTest,
+  strategicPresentation as strategicPresentationForTest
+};

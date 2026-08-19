@@ -40,9 +40,20 @@ async function jsonBody(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+// `webcal://`/`webcals://` are the near-universal scheme publishers hand out
+// for ICS subscription links; they are just HTTP(S)-transported iCalendar,
+// so normalize them to `https://` before any validation runs. This is the
+// single normalization chokepoint for the whole subscription path (feed
+// creation and every re-pull both call `checkedUrl`), so a normalized URL
+// is always subjected to the full HTTPS/target validation below — it is
+// never a way around it. Plain `http://` is untouched and still rejected.
+export function normalizeFeedUrlScheme(value) {
+  return String(value || "").replace(/^webcals?:\/\//i, "https://");
+}
+
 function checkedUrl(value) {
-  const url = new URL(String(value || ""));
-  if (url.protocol !== "https:") throw new Error("Calendar feed URLs must use HTTPS");
+  const url = new URL(normalizeFeedUrlScheme(value));
+  if (url.protocol !== "https:") throw new Error("Calendar feed URLs must use HTTPS (webcal:// and webcals:// are accepted and treated the same as https://)");
   if (url.username || url.password) throw new Error("Put credentials in the feed's secret URL, not URL user-info fields");
   if (["localhost", "localhost.localdomain"].includes(url.hostname.toLowerCase()) || url.hostname.endsWith(".local")) {
     throw new Error("Calendar feeds cannot target this device or a private network");
