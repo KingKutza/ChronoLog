@@ -118,6 +118,16 @@ Rulings and additions (Don, 2026-08-17/18, KISS pass + dock/floats design):
   ruled "the most broken backward way to do what I said while undermining
   what I meant" and removed); stapling an arbitrary occurrence anchors the
   cycle's phase.
+- **The healing invariant** (series semantics, stated after weeks of
+  circling it): "any time we have a pattern we save the pattern and
+  project. Any time we have a deviation from the pattern, we override the
+  instance with an event. Any time that overriding event matches the
+  pattern, the event is removed and the projection reasserts. The series
+  of events leading up to the heal are irrelevant." Not fork-prevention —
+  convergence: the issue was never that a fork occurred but that it was
+  not healed. No-op edits, edit-then-revert, delete-then-recreate-in-place
+  are all the same case; redundant overrides are removed the moment they
+  stop deviating, regardless of history.
 - **The Rob-and-John scenario** (the correct usage pattern series stapling
   exists to support): Rob says "let's do Monday meetings — you always get
   in early on Mondays." John adds a Monday meeting, 6:15 to 6:30, repeat
