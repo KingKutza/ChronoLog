@@ -107,13 +107,107 @@ test("the view bar carries ToDo and Notes card triggers and a hidden-lens drop",
   // They come after the seven lenses, which is where the ruling puts them.
   assert.ok(bar.indexOf('data-lens="radial"') < bar.indexOf('id="open-todos"'));
   // Distinct styling is a requirement, not a nicety: they are not lenses.
-  assert.match(bar, /class="view-bar-card"[^>]*id="open-todos"/);
-  assert.match(bar, /class="view-bar-card"[^>]*id="open-notes"/);
+  // bug 3 additionally puts bar-control on these two, alongside view-bar-card
+  // (see the dedicated bar-control test below), so the class list is no
+  // longer exactly "view-bar-card" -- match the token, not the whole value.
+  assert.match(bar, /class="[^"]*\bview-bar-card\b[^"]*"[^>]*id="open-todos"/);
+  assert.match(bar, /class="[^"]*\bview-bar-card\b[^"]*"[^>]*id="open-notes"/);
 });
 
-test("the document bar carries a Settings entry point", async () => {
+// Bug 5 (8.19 Part Three): the standalone "Settings" button is gone — the
+// document control itself opens the settings/document dock card directly, so
+// a second entry point one click further in the same menu was redundant, not
+// a distinct destination.
+test("the document control is the settings entry point, not a separate Settings button", async () => {
   const html = await readSource("pocket-instrument.html");
-  assert.match(html, /id="settings"/);
+  assert.match(html, /id="document-menu"/);
+  assert.doesNotMatch(html, /id="settings"/);
+});
+
+// Bug 3: the lens bar's hamburger (#hidden-lenses) is the reported case, but
+// the generalized rule is that every bar control — on any of the three bars —
+// reaches its bar's full height as a property of the shared .bar-control
+// class, not a hand-picked min-height that happens to be close. This checks
+// every static bar control across the document bar and view bar carries it;
+// test/toolbar-dropdowns.test.js covers the dynamically-built context bar.
+test("every static bar control on the document bar and view bar carries the shared bar-control class", async () => {
+  const html = await readSource("pocket-instrument.html");
+  const hudStart = html.indexOf('<header id="hud"');
+  const hudEnd = html.indexOf("</header>", hudStart);
+  const hud = html.slice(hudStart, hudEnd);
+  const lensBarStart = html.indexOf('<nav id="lens-bar"');
+  const lensBarEnd = html.indexOf("</nav>", lensBarStart);
+  const lensBar = html.slice(lensBarStart, lensBarEnd);
+  // create-menu, frame-select, and document-menu are <details> whose actual
+  // clickable control is the child <summary>; new-frame is a plain button.
+  assert.match(hud, /<details id="create-menu"[^>]*>\s*<summary class="bar-control"/, "#create-menu's summary carries bar-control");
+  assert.match(hud, /<button class="[^"]*\bbar-control\b[^"]*" id="new-frame"/, "#new-frame carries bar-control");
+  assert.match(hud, /<details id="frame-select"[^>]*>\s*<summary class="bar-control"/, "#frame-select's summary carries bar-control");
+  assert.match(hud, /<details id="document-menu">\s*<summary class="bar-control"/, "#document-menu's summary carries bar-control");
+  for (const lens of ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"]) {
+    assert.match(lensBar, new RegExp(`class="bar-control"[^>]*data-lens="${lens}"`), `the ${lens} lens button carries bar-control`);
+  }
+  for (const id of ["open-todos", "open-notes", "lens-settings"]) {
+    assert.match(lensBar, new RegExp(`class="[^"]*\\bbar-control\\b[^"]*"[^>]*id="${id}"`), `#${id} carries bar-control`);
+  }
+  // The reported defect: the hamburger itself, sized as a full-height square
+  // instead of collapsing to its dashed border's content size.
+  assert.match(lensBar, /<summary class="bar-control square"[^>]*>⋯<\/summary>/, "#hidden-lenses's summary is a full-height square, the exact reported defect");
+});
+
+// Bug 4: Undo, the deliberate save, and Redo as one cluster at the right of
+// the document bar, immediately before the document control.
+test("the history controls are ordered Undo, Save, Redo and sit at the right of the document bar", async () => {
+  const html = await readSource("pocket-instrument.html");
+  const start = html.indexOf('<div class="history-controls"');
+  const end = html.indexOf("</div>", start);
+  assert.ok(start >= 0 && end > start, "the history-controls group exists");
+  const group = html.slice(start, end);
+  const order = [...group.matchAll(/id="(undo|save-document|redo)"/g)].map((match) => match[1]);
+  assert.deepEqual(order, ["undo", "save-document", "redo"], "Undo, save state, Do (redo) — the owner's literal ordering");
+  // "On the right of the bar": the history cluster comes after the frame
+  // select and save-status, and immediately precedes the document control,
+  // which is the bar's own rightmost, hamburger-like trigger.
+  const hudStart = html.indexOf('<header id="hud"');
+  const hud = html.slice(hudStart, html.indexOf("</header>", hudStart));
+  assert.ok(hud.indexOf('id="frame-select"') < hud.indexOf('class="history-controls"'));
+  assert.ok(hud.indexOf('id="save-status"') < hud.indexOf('class="history-controls"'));
+  assert.ok(hud.indexOf('class="history-controls"') < hud.indexOf('id="document-menu"'));
+});
+
+// Bug 5's audit, item by item: the document dropdown became a dock card
+// (#document-card-body) holding only genuinely document-scoped actions and
+// genuine settings; view-scoped items (Configure lenses, shared date) moved
+// to the view bar instead of staying nested under a "Documents" label.
+test("the document card holds the audited document/settings content, not the relocated view-bar items", async () => {
+  const html = await readSource("pocket-instrument.html");
+  const start = html.indexOf('<div id="document-card-body"');
+  const end = html.indexOf('<button id="manage-frames"', start);
+  assert.ok(start >= 0 && end > start, "the document card body exists");
+  const card = html.slice(start, end);
+  for (const id of [
+    "open-document", "save-as-document", "manage-frames-proxy", "new-pattern",
+    "sync-calendars", "import-ics", "export-ics", "theme-settings", "dock-side", "snapshot-period"
+  ]) {
+    assert.ok(card.includes(`id="${id}"`), `#${id} is on the document/settings card`);
+  }
+  // Relocated to the view bar, not left nested here under the document card.
+  for (const id of ["lens-settings", "shared-focus", "settings"]) {
+    assert.ok(!card.includes(`id="${id}"`), `#${id} is not on the document card any more`);
+  }
+  // Moved into the history-controls cluster, not the document card.
+  assert.ok(!card.includes('id="save-document"'), "Save now moved to the history-controls cluster");
+  // No redundant "Documents" label — the card's own title already says
+  // "Document"; only the internal Settings/actions split is named.
+  assert.doesNotMatch(card, />Documents</);
+});
+
+test("Configure lenses and shared date live on the view bar, not the document card", async () => {
+  const html = await readSource("pocket-instrument.html");
+  const lensBarStart = html.indexOf('<nav id="lens-bar"');
+  const lensBar = html.slice(lensBarStart, html.indexOf("</nav>", lensBarStart));
+  assert.ok(lensBar.includes('id="lens-settings"'));
+  assert.ok(lensBar.includes('id="shared-focus"'));
 });
 
 test("the shell provides the dock's rail, pager strip, and resize separator", async () => {

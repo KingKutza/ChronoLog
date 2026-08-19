@@ -5,11 +5,16 @@ import { Rational, coordinate, daysFromCivil, formatCivil } from "../src/exact.j
 import { importICS } from "../src/ics.js";
 import {
   CommandHistory,
+  addEvent,
+  addRelation,
   clearSeriesEndStaple,
+  durationMagnitude,
+  putStaple,
   seriesEndStaple,
   setSeriesEndStaple,
   validateDocument
 } from "../src/model.js";
+import { staplesForObject } from "../src/staples.js";
 import { createTransactions } from "../src/ui/transactions.js";
 import { createStructuralDocument } from "./helpers/sample-document.js";
 
@@ -232,5 +237,60 @@ test("deleting a pattern deletes its end-staple in the same undoable transaction
 
   app.history.redo();
   assert.equal(document.patterns[pattern.id], undefined);
+  assert.equal(document.relations[staple.id], undefined, "redo removes both again");
+});
+
+// The object-keyed sibling of the pattern-deletion cascade above. Staples on
+// an OBJECT (an anchor on an event) are new and had no cascade at all before
+// this wave: AGENTS.md's rule -- "deleting a pattern must delete its
+// overrides in the same undoable transaction" -- applies identically to an
+// event and its own staples, wired the same way (src/ui/transactions.js's
+// `cascadeRemovedObjects`, mirroring `cascadeRemovedPatterns`), not a second
+// mechanism.
+test("deleting an event deletes its object staples in one undoable transaction, and undo restores both together", () => {
+  const document = createStructuralDocument();
+  const shift = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("7", "hour") },
+    payload: { title: "Night shift" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: shift.id,
+    frame: "frame:wall-time",
+    role: "placed",
+    coordinate: civil(2026, 3, 2, 22, 0, 0)
+  });
+  const app = transactionsFor(document);
+  app.executeEventChange("Anchor the shift's end", shift.id, (documentValue) => {
+    putStaple(documentValue, {
+      object: shift.id,
+      kind: "anchor",
+      role: "end",
+      frame: "frame:wall-time",
+      coordinate: civil(2026, 3, 3, 5, 0, 0)
+    });
+  });
+  const staple = staplesForObject(document, shift.id)[0];
+  assert.ok(staple, "the anchor staple exists");
+
+  app.executeEventChange("Delete event", shift.id, (documentValue) => {
+    delete documentValue.events[shift.id];
+    for (const [id, relation] of Object.entries(documentValue.relations)) {
+      if (relation.event === shift.id) delete documentValue.relations[id];
+    }
+  });
+  assert.equal(document.events[shift.id], undefined, "the event is gone");
+  assert.equal(document.relations[staple.id], undefined, "its staple went with it, not left as a dangling pointer");
+  assert.equal(validateDocument(document).valid, true);
+
+  app.history.undo();
+  assert.ok(document.events[shift.id], "the event comes back");
+  assert.ok(document.relations[staple.id], "and its staple comes back with it, in the same undo step");
+  assert.deepEqual(staplesForObject(document, shift.id).map((item) => item.id), [staple.id]);
+  assert.equal(validateDocument(document).valid, true);
+
+  app.history.redo();
+  assert.equal(document.events[shift.id], undefined);
   assert.equal(document.relations[staple.id], undefined, "redo removes both again");
 });

@@ -2,10 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Rational } from "../src/exact.js";
 import {
+  DEFAULT_LENS_ORDER,
   INTIMATE_HOUR_PIXELS_MAX,
   INTIMATE_HOUR_PIXELS_MIN,
+  LENS_IMPORTANCE_THRESHOLD_DEFAULTS,
   LENS_VIEW_DEFAULTS,
   ViewSession,
+  factImportanceForLens,
   factMatchesSelection
 } from "../src/session.js";
 
@@ -311,4 +314,49 @@ test("seedOverlaysOnce is a no-op when the session already has its own companion
   const session = new ViewSession({ activeFrame: "calendar:personal", companionFrames: ["calendar:work"] });
   session.seedOverlaysOnce(chronolog);
   assert.deepEqual(session.companionFrames, ["calendar:work"], "an explicit selection is never overwritten by legacy document data");
+});
+
+// The promotion thresholds used to be one fixed global pair
+// (`IMPORTANCE_WEIGHT_THRESHOLD` in src/visual-language.js); the 8.19
+// weight-as-formula wave makes them per-lens and settable, defaulting to the
+// exact same numbers so a lens nobody has configured renders identically.
+test("every lens defaults to the exact 2/4 importance thresholds, and defaults are the same object every existing document has always used", () => {
+  assert.deepEqual(LENS_IMPORTANCE_THRESHOLD_DEFAULTS, { important: 2, landmark: 4 });
+  const session = new ViewSession();
+  for (const lens of DEFAULT_LENS_ORDER) {
+    assert.deepEqual(session.lensThresholds[lens], { important: 2, landmark: 4 }, `${lens} defaults to 2/4`);
+  }
+});
+
+test("per-lens thresholds are settable per lens and survive a ViewSession.toJSON round trip", () => {
+  const session = new ViewSession();
+  session.setLensThreshold("strategic", { important: 3, landmark: 6 });
+  assert.deepEqual(session.lensThresholds.strategic, { important: 3, landmark: 6 });
+  // Every other lens is untouched.
+  assert.deepEqual(session.lensThresholds.intimate, { important: 2, landmark: 4 });
+
+  const restored = new ViewSession(session.toJSON());
+  assert.deepEqual(restored.lensThresholds.strategic, { important: 3, landmark: 6 });
+  assert.deepEqual(restored.lensThresholds.intimate, { important: 2, landmark: 4 });
+});
+
+test("setLensThreshold ignores an unknown lens and normalizes garbage input to the defaults", () => {
+  const session = new ViewSession();
+  session.setLensThreshold("not-a-lens", { important: 99, landmark: 100 });
+  assert.equal(session.lensThresholds["not-a-lens"], undefined);
+
+  session.setLensThreshold("wall", { important: -5, landmark: "not-a-number" });
+  assert.deepEqual(session.lensThresholds.wall, { important: 2, landmark: 4 }, "invalid thresholds fall back to the defaults, not silently accepted");
+});
+
+test("factImportanceForLens compares the same composed weight against a caller-supplied threshold pair, while factImportance keeps the global default", () => {
+  const document = { events: {}, patterns: {}, frames: {} };
+  const engine = { eventFrames: () => [], eventDisplayGroupMemberships: () => [] };
+  const context = { document, engine };
+  const fact = { event: { id: "event:one", traits: ["event", "important"] } }; // base weight 2
+  // Global default thresholds (2/4): weight 2 crosses "important".
+  assert.equal(factImportanceForLens(context, fact), "important");
+  // A stricter per-lens threshold demands more to earn the same verdict.
+  assert.equal(factImportanceForLens(context, fact, { important: 3, landmark: 6 }), "standard");
+  assert.equal(factImportanceForLens(context, fact, { important: 1, landmark: 2 }), "landmark");
 });

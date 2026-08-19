@@ -8,7 +8,7 @@ import { createTransactions } from "../src/ui/transactions.js";
 import { createSampleDocument, createStructuralDocument } from "./helpers/sample-document.js";
 import { renderProjection } from "../src/projections.js";
 import { ChronologEngine } from "../src/engine.js";
-import { FIXED_RADIAL_CYCLES, resolveRadialCycle } from "../src/radial.js";
+import { FIXED_RADIAL_CYCLES, polar, resolveRadialCycle } from "../src/radial.js";
 import { daysFromCivil } from "../src/exact.js";
 
 // createTransactions(app) only reaches into app.chronolog/app.history/app.session,
@@ -464,20 +464,31 @@ test("Stage B3: two floats that genuinely overlap still lane side by side instea
   assert.equal(floatWithTitle(target, "Renew the parking permit")[0].style.width, "calc(100% - 3px)");
 });
 
-// Stage C (8.19 field report, owner item 6): "Spiral Still has rounded edges,
-// at the ends of the spirals, where it should terminate along the vertical
-// ray according to its start or stop date." The cap is now decided in exactly
-// one place -- `.radial-event-arc { stroke-linecap: butt }` in app.css -- and
-// the geometry proof that a butt cap on a circular arc lands exactly on the
-// radial ray lives in src/radial.js's arcPath/polar tests.
+// Stage C (8.19 field report, owner item 6) reported the TRACK's own rounded
+// end caps: "Spiral Still has rounded edges, at the ends of the spirals,
+// where it should terminate along the vertical ray according to its start
+// or stop date." The prior wave's fix conflated two distinct classes: it
+// gave the EVENT marks a flush `butt` cap (via `.radial-event-arc` in
+// app.css) instead of the TRACK, which kept drawing its own rounded caps
+// unchanged. Two 8.19 Part Three owner reports are the two halves of that
+// swap surfacing: "Spiral still has rounded end caps" (the track was never
+// actually fixed) and "Spiral Events lost rounded caps, and are not
+// perpendicular to the radial lines they sit on" (the events wrongly lost
+// theirs). The track's flat terminus is now handled as geometry
+// (spiralRibbonPath in src/radial.js, pinned in test/radial-stability.test.js)
+// and the event arc's round cap is restored here, along with the arc's own
+// perpendicular-to-its-radius geometry (also pinned below) -- distinct
+// claims, so a bug that swaps which class gets which treatment cannot pass
+// a test that only checks "something is flat".
 //
-// What this pins is the half of the contract that CSS cannot defend: the arc
-// renderer must not set a cap of its own. An inline style or a presentation
-// attribute here would outrank the stylesheet and make that rule a dead letter,
-// and the risk is live rather than theoretical -- sibling paths in the very same
-// renderer (the Lines lens, the radial guide rings) legitimately set
-// "stroke-linecap": "round", so copying that pattern onto an event arc is a
-// one-line regression that would restore the reported bug invisibly.
+// What this test pins is the half of the contract that CSS cannot defend:
+// the arc renderer must not set a cap of its own. An inline style or a
+// presentation attribute here would outrank the stylesheet and make that
+// rule a dead letter, and the risk is live rather than theoretical --
+// sibling paths in the very same renderer (the Lines lens, the radial guide
+// rings) legitimately set "stroke-linecap" as an attribute for their own
+// reasons, so copying that pattern onto an event arc is a one-line
+// regression that would silently override app.css's decision either way.
 function radialArcDocument() {
   const document = createStructuralDocument();
   document.frames["calendar:personal"] = {
@@ -522,7 +533,7 @@ function renderRadialFamilyFor(document, calendar, radialMode) {
 }
 
 for (const radialMode of ["concentric", "spiral"]) {
-  test(`Stage C: a rendered ${radialMode === "spiral" ? "Spiral" : "Radial"} arc leaves its flush cap to the stylesheet and never re-rounds it`, () => {
+  test(`Stage C: a rendered ${radialMode === "spiral" ? "Spiral" : "Radial"} event arc leaves its round cap to the stylesheet and never flattens it`, () => {
     const { document, calendar } = radialArcDocument();
     const target = renderRadialFamilyFor(document, calendar, radialMode);
     const arcs = findByClass(target, "radial-event-arc");
@@ -530,13 +541,64 @@ for (const radialMode of ["concentric", "spiral"]) {
     for (const arc of arcs) {
       const style = arc.attributes.get("style") || "";
       const attribute = arc.attributes.get("stroke-linecap") || "";
-      // A round or square cap extends the stroke past the arc's own exact
-      // endpoint, which is the reported overshoot past the start/stop date.
+      // A `butt` cap here would flatten the event mark's own sigil (a
+      // point-in-time indicator, not a boundary) -- that is the track's
+      // treatment, not an event's; see spiralRibbonPath's doc comment.
       assert.doesNotMatch(style, /stroke-linecap/, "the renderer sets no inline cap, so app.css stays the single decision point");
       assert.ok(
-        attribute === "" || attribute === "butt",
-        `the renderer must not present a rounded cap attribute (got "${attribute}")`
+        attribute === "" || attribute === "round",
+        `the renderer must not present a flush cap attribute that would override the round default (got "${attribute}")`
       );
     }
   });
 }
+
+// This is the other distinct claim in the same owner report: not just that
+// the cap is round, but that the mark's own long axis -- the arc's path
+// itself, independent of any cap -- sits perpendicular to the radius it
+// occupies, rather than skewed along the spiral's own mixed radial+angular
+// travel direction. A test that only checked the cap (above) would have
+// missed this half entirely: the previous per-sample spiral event path had
+// exactly the reported butt cap AND a tangent tilted away from perpendicular
+// by the spiral's own pitch.
+test("Stage C: a rendered Spiral event arc is a constant-radius arc, so its own long axis is exactly perpendicular to its own radius", () => {
+  const { document, calendar } = radialArcDocument();
+  const target = renderRadialFamilyFor(document, calendar, "spiral");
+  const arcs = findByClass(target, "radial-event-arc");
+  assert.ok(arcs.length > 0, "the event actually rendered an arc");
+  const cx = 450;
+  const cy = 360;
+  for (const arc of arcs) {
+    const d = arc.attributes.get("d");
+    const match = /^M ([\d.-]+) ([\d.-]+) A ([\d.-]+) [\d.-]+ 0 \d 1 ([\d.-]+) ([\d.-]+)/.exec(d);
+    assert.ok(match, `a Spiral event arc must be a single constant-radius A command, not a path sampled along the spiral's own growth (got "${d}")`);
+    const [mx, my, r, ex, ey] = match.slice(1).map(Number);
+    // Constant radius, not one end further out than the other the way the
+    // spiral's own track (or the old per-sample event path) would be.
+    assert.ok(Math.abs(Math.hypot(mx - cx, my - cy) - r) < 0.5, "the arc's start point must sit on its own declared radius");
+    assert.ok(Math.abs(Math.hypot(ex - cx, ey - cy) - r) < 0.5, "the arc's end point must sit on the same radius as its start");
+    // The numeric perpendicularity claim: estimate the tangent at the start
+    // point by stepping a small angle further around that same circle (same
+    // technique as radial-stability.test.js's circle-tangent proof, applied
+    // here to the actually-rendered geometry rather than a synthetic input).
+    // Epsilon must be large enough that the resulting displacement (r *
+    // epsilon) dominates the +/-0.005 quantization noise `d`'s toFixed(2)
+    // coordinates carry -- at 1e-4 that displacement is only ~0.02 units at
+    // a ~200 radius, the same order as the rounding noise itself, which
+    // manufactures a spurious few-percent "misalignment" out of thin air.
+    // 1e-2 keeps the chord-vs-true-tangent bias (epsilon/2) an order of
+    // magnitude below the old pitch-tilt bug's own ~0.12-0.15 cosine, so it
+    // stays a tight, discriminating check rather than a loose one.
+    const startAngle = Math.atan2(my - cy, mx - cx);
+    const epsilon = 1e-2;
+    const [nx, ny] = polar(cx, cy, r, startAngle + epsilon);
+    const tangent = [nx - mx, ny - my];
+    const tangentLength = Math.hypot(...tangent);
+    const radial = [Math.cos(startAngle), Math.sin(startAngle)];
+    const cosineBetween = (tangent[0] * radial[0] + tangent[1] * radial[1]) / tangentLength;
+    assert.ok(
+      Math.abs(cosineBetween) < 1e-2,
+      `the event mark's long axis must be perpendicular to the radius it sits on, not tangent-misaligned to the spiral's pitch (cos ${cosineBetween})`
+    );
+  }
+});

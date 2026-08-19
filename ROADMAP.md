@@ -11,10 +11,13 @@ the archive.
    checkbox, up/down on one line; descriptions with the tags; no
    scrolling); swap "jump to today" and "reset lens"; minimap dot
    tuning — more visibility into what counts as a dot and how dots
-   accumulate. The stage-takeover settings window is cut: settings
-   arrive incrementally in existing surfaces and dock cards (still
-   pending exposure: series projection horizon, snapshot-compaction
-   period — the server endpoint is live). Parked from the 8.19 wave:
+   accumulate. Bar controls derive their height from their bar through
+   one shared class rather than hand-picked pixel values. The
+   stage-takeover settings window is cut: settings arrive incrementally
+   in existing surfaces and dock cards — the document control opens a
+   document/settings card carrying the snapshot-compaction period, and
+   the series projection horizon is the one setting still unexposed,
+   because it is a literal in the engine with no field to bind to. Parked from the 8.19 wave:
    ToDo-tailored editor fields (recurrence rows, location, and
    calendar-vs-list framing are still event-shaped); exposing
    many-to-many event↔frame attachment in the editor (frame selection is
@@ -29,8 +32,11 @@ the archive.
    levels are groups whose handling (keep-range, decay, display weight) is
    a group property — composable, addable, removable, including irregular
    levels; the fixed standard/important/landmark enum retires into that
-   model (display-side unification shipped; the persisted migrations —
-   legacy trait strings, additive kind-switching — remain). **The Notes
+   model (display-side unification shipped, and display weight is now a
+   formula over the incoming weight with per-lens promotion thresholds —
+   see AGENTS.md, "Display weight"; keep-range and decay remain unbuilt
+   group properties, as do the persisted migrations — legacy trait
+   strings, additive kind-switching). **The Notes
    default is Obsidian-shaped**: a name, properties and tags (groups)
    under a rolled-up section, and a big markdown text window that renders
    everything except the line under the cursor in edit mode. Staples
@@ -51,31 +57,30 @@ the archive.
    meeting/event notes and for todos in linked folders. Markdown files
    are the interchange boundary for notes, as ICS is for calendars —
    severance doctrine, no plugin API coupling.
-4. **Staple anchoring** (see LEXICON.md, staple anchoring entry) — retire
-   the start-time-plus-duration assumption: a staple can anchor start,
-   end, midpoint, or another named point of an event, paired with a
-   magnitude; two or three staples derive the magnitude instead. Fuzzy
-   staples ("about 5ish") make uncertainty per-staple data. Constraint
-   bounds ("can't go later than 7:30") are adjacent and unruled. A series
-   is an identity whose rules are segments partitioned by staples (the
-   Rob-and-John scenario in LEXICON.md is the acceptance case): a staple
-   at an inflection point ends the reigning rule, and a new rule may
-   follow on the same series or a new series may begin, on preference.
-   The series end-staple ships: a `staple` relation carrying
-   `series`/`kind: "end"`/`frame`/`coordinate`, one shared derivation of
-   the effective stop as the earlier of the rule's own extent and the
-   staple, removal restoring the projection, ICS deriving UNTIL at
-   serialization rather than storing it, and the whole thing composing
-   with the healing invariant. Still open: start, midpoint and other
-   named-point anchors; magnitudes derived from staples; fuzzy staples;
-   an occurrence staple anchoring the cycle's phase; a new rule defined
-   after the staple; an end-staple under a COUNT rule (RFC 5545 forbids
-   COUNT with UNTIL); and exclusions as live references to another
-   frame's events (skip holidays = events on frame xyz) rather than baked
-   lists. Rule extent (indefinite) is distinct from projection horizon
-   (bounded, default ~2 years, settable). The authoring path must handle
-   end-anchored work shifts and irregular night-shift cycles; defining an
-   event — as opposed to a series — by an end staple still has no path.
+4. **Staple display and constraint staples** — the substrate ships (see
+   AGENTS.md, "Staples"): staples are an open collection on any object,
+   `kind` is validated against a registry rather than hardcoded, and the
+   derivations cover anchoring with derived magnitudes, series rule
+   segments, per-staple fuzziness, occurrence phase, and exclusions as
+   live references to another frame's events. The Rob-and-John scenario
+   passes beat by beat, end-anchored events place from where they stop,
+   and the editor authors the whole collection including the rule that
+   follows an inflection. What remains is display and one unruled
+   shape. **Fuzzy rendering**: uncertainty reaches the renderer as data
+   and is marked, but the display language for it is undesigned — a
+   spread wants sigils and zones that read at a glance without piling
+   information on the eye, the same problem #2's decay work faces, and
+   the two should be designed together. **Overdetermined anchors** are
+   reported and never averaged; how a lens should *show* that an
+   authored staple is not being believed is undesigned. **Constraint
+   bounds** ("can't go later than like 7:30/8") stay unruled — LEXICON.md
+   reads them as a bound distinct from the fuzzy actual, and the kind
+   registry is a one-entry path once the semantics are decided.
+   A named anchor point's relationship to a second anchor derives no
+   magnitude on purpose; whether it should is unruled. Rule extent
+   (indefinite) is distinct from projection horizon (bounded, ~2 years) —
+   the horizon is still a literal in the engine rather than a setting,
+   and exposing it is the last piece of #1's settings work.
 5. **Pattern authoring beyond the RRULE dropdown** — the repeat control
    is a rigid list of common Gregorian periods. "Every odd day of every
    even month of every odd year, except where any of those numbers is

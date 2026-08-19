@@ -11,7 +11,8 @@ import {
   radialGuideSettings,
   radialRenderState,
   resolveRadialCycle,
-  radialCycleWindow
+  radialCycleWindow,
+  spiralRibbonPath
 } from "../src/radial.js";
 import { daysFromCivil } from "../src/exact.js";
 
@@ -160,6 +161,66 @@ test("a circle's tangent at any point is exactly perpendicular to that point's r
     assert.ok(
       Math.abs(cosineBetween) < 1e-3,
       `the tangent at angle ${angle} must be perpendicular to the radius there (cos ${cosineBetween})`
+    );
+  }
+});
+
+// 8.19 Part Three: two owner reports turned out to be two halves of one
+// conflated bug. "Spiral still has rounded end caps" -- the TRACK (this
+// timeline's own spiral ribbon) never actually got the flat/flush treatment
+// the prior wave's fix intended; it still drew as a stroked path with
+// `stroke-linecap: round`. "Spiral Events lost rounded caps and are not
+// perpendicular to the radial lines they sit on" -- the prior wave's fix
+// landed on the EVENT marks instead (`.radial-event-arc` in app.css), which
+// should have kept their round caps.
+//
+// This test pins the TRACK half only, deliberately apart from the event-arc
+// tests in test/roster-lenses.test.js -- a test that only asserted "the
+// track is flat" would not have caught the swap, since the event arcs were
+// *also* flat. The two must be asserted as distinct claims so this class of
+// bug (a cap/terminus decision shared between a track and a mark) cannot
+// silently swap again.
+test("spiralRibbonPath's own two ends are exact flat cuts colinear with the vertical ray, not a cap perpendicular to the spiral's own tilted tangent", () => {
+  const cx = 450;
+  const cy = 360;
+  const normalize = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
+  const angleOf = ([x, y]) => Math.atan2(y - cy, x - cx);
+  for (const { inner, spacing, turns, samples, halfWidth } of [
+    { inner: 82, spacing: 78, turns: 1, samples: 180, halfWidth: 17 },
+    { inner: 82, spacing: 42, turns: 3, samples: 360, halfWidth: 30.6 },
+    { inner: 60, spacing: 20, turns: 2, samples: 240, halfWidth: 0.7 }
+  ]) {
+    const d = spiralRibbonPath(cx, cy, inner, spacing, turns, samples, halfWidth);
+    const points = [...d.matchAll(/[ML]([\d.-]+) ([\d.-]+)/g)].map(([, x, y]) => [Number(x), Number(y)]);
+    assert.equal(points.length, 2 * (samples + 1), "the polygon carries an outer and inner edge sample per progress step");
+    const outerStart = points[0];
+    const outerEnd = points[samples];
+    const innerEnd = points[samples + 1];
+    const innerStart = points[points.length - 1];
+    // The load-bearing claim: at each terminus, the outer and inner edge
+    // (offset radially, not tangent-normal) land on the exact same ray as
+    // each other -- so the segment joining them (the polygon's actual end
+    // edge) is colinear with that ray, by construction, regardless of the
+    // spiral's pitch at that point.
+    assert.ok(
+      Math.abs(normalize(angleOf(outerStart) - angleOf(innerStart))) < 1e-3,
+      "the start terminus's outer and inner edge must sit on the same ray"
+    );
+    assert.ok(
+      Math.abs(normalize(angleOf(outerEnd) - angleOf(innerEnd))) < 1e-3,
+      "the end terminus's outer and inner edge must sit on the same ray"
+    );
+    // And that shared ray is exactly the vertical ray both the start and
+    // stop date sit on -- true because `turns` (radialPast + radialFuture +
+    // 1, always floored by ViewSession) is always an integer, so progress 0
+    // and progress 1 are the same angle modulo a whole number of turns.
+    assert.ok(
+      Math.abs(normalize(angleOf(outerStart) + Math.PI / 2)) < 1e-3,
+      "the start terminus must sit on the vertical ray, the spiral's own start angle"
+    );
+    assert.ok(
+      Math.abs(normalize(angleOf(outerEnd) + Math.PI / 2)) < 1e-3,
+      "the end terminus must sit on the vertical ray too"
     );
   }
 });

@@ -177,3 +177,50 @@ export function arcPath(cx, cy, radius, startAngle, endAngle) {
   const large = endAngle - startAngle > Math.PI ? 1 : 0;
   return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius.toFixed(2)} ${radius.toFixed(2)} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
 }
+
+/**
+ * The closed outline of the Spiral lens's own timeline ribbon (the track,
+ * not an event) -- a filled polygon rather than a stroked open path, offset
+ * by `halfWidth` along each sample's RADIUS instead of perpendicular to the
+ * path's local tangent.
+ *
+ * A stroked path's cap can only ever cut perpendicular to its own tangent at
+ * the endpoint; on a spiral that tangent is a mix of angular and radial
+ * travel (the spiral's pitch), so no native `stroke-linecap` -- round, butt,
+ * or square -- can land exactly on the vertical ray the track starts/stops
+ * on, only near it. Radial offset sidesteps the tangent question entirely:
+ * `turns` is always a non-negative integer (`ViewSession` floors
+ * radialPast/radialFuture), so progress 0 and progress 1 land on the exact
+ * same ray (-PI/2 mod 2*PI radians). The two boundary points at each end
+ * therefore share that angle and differ only in radius, so the segment
+ * directly joining them is, by construction, colinear with the ray -- an
+ * exact flat terminus, not a rendering approximation of one.
+ *
+ * This is deliberately a different geometry strategy than an event mark's
+ * own path (see `renderRadial`'s spiral event loop in projections.js, which
+ * draws a constant-radius `arcPath` per event so its tangent is exactly
+ * perpendicular to its own radius): the track is one continuous multi-turn
+ * ribbon whose ends must read as flush cuts, while an event is a point-in-
+ * time mark whose rounded ends are the desired sigil, not a bug. Conflating
+ * the two into one cap decision is exactly the regression this fixes.
+ */
+export function spiralRibbonPath(cx, cy, inner, spacing, turns, samples, halfWidth) {
+  const outerEdge = [];
+  const innerEdge = [];
+  for (let index = 0; index <= samples; index += 1) {
+    const progress = index / samples;
+    const angle = -Math.PI / 2 + progress * turns * Math.PI * 2;
+    const radius = inner + progress * turns * spacing;
+    outerEdge.push(polar(cx, cy, radius + halfWidth, angle));
+    innerEdge.push(polar(cx, cy, Math.max(0, radius - halfWidth), angle));
+  }
+  let d = "";
+  outerEdge.forEach(([x, y], index) => {
+    d += `${index ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
+  });
+  for (let index = innerEdge.length - 1; index >= 0; index -= 1) {
+    const [x, y] = innerEdge[index];
+    d += `L${x.toFixed(2)} ${y.toFixed(2)} `;
+  }
+  return `${d}Z`;
+}

@@ -13,10 +13,17 @@ import {
   daysToCoordinate,
   durationMagnitude,
   durationMagnitudeDays,
-  seriesEndStaple,
   stableVirtualId,
   validateDocument
 } from "./model.js";
+import {
+  isLiveExcluded,
+  liveExclusionDays,
+  resolveObjectExtent,
+  seriesIsSegmented,
+  seriesPhaseDays,
+  seriesSegments
+} from "./staples.js";
 
 function rational(value) {
   return Rational.parse(value);
@@ -111,41 +118,50 @@ function monthDayCandidates(rule, year, month, baseDay) {
   return [...new Set(candidates)].sort(compareBigInt);
 }
 
-// The one derivation of an ics-rrule series' effective stop: the earlier of
-// the rule's own written extent (UNTIL; COUNT is a separate, independent
-// bound checked per-occurrence in `occurrenceFacts` below) and any end-staple
-// authored on that series (LEXICON.md's staple anchoring / Rob-and-John
-// scenario). The staple is never written into `rrule.UNTIL` -- the rule keeps
-// saying what it says, so removing the staple restores the full projection
-// for free. `occurrenceFacts` uses this directly; `src/ics.js` reuses it so an
-// exported RRULE's UNTIL can reflect the staple at serialization time without
-// the staple ever being stored in the rule. Comparison is exact Rational days
-// throughout (`compactIcsDay`, `coordinateDays`), never string equality --
-// ICS writes month "01" where the generator writes "1".
+// This series' rule change segment 0 is cut off at: the earlier of the rule's
+// own written extent (UNTIL) and whatever partitioning staple ends segment 0
+// (an "end" staple, or an "inflection" staple that hands off to a following
+// rule -- both partition, per src/staples.js's STAPLE_KINDS). Segment 0 IS
+// the pattern's own rrule, so this is exactly `segmentEffectiveUntilDays`
+// applied to `seriesSegments(...)[0]` -- kept as a named export because
+// `src/ics.js` reuses it to reflect the staple in an exported RRULE's UNTIL
+// at serialization time without the staple ever being written into the rule.
+// Comparison is exact Rational days throughout (`compactIcsDay`,
+// `coordinateDays`), never string equality -- ICS writes month "01" where the
+// generator writes "1".
 export function seriesEffectiveUntilDays(engine, pattern) {
-  const ruleUntil = compactIcsDay(pattern?.rrule?.UNTIL);
-  const staple = seriesEndStaple(engine.document, pattern?.id);
-  if (!staple) return ruleUntil;
-  let stapleDays;
-  try {
-    stapleDays = engine.coordinateDays(staple.frame, staple.coordinate);
-  } catch {
-    return ruleUntil;
-  }
-  if (!stapleDays) return ruleUntil;
-  if (!ruleUntil) return stapleDays;
-  return ruleUntil.compare(stapleDays) <= 0 ? ruleUntil : stapleDays;
+  return segmentEffectiveUntilDays(seriesSegments(engine, pattern)[0]);
 }
 
-function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
-  const document = engine.document;
-  const relation = document.relations[pattern.templateRelation];
-  const event = document.events[pattern.templateEvent];
-  if (!relation || !event?.id || !relation.coordinate) return [];
-  const base = engine.coordinateDays(relation.frame, relation.coordinate);
+// The earlier of a segment's own written RRULE UNTIL and the staple that
+// closes it (`segment.untilDays`, from src/staples.js's seriesSegments --
+// null for the series' final segment, which runs to whatever the caller's
+// query bounds are). One derivation shared by every segment, segment 0
+// included, which is what lets `seriesEffectiveUntilDays` above be a one-line
+// call rather than a second copy of this comparison.
+function segmentEffectiveUntilDays(segment) {
+  const ruleUntil = compactIcsDay(segment?.rrule?.UNTIL);
+  const stapleUntil = segment?.untilDays ?? null;
+  if (!stapleUntil) return ruleUntil;
+  if (!ruleUntil) return stapleUntil;
+  return ruleUntil.compare(stapleUntil) <= 0 ? ruleUntil : stapleUntil;
+}
+
+// One rule segment's own occurrence days within [lower, upper] -- the exact
+// generation math a single, un-segmented series has always used, now taking
+// its rule/base/bounds as parameters instead of reading them off `pattern`
+// directly. `occurrenceFacts` below calls this once per segment
+// (src/staples.js's seriesSegments) and concatenates.
+//
+// COUNT is counted from `base` and is therefore scoped to THIS segment alone
+// -- a segment is that rule's whole life, so counting emitted occurrences
+// across a rule change (into a segment whose rule may have a different FREQ
+// entirely) would count against a rule that no longer applies. `until` is
+// this segment's own effective stop (`segmentEffectiveUntilDays`): the
+// earlier of the rule's own written UNTIL and the staple that closes it.
+function ruleOccurrenceDays(rule, base, lower, upper, until, excluded, limit) {
   const baseWhole = base.floor();
   const time = base.sub(baseWhole);
-  const rule = pattern.rrule || {};
   const frequency = String(rule.FREQ || "").toUpperCase();
   const interval = BigInt(rule.INTERVAL || 1);
   if (interval <= 0n) throw new RangeError(`RRULE INTERVAL must be positive, got ${rule.INTERVAL}`);
@@ -153,8 +169,6 @@ function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
   if (count !== null && count > MAX_RRULE_COUNT) {
     throw new RangeError(`RRULE COUNT exceeds the safe limit of ${MAX_RRULE_COUNT}`);
   }
-  const until = seriesEffectiveUntilDays(engine, pattern);
-  const excluded = new Set(pattern.exdates || []);
   const days = [];
   let counted = 0n;
 
@@ -244,29 +258,140 @@ function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
     throw new Error(`Unsupported FREQ in RRULE: ${rule.FREQ || "(missing)"}`);
   }
 
-  return days.map((day) => {
-    const virtualId = stableVirtualId(pattern.id, `occurrence-${day.toJSON()}`);
-    const virtualEvent = {
-      ...event,
-      id: virtualId,
-      provenance: { kind: "pattern", pattern: pattern.id, key: day.toJSON() }
-    };
-    const virtualRelation = {
-      ...relation,
-      id: `${virtualId}/attachment`,
-      event: virtualId,
-      coordinate: engine.daysCoordinate(relation.frame, day),
-      provenance: { kind: "pattern", pattern: pattern.id, key: day.toJSON() }
-    };
-    return {
-      kind: "virtual",
-      virtualId,
-      event: virtualEvent,
-      relation: virtualRelation,
-      day: day.toJSON(),
-      coordinate: virtualRelation.coordinate
-    };
-  });
+  return days;
+}
+
+// A series projects per segment (LEXICON.md's Rob-and-John scenario: "a series
+// is an identity whose rules are segments partitioned by staples"). Every
+// segment's occurrences are generated by the same `ruleOccurrenceDays` a
+// single un-segmented series always used, clipped to that segment's own life,
+// and concatenated -- but EVERY fact from EVERY segment keeps the SAME
+// pattern provenance (`provenance.kind: "pattern", pattern: pattern.id`).
+// That is the whole point of the ruling: a rule change is not a new identity.
+//
+// Virtual ids stay `stableVirtualId(pattern.id, "occurrence-<day>")`, exactly
+// as an un-segmented series has always keyed them (so existing overrides and
+// materializations keep resolving after this change). Two segments can never
+// collide on a day: the boundary convention (src/staples.js) closes a segment
+// INCLUSIVELY at its own `untilDays` and the next segment is filtered to
+// STRICTLY AFTER that same instant below, so consecutive segments' day-ranges
+// are disjoint by construction, and that disjointness composes across any
+// number of segments because the partitioning staples are chronologically
+// ordered. The Rob-and-John acceptance test asserts this directly (no
+// duplicate virtual ids across the Monday/Thursday segments).
+function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
+  const document = engine.document;
+  const templateRelation = document.relations[pattern.templateRelation];
+  const templateEvent = document.events[pattern.templateEvent];
+  if (!templateRelation || !templateEvent?.id) return [];
+
+  // A phase staple (LEXICON.md: "stapling an arbitrary occurrence anchors the
+  // cycle's phase") replaces every segment's own base instant for cycle
+  // counting, without rewriting any segment's template -- removing it
+  // restores each segment's original phase for free. It is a property of the
+  // series as a whole, not of one segment, so it is resolved once here.
+  const phaseDays = seriesPhaseDays(engine, pattern);
+  const segments = seriesSegments(engine, pattern);
+  const facts = [];
+
+  for (const segment of segments) {
+    if (facts.length >= limit) break;
+    if (!segment.baseCoordinate) continue;
+    const frame = segment.frame || templateRelation.frame;
+    let templateBase;
+    try {
+      templateBase = engine.coordinateDays(frame, segment.baseCoordinate);
+    } catch {
+      continue;
+    }
+    const base = phaseDays !== null ? phaseDays : templateBase;
+    const until = segmentEffectiveUntilDays(segment);
+
+    // BOUNDARY CONVENTION (src/staples.js, load-bearing): a partitioning
+    // staple closes its segment INCLUSIVELY (folded into `until` above) and
+    // opens the next one EXCLUSIVELY. The exclusive open is enforced as a
+    // post-filter below rather than folded into the generator's own lower
+    // bound, so `ruleOccurrenceDays`'s skip-ahead optimizations stay exactly
+    // what they were for an un-segmented series; `segmentLower` only narrows
+    // the bound passed in for efficiency; it is not what makes the boundary
+    // exclusive.
+    const segmentLower = segment.fromDays !== null && segment.fromDays.compare(lower) > 0
+      ? segment.fromDays
+      : lower;
+    const segmentUpper = until !== null && until.compare(upper) < 0 ? until : upper;
+    if (segmentLower.compare(segmentUpper) > 0) continue;
+
+    const excluded = new Set(segment.exdates || []);
+    const remaining = limit === Infinity ? Infinity : limit - facts.length;
+    let days = ruleOccurrenceDays(segment.rrule || {}, base, segmentLower, segmentUpper, until, excluded, remaining);
+    if (segment.fromDays !== null) {
+      days = days.filter((day) => day.compare(segment.fromDays) > 0);
+    }
+
+    // Live exclusions (LEXICON.md's Rob-and-John beat 2): "skip holidays
+    // (events on frame xyz)" is a reference to another frame's events,
+    // resolved at projection time, resolved ONCE per query rather than once
+    // per occurrence -- adding a holiday to the referenced calendar changes
+    // this series with no edit to the series itself.
+    if (segment.exclude) {
+      const excludedDays = liveExclusionDays(engine, segment.exclude, segmentLower, segmentUpper);
+      if (excludedDays) days = days.filter((day) => !isLiveExcluded(excludedDays, day));
+    }
+
+    for (const day of days) {
+      const virtualId = stableVirtualId(pattern.id, `occurrence-${day.toJSON()}`);
+      // A following rule's `magnitude` (LEXICON.md's Rob-and-John scenario:
+      // "a different weekday AND a different time of day AND a different
+      // duration") overrides the template event's own duration for this
+      // segment's occurrences; absent, the template's own duration applies
+      // exactly as it always has.
+      const magnitudes = segment.magnitude
+        ? { ...templateEvent.magnitudes, duration: segment.magnitude }
+        : templateEvent.magnitudes;
+      const virtualEvent = {
+        ...templateEvent,
+        id: virtualId,
+        magnitudes,
+        provenance: { kind: "pattern", pattern: pattern.id, key: day.toJSON() }
+      };
+      const virtualRelation = {
+        ...templateRelation,
+        id: `${virtualId}/attachment`,
+        event: virtualId,
+        frame,
+        coordinate: engine.daysCoordinate(frame, day),
+        provenance: { kind: "pattern", pattern: pattern.id, key: day.toJSON() }
+      };
+      facts.push({
+        kind: "virtual",
+        virtualId,
+        event: virtualEvent,
+        relation: virtualRelation,
+        day: day.toJSON(),
+        coordinate: virtualRelation.coordinate
+      });
+      if (facts.length >= limit) break;
+    }
+  }
+
+  return facts;
+}
+
+// A cheap fingerprint of every staple relation in the document, used only to
+// decide whether `setDocument`'s `preserveRecurrence` request is actually
+// safe -- see the comment on `setDocument` below for the trap this closes.
+// Every field a staple's own derivations read (kind/frame/coordinate/payload/
+// role/spread, on top of which series or object it targets) participates, so
+// a staple's coordinate moving, its kind changing, or its following rule's
+// payload changing all change the signature; unrelated relations (any
+// non-staple) never do, which is what keeps this cheap on a document whose
+// edit had nothing to do with staples at all.
+function stapleSignature(document) {
+  const staples = Object.values(document?.relations || {})
+    .filter((relation) => relation?.type === "staple")
+    .map((relation) => JSON.stringify(relation))
+    .sort();
+  return staples.join(" ");
 }
 
 export class ChronologEngine {
@@ -276,8 +401,29 @@ export class ChronologEngine {
     this.setDocument(document);
   }
 
+  // CACHE INVALIDATION TRAP, closed here rather than per-caller: a staple
+  // edit changes what a pattern projects (a new end/inflection moves where a
+  // segment stops, a phase staple moves what a cycle counts from, an
+  // exclusion's referenced frame can change what a live reference drops), so
+  // `recurrenceSeries`/`recurrenceWindows` must never survive a staple change
+  // -- regardless of what `options.preserveRecurrence` claims. That flag is
+  // authored per call site by `src/ui/transactions.js` keyed on WHICH MAP a
+  // record lives in (`executeRecordChange`'s `mapName !== "patterns"`
+  // default), and a staple is a `relations` record -- the same map plain
+  // attachments and group memberships live in, which really can be edited
+  // with the recurrence cache safely preserved. A caller cannot tell those
+  // apart from the map name alone, so trusting the flag unconditionally would
+  // make "preserve" a per-kind special case that is only right until the next
+  // relations-map edit path happens to touch a staple. The general rule
+  // instead: compare the document's own staple relations before and after,
+  // independent of anything the caller believes it preserved, and only honor
+  // `preserveRecurrence` when staples provably did not change.
   setDocument(document, options = {}) {
-    const preserveRecurrence = options.preserveRecurrence === true && this.document === document;
+    const requestedPreserve = options.preserveRecurrence === true && this.document === document;
+    const currentStapleSignature = stapleSignature(document);
+    const staplesChanged = this.stapleSignature !== undefined && this.stapleSignature !== currentStapleSignature;
+    const preserveRecurrence = requestedPreserve && !staplesChanged;
+    this.stapleSignature = currentStapleSignature;
     this.document = document;
     this.compiledPatterns.clear();
     this.patternsForEveryFrame = [];
@@ -549,6 +695,27 @@ export class ChronologEngine {
     this.rebuildGroupMemberships();
   }
 
+  // Anchor-aware placement (src/staples.js's `resolveObjectExtent`, the
+  // end-anchored work shift LEXICON.md asks for): an object with no anchor
+  // staples must resolve BIT-IDENTICALLY to before this existed
+  // (`source: "placement"`, `day`/`coordinate` computed exactly as
+  // `attachmentDay` always has), which is the hard regression requirement
+  // test/staple-anchoring.test.js guards directly. An object anchored by a
+  // staple (an end anchor plus a magnitude, or two anchors that derive the
+  // magnitude themselves) is placed at its resolved extent instead, and the
+  // full extent rides along on the fact as an ADDED field (`fact.extent`) so
+  // a renderer can read spread/overdetermination without re-deriving them --
+  // existing fields and their meaning are untouched either way.
+  //
+  // The "completed" role is deliberately excluded from anchor placement: it
+  // names a distinct instant (when a todo was finished), not where the object
+  // sits, so an anchor on the object must not relocate it. Extent is still
+  // attached for information, just never used to move `day`/`coordinate`.
+  //
+  // `resolveObjectExtent` is looked up once per event id (not once per
+  // relation) via `extentByEvent` below -- a "completed" and a "placed"
+  // relation on the same event would otherwise pay for the same document-wide
+  // staple scan twice.
   indexedExplicitFacts(frameId) {
     const cached = this.explicitFactsByFrame.get(frameId);
     if (cached) return cached;
@@ -559,14 +726,24 @@ export class ChronologEngine {
     );
     const entries = [];
     let maxDuration = Rational.parse(0);
+    const extentByEvent = new Map();
     for (const relation of this.relationsByFrame.get(frameId) || []) {
       if (!relation.coordinate || templateRelations.has(relation.id)) continue;
       const event = this.document.events[relation.event];
       if (!event) continue;
-      const day = attachmentDay(this, relation);
+      let extent = extentByEvent.get(event.id);
+      if (extent === undefined) {
+        extent = resolveObjectExtent(this.document, this, event.id);
+        extentByEvent.set(event.id, extent);
+      }
+      const anchored = relation.role !== "completed"
+        && extent.startDays !== null
+        && (extent.source === "anchors" || extent.source === "anchor+magnitude");
+      const day = anchored ? extent.startDays : attachmentDay(this, relation);
       if (!day) continue;
-      const duration = eventDurationDays(event);
+      const duration = anchored ? extent.magnitudeDays : eventDurationDays(event);
       if (duration.compare(maxDuration) > 0) maxDuration = duration;
+      const coordinate = anchored ? this.daysCoordinate(extent.frame || relation.frame, day) : relation.coordinate;
       entries.push({
         day,
         fact: {
@@ -574,7 +751,8 @@ export class ChronologEngine {
           event,
           relation,
           day: day.toJSON(),
-          coordinate: relation.coordinate
+          coordinate,
+          extent
         }
       });
     }
@@ -585,7 +763,19 @@ export class ChronologEngine {
   }
 
   recurrenceFacts(pattern, lower, upper, limit) {
-    const hasCount = pattern.rrule?.COUNT !== undefined;
+    // The small-COUNT fast path below caches a whole rule's life by bounding
+    // it from `pattern.rrule`'s own INTERVAL/COUNT/FREQ (`horizon`, just
+    // below) -- correct only because an un-segmented rule's whole life IS
+    // that bound. A segmented series (src/staples.js's seriesSegments) can
+    // run on well past segment 0's own COUNT-bounded life -- the Rob-and-John
+    // scenario's Thursday-lunch segment is exactly this: indefinite, years
+    // after a bounded-looking first segment. So a segmented pattern is never
+    // routed through the horizon-bounded cache; it falls through to the
+    // windowed cache below, which always asks `occurrenceFacts` for the
+    // query's own true bounds and therefore stays correct across any number
+    // of segments.
+    const segmented = seriesIsSegmented(this, pattern);
+    const hasCount = !segmented && pattern.rrule?.COUNT !== undefined;
     const count = Number(pattern.rrule?.COUNT);
     if (hasCount && (
       !Number.isSafeInteger(count)

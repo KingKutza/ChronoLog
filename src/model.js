@@ -2,9 +2,16 @@ import {
   Rational,
   civilCoordinateToDays,
   coordinate,
-  daysToCivilCoordinate
+  daysToCivilCoordinate,
+  durationMagnitudeDays
 } from "./exact.js";
 import { mapSnapshot, opsFromMaps, putOp } from "./ops.js";
+import { STAPLE_KINDS, stapleKind, stapleTarget } from "./staples.js";
+
+// Re-exported from exact.js, where the arithmetic now lives (it reads the
+// nested-levels shape and touches no document). Kept exported here so every
+// existing caller's import path is unchanged.
+export { durationMagnitudeDays };
 
 export const SCHEMA_VERSION = "chronolog/1";
 
@@ -348,21 +355,107 @@ function validateTermination(document, relation, errors) {
   }
 }
 
-// A staple is a series' own end-of-rule inflection point, authored as data
-// rather than a rewrite of the rule (LEXICON.md's staple anchoring and the
+// A staple is a member of an OPEN COLLECTION on an object, authored as data
+// rather than a rewrite of anything (LEXICON.md's staple anchoring and the
 // Rob-and-John scenario). It is NOT the same concept as a `termination`
 // relation, which seals or staples a *line* in the time-travel taxonomy
 // (validateTermination, above) -- a staple's `series` names a pattern, a
-// termination's `line` names a frame, and the two never interchange.
-// Only the "end" kind is implemented this wave; other named-point staples
-// (start, midpoint, magnitude-from-staples, fuzzy) are ROADMAP #4's later
-// stages and are rejected here rather than silently accepted as a shape
-// nothing yet honours.
+// staple's `object` names an event, a termination's `line` names a frame, and
+// none of the three ever interchange.
+//
+// `kind` is validated against src/staples.js's STAPLE_KINDS registry rather
+// than hardcoded to "end", which is the mechanism the owner found missing:
+// "I see no clear mechanism to add an arbitrary number or type of staples."
+// Adding a kind is one registry entry plus its interpretation. An unregistered
+// kind is still refused, for the reason the original note here gave -- a kind
+// nothing honours is a shape that silently moves things on screen, or silently
+// fails to -- but the registry is now the extension path that was absent.
+//
+// Every shipped record (`{series, kind: "end", frame, coordinate}`) stays valid
+// with no migration: `object`, `role`, `spread` and `payload` are all optional.
+function validateMagnitudeShape(document, value, label, errors) {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object") {
+    errors.push(`${label} must be a magnitude object`);
+    return;
+  }
+  if (value.frame !== undefined && !document.frames?.[value.frame]) {
+    errors.push(`${label} references a missing frame`);
+  }
+  if (!Array.isArray(value.value?.levels)) errors.push(`${label} lacks a nested value`);
+}
+
 function validateStaple(document, relation, errors) {
-  if (!document.patterns?.[relation.series]) errors.push(`Staple ${relation.id} references a missing series`);
-  if (relation.kind !== "end") errors.push(`Staple ${relation.id} kind must be "end" (the only staple kind implemented so far)`);
+  const target = stapleTarget(relation);
+  if (!target.scope) {
+    errors.push(`Staple ${relation.id} must staple either a series or an object`);
+  } else if (relation.series && relation.object) {
+    errors.push(`Staple ${relation.id} staples both a series and an object; exactly one is allowed`);
+  } else if (target.scope === "series" && !document.patterns?.[target.id]) {
+    errors.push(`Staple ${relation.id} references a missing series`);
+  } else if (target.scope === "object" && !document.events?.[target.id]) {
+    errors.push(`Staple ${relation.id} references a missing object`);
+  }
+
+  const definition = stapleKind(relation.kind);
+  if (!definition) {
+    errors.push(
+      `Staple ${relation.id} kind must be one of ${Object.keys(STAPLE_KINDS).join(", ")}`
+    );
+  } else if (target.scope && !definition.targets.includes(target.scope)) {
+    errors.push(`Staple ${relation.id} kind "${relation.kind}" cannot staple a ${target.scope}`);
+  }
+
   if (!document.frames?.[relation.frame]) errors.push(`Staple ${relation.id} references a missing frame`);
   if (!isCoordinate(relation.coordinate)) errors.push(`Staple ${relation.id} coordinate must use nested levels`);
+
+  if (relation.role !== undefined && (typeof relation.role !== "string" || !relation.role.trim())) {
+    errors.push(`Staple ${relation.id} role must be a non-empty name`);
+  }
+
+  // Fuzziness is per-staple data, so it validates as data: two magnitudes,
+  // either of which may be absent. An asymmetric spread is the point -- "about
+  // 5ish" and a hard ceiling are different shapes.
+  if (relation.spread !== undefined) {
+    if (!relation.spread || typeof relation.spread !== "object") {
+      errors.push(`Staple ${relation.id} spread must be an object`);
+    } else {
+      validateMagnitudeShape(document, relation.spread.before, `Staple ${relation.id} spread before`, errors);
+      validateMagnitudeShape(document, relation.spread.after, `Staple ${relation.id} spread after`, errors);
+    }
+  }
+
+  // A following rule is only meaningful on a kind that partitions a series'
+  // rules. Carried inside the staple's own record so a rule change is one
+  // record-level op, journalled and undone like anything else.
+  const head = relation.payload?.rule;
+  if (head !== undefined) {
+    if (!definition?.carriesRule) {
+      errors.push(`Staple ${relation.id} kind "${relation.kind}" cannot carry a following rule`);
+    } else if (!head || typeof head !== "object") {
+      errors.push(`Staple ${relation.id} following rule must be an object`);
+    } else {
+      if (!head.rrule || typeof head.rrule !== "object") {
+        errors.push(`Staple ${relation.id} following rule requires an rrule`);
+      }
+      if (head.coordinate !== undefined && !isCoordinate(head.coordinate)) {
+        errors.push(`Staple ${relation.id} following rule coordinate must use nested levels`);
+      }
+      if (head.frame !== undefined && !document.frames?.[head.frame]) {
+        errors.push(`Staple ${relation.id} following rule references a missing frame`);
+      }
+      validateMagnitudeShape(document, head.magnitude, `Staple ${relation.id} following rule magnitude`, errors);
+      for (const frameId of head.exclude?.frames || (head.exclude?.frame ? [head.exclude.frame] : [])) {
+        if (!document.frames?.[frameId]) {
+          errors.push(`Staple ${relation.id} following rule excludes a missing frame`);
+        }
+      }
+    }
+  }
+
+  if (relation.payload?.offset !== undefined) {
+    validateMagnitudeShape(document, relation.payload.offset, `Staple ${relation.id} offset`, errors);
+  }
 }
 
 function validateDisplacement(document, relation, errors) {
@@ -449,36 +542,6 @@ export function durationMagnitude(value = "0", unit = "second", frame = "measure
     frame,
     value: coordinate([{ level: unit, value: String(value) }])
   };
-}
-
-// The one duration-in-days primitive: every level factor is exact, a
-// malformed level value (unparseable magnitude, e.g. from imported ICS data
-// ~169 MB of which is plausibly dirty) is tolerated rather than thrown, and a
-// negative-summing duration clamps to zero rather than corrupting a caller
-// that treats duration as a non-negative span (engine overlap/lookback
-// windows, a drag span, a duration shown in a form all agree: 0 reads better
-// than a thrown error or a negative span). This used to be forked into a
-// throwing/unclamped copy (`durationMagnitudeDays`, formerly here) and a
-// tolerant/clamped copy (`eventDurationDays`, formerly src/engine.js); this is
-// the single reconciled behavior both now share.
-export function durationMagnitudeDays(magnitude) {
-  const factors = {
-    week: "7",
-    day: "1",
-    hour: "1/24",
-    minute: "1/1440",
-    second: "1/86400"
-  };
-  let total = Rational.parse(0);
-  try {
-    for (const part of magnitude?.value?.levels || []) {
-      const factor = factors[part.level];
-      if (factor !== undefined) total = total.add(Rational.parse(part.value).mul(factor));
-    }
-  } catch {
-    return Rational.parse(0);
-  }
-  return total.compare(0) > 0 ? total : Rational.parse(0);
 }
 
 export function isZeroDuration(event) {
@@ -592,52 +655,112 @@ export function removeStaplesForPatterns(document, patternIds) {
   return count;
 }
 
+// The object-keyed sibling of `removeStaplesForPatterns`, just above. Staples
+// are an open collection on ANY object now, so an event's deletion has to
+// sweep its own staples exactly the way a pattern's deletion sweeps its own --
+// same invariant, same transaction. Otherwise a deleted event leaves staples
+// pointing at nothing, and one bad pointer takes the whole file offline at its
+// next load.
+export function removeStaplesForObjects(document, objectIds) {
+  const removed = objectIds instanceof Set ? objectIds : new Set(objectIds);
+  if (!removed.size) return 0;
+  let count = 0;
+  for (const [id, relation] of Object.entries(document?.relations || {})) {
+    if (relation?.type !== "staple" || !removed.has(relation.object)) continue;
+    delete document.relations[id];
+    count += 1;
+  }
+  return count;
+}
+
+// Placing and removing staples, generalized.
+//
+// The collection is open: an object may carry arbitrarily many staples of
+// arbitrary kind, arbitrarily placed (LEXICON.md). So `putStaple` ADDS by
+// default and only updates when handed an explicit `id`. The shipped
+// "re-placing updates the one staple" behavior survives in
+// `setSeriesEndStaple` below, because for a single end-staple editor field it
+// is still right -- but it is no longer what the substrate assumes about
+// staples in general, which is exactly the presupposition the owner rejected.
+//
+// Mutates in place like `suppressVirtual`/`stapleEvents` above; the caller
+// wraps this in a transaction.
+export function putStaple(document, input = {}) {
+  const existing = input.id ? document.relations?.[input.id] : null;
+  if (existing && existing.type === "staple") {
+    for (const key of Object.keys(existing)) {
+      if (key !== "id" && key !== "type") delete existing[key];
+    }
+    Object.assign(existing, clone({ ...input, id: existing.id, type: "staple" }));
+    touch(document);
+    return existing;
+  }
+  const relation = clone({
+    ...input,
+    id: input.id || createId("relation"),
+    type: "staple"
+  });
+  document.relations[relation.id] = relation;
+  touch(document);
+  return relation;
+}
+
+export function removeStaple(document, stapleId) {
+  const existing = document?.relations?.[stapleId];
+  if (!existing || existing.type !== "staple") return false;
+  delete document.relations[stapleId];
+  touch(document);
+  return true;
+}
+
+// Every staple on a series or an object, in a stable, deterministic order
+// (relation id). Deliberately not called authoring order: ids are random UUIDs
+// and carry no creation sequence. See `byStableOrder` in src/staples.js -- what
+// a tie-break needs is a total order identical across reload and journal
+// replay, which object key order does not promise.
+//
+// Requires a selector: an unfiltered call would return every staple in the
+// document, which no caller wants and which would silently "work" while
+// meaning something else entirely.
+export function staplesFor(document, { series = null, object = null } = {}) {
+  if (!series && !object) return [];
+  return Object.values(document?.relations || {})
+    .filter((relation) => relation?.type === "staple"
+      && (!series || relation.series === series)
+      && (!object || relation.object === object))
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+}
+
 // The one place that finds a series' end-staple, shared by the engine (the
 // projection intersects the rule's own extent with this), the series editor
 // (to show/clear it), and ICS export (to derive the effective UNTIL without
-// ever writing the staple into the rule). A series carries at most one --
-// this wave only implements the "end" kind.
+// ever writing the staple into the rule).
+//
+// A thin named wrapper over the open collection now, rather than the
+// substrate's own idea of a privileged record. `kind: "end"` is one registry
+// entry among several (src/staples.js); this is the convenience a
+// single-end-staple field still wants.
 export function seriesEndStaple(document, patternId) {
   if (!patternId) return null;
   return Object.values(document?.relations || {}).find((relation) =>
     relation?.type === "staple" && relation.series === patternId && relation.kind === "end") || null;
 }
 
-// Placing/removing a series' end-staple, in one derivation shared by the
-// series editor (src/ui/inspector.js) and tests. Mutates in place like
-// `suppressVirtual`/`stapleEvents` above -- the caller wraps this in a
-// transaction. Re-placing an existing staple updates it (one staple per
-// series, this wave), rather than accumulating a second record.
 export function setSeriesEndStaple(document, patternId, frame, coordinateValue, parameters = null) {
   const existing = seriesEndStaple(document, patternId);
-  if (existing) {
-    existing.frame = frame;
-    existing.coordinate = clone(coordinateValue);
-    if (parameters) existing.parameters = clone(parameters);
-    else delete existing.parameters;
-    touch(document);
-    return existing;
-  }
-  const relation = {
-    id: createId("relation"),
-    type: "staple",
+  return putStaple(document, {
+    ...(existing ? { id: existing.id } : {}),
     series: patternId,
     kind: "end",
     frame,
-    coordinate: clone(coordinateValue),
-    ...(parameters ? { parameters: clone(parameters) } : {})
-  };
-  document.relations[relation.id] = relation;
-  touch(document);
-  return relation;
+    coordinate: coordinateValue,
+    ...(parameters ? { parameters } : {})
+  });
 }
 
 export function clearSeriesEndStaple(document, patternId) {
   const existing = seriesEndStaple(document, patternId);
-  if (!existing) return false;
-  delete document.relations[existing.id];
-  touch(document);
-  return true;
+  return existing ? removeStaple(document, existing.id) : false;
 }
 
 export function stableVirtualId(patternId, key) {

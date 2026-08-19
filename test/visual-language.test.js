@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   SIGIL_VOCABULARY,
   THEME_PRESETS,
+  explainFactWeight,
   factImportance,
   factImportanceWeight,
   normalizeTheme,
@@ -328,6 +329,75 @@ test("AGENTS.md documents all shipping lenses and the contrast rule", async () =
   assert.match(document, /sole carrier/i);
   assert.match(document, /Object color inheritance/);
   assert.match(document, /group with the most event members wins/i);
+});
+
+// The 8.19 weight-as-formula wave rewired `factImportanceWeight` from an
+// unordered Set-of-frames multiplication into a canonical-order fold of each
+// contributing frame's weight *formula*. This is the headline regression
+// guard for that rewrite: a document nobody has authored a formula on --
+// plain numbers or nothing at all, exactly what every existing document
+// contains -- must produce the bit-identical weight and the bit-identical
+// three-string verdict it always has.
+test("REGRESSION GUARD: plain numeric weights (and absent weights) compose to the exact same weight and verdict as before formulas existed", () => {
+  const event = { id: "event:multi", traits: ["event"] };
+  const { document, engine } = weightFixture({
+    frames: {
+      "frame:a": { id: "frame:a", traits: ["set", "group"], display: { weight: 2 } },
+      "frame:b": { id: "frame:b", traits: ["set", "group"], display: { weight: 0.5 } },
+      "frame:c": { id: "frame:c", traits: ["set", "group"] } // no display.weight authored at all
+    },
+    memberships: ["frame:a", "frame:b", "frame:c"]
+  });
+  const context = { document, engine };
+  const fact = { event };
+  // 1 (standard base) * 2 * 0.5 * 1 (unauthored -> identity) = 1, the exact
+  // product the old unordered multiplicative model produced -- multiplication
+  // commutes, so canonical ordering changes nothing here, which is the point.
+  assert.equal(factImportanceWeight(context, fact), 1);
+  assert.equal(factImportance(context, fact), "standard");
+
+  // The three-string verdict space itself: legacy trait strings still take
+  // the same base weight they always have, unaffected by the formula rewrite.
+  const legacy = { id: "event:legacy", traits: ["event", "landmark"] };
+  assert.equal(factImportance({ document: { frames: {} }, engine: { eventFrames: () => [], eventDisplayGroupMemberships: () => [] } }, { event: legacy }), "landmark");
+});
+
+test("explainFactWeight: steps appear in canonical order with correct intermediate values, and the order is provably real", () => {
+  const event = { id: "event:one", traits: ["event"] };
+  const { document, engine } = weightFixture({
+    frames: {
+      "frame:add": { id: "frame:add", traits: ["set", "group"], title: "Additive", display: { weight: "w + 1" } },
+      "frame:mul": { id: "frame:mul", traits: ["set", "group"], title: "Multiplier", display: { weight: "w * 2" } }
+    },
+    memberships: ["frame:add", "frame:mul"]
+  });
+  // frame:add has the larger membership, so canonical order (larger group
+  // applies first, see src/weight-formula.js's weightContributionOrder)
+  // applies frame:add's "+1" before frame:mul's "*2".
+  engine.displayGroupEventMembers = (id) => Array.from({ length: id === "frame:add" ? 10 : 1 });
+  const context = { document, engine };
+  const explanation = explainFactWeight(context, { event });
+  assert.equal(explanation.base, 1);
+  assert.equal(explanation.baseVerdict, "standard");
+  assert.deepEqual(explanation.steps.map((step) => step.frame), ["frame:add", "frame:mul"]);
+  assert.equal(explanation.steps[0].title, "Additive");
+  assert.equal(explanation.steps[0].from, 1);
+  assert.equal(explanation.steps[0].to, 2, "1 + 1 = 2");
+  assert.equal(explanation.steps[1].title, "Multiplier");
+  assert.equal(explanation.steps[1].from, 2);
+  assert.equal(explanation.steps[1].to, 4, "2 * 2 = 4");
+  assert.equal(explanation.final, 4);
+  assert.equal(explanation.verdict, "landmark");
+  assert.equal(factImportanceWeight(context, { event }), 4, "factImportanceWeight agrees with explainFactWeight's final value");
+
+  // Prove order is real, not incidental: making frame:mul the larger group
+  // instead reverses the fold order and produces the OTHER answer these same
+  // two formulas can give -- mixed +/x genuinely does not commute.
+  engine.displayGroupEventMembers = (id) => Array.from({ length: id === "frame:mul" ? 10 : 1 });
+  const reordered = explainFactWeight(context, { event });
+  assert.deepEqual(reordered.steps.map((step) => step.frame), ["frame:mul", "frame:add"]);
+  assert.equal(reordered.final, 3, "1 * 2 + 1 = 3, the other answer, proving the fold order is not commutative");
+  assert.notEqual(reordered.final, explanation.final);
 });
 
 test("renderers apply the shared sigil data contract to block, pip, line, and radial marks", async () => {

@@ -306,6 +306,42 @@ export function levelValue(value, name, fallback = "0") {
   return entry ? entry.value : fallback;
 }
 
+// The one duration-in-days primitive: every level factor is exact, a
+// malformed level value (unparseable magnitude, e.g. from imported ICS data
+// ~169 MB of which is plausibly dirty) is tolerated rather than thrown, and a
+// negative-summing duration clamps to zero rather than corrupting a caller
+// that treats duration as a non-negative span (engine overlap/lookback
+// windows, a drag span, a duration shown in a form all agree: 0 reads better
+// than a thrown error or a negative span). This used to be forked into a
+// throwing/unclamped copy and a tolerant/clamped copy under the same name in
+// two modules; this is the single reconciled behavior both now share.
+//
+// It lives here rather than in model.js because it is exact arithmetic over
+// the nested-levels shape this module already owns (`coordinate`,
+// `levelValue`) and reaches for no part of a document. Keeping it here is also
+// what lets src/staples.js read magnitudes without importing model.js, which
+// would close an import cycle around validation. `model.js` re-exports it, so
+// every existing caller's import path is unchanged.
+export function durationMagnitudeDays(magnitude) {
+  const factors = {
+    week: "7",
+    day: "1",
+    hour: "1/24",
+    minute: "1/1440",
+    second: "1/86400"
+  };
+  let total = Rational.parse(0);
+  try {
+    for (const part of magnitude?.value?.levels || []) {
+      const factor = factors[part.level];
+      if (factor !== undefined) total = total.add(Rational.parse(part.value).mul(factor));
+    }
+  } catch {
+    return Rational.parse(0);
+  }
+  return total.compare(0) > 0 ? total : Rational.parse(0);
+}
+
 export function civilCoordinateToDays(value) {
   const year = BigInt(levelValue(value, "year", "1970"));
   const month = BigInt(levelValue(value, "month", "1"));

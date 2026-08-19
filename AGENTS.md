@@ -77,6 +77,14 @@ character when you touch adjacent code or docs.
 - `recurrence-end.js` — how an RRULE stops: COUNT/UNTIL mode detection, their
   mutual exclusion, and the UNTIL values for "ends on this date" (inclusive of
   the whole day) and "stop repeating here" (inclusive of that occurrence).
+- `staples.js` — the staple substrate: the open `STAPLE_KINDS` registry and
+  every derivation over an object's staple collection (anchoring and derived
+  magnitudes, series rule segments, per-staple fuzziness, occurrence phase,
+  live exclusion references). DOM-free and pure over `{document, engine}`, so
+  the whole substrate is a testable contract. See "Staples" below.
+- `weight-formula.js` — a frame's display-weight handling as a formula over the
+  incoming weight `w`, plus the canonical order contributing frames apply in.
+  See "Display weight" below.
 - `object-kinds.js` — trait bundles for Event/ToDo/Note-shaped objects.
 - `visual-language.js` — the sigil vocabulary, theme fields, and the 4-step
   color cascade; contains no DOM code so it is testable as a pure contract.
@@ -229,6 +237,156 @@ against their authored, strictly ordered boundary series — no averaging and
 no extrapolation past the series. Approximate fixed periods must carry
 `provenance.kind: "approximation"` and are never presented as observed or
 computed.
+
+### Staples
+
+A staple is a `relation` — `{type: "staple", series|object, kind, role?, frame,
+coordinate, spread?, payload?, parameters?}` — and staples are an **open
+collection** on any object: a series, an event, a todo, a note, or any future
+object carries arbitrarily many staples of arbitrary kind, arbitrarily placed.
+Nothing about ending a series is structural; `kind: "end"` is one registry
+entry whose interpretation happens to be "terminate, with no rule following".
+
+`series` names a pattern and `object` names an event; exactly one is present,
+and they never interchange — the same discipline that keeps a `termination`
+relation's `line` (a frame) distinct from a staple's `series`.
+
+`kind` is validated against `STAPLE_KINDS` in `src/staples.js`, not hardcoded.
+Adding a kind is one registry entry plus its interpretation. This is
+deliberately stricter than frame traits, which stay valid data when
+unfamiliar: a trait is a capability claim a renderer may ignore harmlessly,
+while a kind *selects a derivation*, and a kind nothing honours would silently
+move things on screen — or silently fail to. Registered kinds are `end` and
+`inflection` (both partition a series' rules; only `inflection` may carry a
+following rule), `phase`, and `anchor`. Constraint bounds ("can't go later
+than 7:30") are deliberately **not** registered — LEXICON.md marks them
+unruled, and registering a kind whose semantics nobody has decided would be
+inventing meaning.
+
+`src/staples.js` holds every derivation, DOM-free and pure over
+`{document, engine}`:
+
+1. **Anchoring.** `resolveObjectExtent` retires start-time-plus-duration as the
+   only shape. Role precedence is fixed — `start` > `end` > `midpoint` >
+   named. Zero anchors means the placement relation plus the object's own
+   duration, bit-identical to a document authored before staples existed. One
+   anchor plus a magnitude places the object, so an event can be *defined by
+   where it stops*. Two anchors fully determine the extent and the magnitude is
+   **derived**, with the object's own duration ignored rather than fought with;
+   the extent is placed from the highest-precedence anchor, which is not always
+   the earlier one (an `end`+`midpoint` pair starts at `2·mid − end`, earlier
+   than either anchor). Three or more anchors let the two highest-precedence
+   roles win, and every remaining anchor is reported in `overdetermined` and
+   **never averaged in** — an average of contradictory anchors is an invented
+   value, the same thing forbidden for coordinate mappings across a
+   discontinuity.
+2. **Series partitioning.** A series is one identity whose rules are segments
+   partitioned by staples (`seriesSegments`). A partitioning staple **closes
+   its segment inclusively and opens the next exclusively** — inclusive close
+   is the shipped end-staple's behavior, and given that, exclusive open is the
+   only choice that does not project the staple instant twice. A staple
+   carrying `payload.rule` (a rule head: `{rrule, coordinate?, frame?,
+   magnitude?, exdates?, exclude?}`) opens a following segment with its own
+   base coordinate; a partitioning staple with no following rule terminates the
+   series, which is exactly the degenerate one-staple case. COUNT counts
+   *within* a segment. Every segment's facts carry the same pattern provenance,
+   because a segmented series is still one identity.
+3. **Fuzzy staples.** `spread: {before, after}` is per-staple uncertainty,
+   asymmetric on purpose — "about 5ish" and a hard ceiling are different
+   shapes, and a single ± would flatten the distinction. Spreads **add** when a
+   magnitude is derived from two fuzzy anchors; independent uncertainties do
+   not cancel. The data and the derivation are the contract; fuzzy *rendering*
+   is a marker only, because the display language for uncertainty is not
+   designed and inventing one would be meaning inferred.
+4. **Occurrence phase.** A `phase` staple supplies the generator's base instant
+   without rewriting the template, so removing it restores the original phase
+   for free.
+5. **Exclusions as live references.** `exclude: {frames: [...]}` drops
+   occurrences colliding with events on the referenced frames, resolved **at
+   projection time**, never baked into `exdates`. Matched by whole day, not by
+   instant: a holiday is all-day, so a 6:15 meeting on that date must be
+   skipped. Adding a holiday to the referenced calendar changes the series with
+   no edit to the series.
+
+The rule keeps saying what it says. A staple is never written into
+`rrule.UNTIL`; `seriesEffectiveUntilDays` intersects the rule's own written
+extent with the staple at read time, which is what makes removing a staple
+restore the full projection for free. Every comparison is exact `Rational`
+days through `coordinateDays` — never string equality, because ICS writes
+month `"01"` where the generator writes `"1"`.
+
+Staples cascade like overrides: `removeStaplesForPatterns` and
+`removeStaplesForObjects` run inside the same undoable transaction as the
+record they belong to, so undo restores a deleted event or pattern together
+with its staples and the journal carries every removal. Every bundle helper in
+`src/ui/transactions.js` that can delete an event or a pattern sweeps staples,
+and so do `calendar-sync.js`'s `removeDanglingEventReferences` and
+`removeSourceOwnedRecords` — the reconciler can delete records too, so it needs
+the same sweep rather than a loader-side repair.
+
+Staples cross the ICS boundary like this:
+
+- **Segment 0** exports as one VEVENT with UNTIL (or a truncated COUNT) derived
+  at serialization from `seriesEffectiveUntilDays`. The staple is never written
+  into the rule. The gate is `seriesSegments(...)[0].untilDays != null`, not
+  `seriesIsSegmented` — a lone end-staple leaves exactly one segment, so the
+  broader guard would silently stop truncating end-staples.
+- **Following segments** export as sibling VEVENTs with a deterministic UID
+  (`<baseUid>.chronolog-segment-<n>`, byte-identical on re-export) carrying
+  `X-CHRONOLOG-SERIES`, `X-CHRONOLOG-SEGMENT-INDEX`, and
+  `X-CHRONOLOG-INFLECTION` (the partitioning staple's own coordinate, which is
+  authored separately from the following rule's first occurrence). Import
+  rejoins them into one `inflection` staple on the base pattern — one identity,
+  not a second series. A calendar that has never heard of ChronoLog still sees
+  the real meetings, which is why the later segments are exported at all rather
+  than hidden.
+- **Anchors and spreads** are ChronoLog-native. The *derived* extent exports as
+  ordinary DTSTART/DTEND so every other calendar shows correct times, and the
+  intent rides as one `X-CHRONOLOG-ANCHOR` / optional `X-CHRONOLOG-SPREAD` pair
+  per staple, correlated by an `ID` parameter. Magnitudes are exact `Rational`
+  day-fraction text (`"1/24"`), never a float. ICS has no nested-level
+  magnitudes, so a spread round-trips as an exact value collapsed to one level
+  rather than its authored level shape — a stated limitation, not a rounding.
+- An unanchored object exports byte-identically to before staples existed, and a
+  foreign ICS with none of these properties invents no staples. Meaning is
+  authored: an anchor role is never guessed from a title, category, or duration.
+- On reimport, staples resolve against the reimporting document's **own** frame,
+  because a fresh import always mints a new frame id; the exported `FRAME`
+  parameter is informational only.
+
+### Display weight
+
+A frame's weight handling is a **formula** in `chronolog-formula/1`, evaluated
+with the incoming weight bound to `w` — "if I can describe with basic algebra
+how membership should alter a member, then I should be able to do that". A
+plain number `n` is sugar for `w * n`, which is what migrates every shipped
+`display.weight` number with no record rewriting and no change in what it
+means. An absent, unparseable, or non-finite-result formula contributes
+nothing and acts as identity: a broken knob must never silently change what
+renders.
+
+Because mixed `+` and `×` do not commute, the fold order is part of the
+contract. Contributing frames apply in this order, folded left from the base
+weight: ascending `display.weightOrder` (absent = 0), then **group size
+descending** so the narrowest, most specific affiliation has the last word,
+then frame id as the final deterministic tie-break. Group size is already the
+color cascade's ordering signal, which is why it is reused here rather than a
+new one being invented.
+
+`factImportanceWeight` composes the weight and `factImportance` thresholds it;
+`explainFactWeight` returns the whole derivation (base, one step per
+contributing frame, final, verdict) so the editor can *show* how a weight was
+reached. Promotion thresholds are **per lens**, visible and editable on each
+lens's row in the lens workspace, defaulting to the 2 and 4 that were
+previously hardcoded so an untouched document renders identically.
+`IMPORTANCE_WEIGHT_THRESHOLD` in `src/visual-language.js` stays the one place
+those numbers live.
+
+Newly created **groups** default to a `w * 1.5` boost so an event crossing more
+frames is more prominent by default. Calendars do not, and imported calendar
+frames do not: every event has a calendar, so a uniform calendar boost promotes
+nothing relative to anything while pushing everything toward the landmark
+threshold. Existing records are never migrated.
 
 ### Visual grammar
 

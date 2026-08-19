@@ -6,7 +6,7 @@ import {
 } from "../exact.js";
 import { calendarFrames } from "../projections.js";
 import { FIXED_RADIAL_CYCLES, cyclePeriodHint, normalizeRadialGuideValues, radialGuideSettings, resolveRadialCycle } from "../radial.js";
-import { DEFAULT_LENS_ORDER, LENS_CATALOG } from "../session.js";
+import { DEFAULT_LENS_ORDER, LENS_CATALOG, LENS_IMPORTANCE_THRESHOLD_DEFAULTS } from "../session.js";
 import { createDropdownRegistry, exclusiveOpenSet, outsideInteractionCloses, panelPlacement, wrapFocusIndex } from "../panel-flip.js";
 import { parseDocument } from "../store.js";
 import { THEME_FIELDS, THEME_PRESETS, normalizeTheme } from "../visual-language.js";
@@ -107,6 +107,21 @@ export function createToolbar(app, dom) {
   // audit test all drive off dropdowns.ids()/values().
   const dropdownLayer = byId("dropdown-layer");
   const dropdowns = createDropdownRegistry();
+
+  // Bug 5 (8.19 Part Three): the document control opens a dock card instead
+  // of a floating dropdown panel. #document-card-body and #dock-side live
+  // inside the dock once the card has been opened at least once -- closing
+  // the card detaches its whole subtree from the document (dock.js's
+  // closeCard does `card.element.remove()`), so a fresh `byId(...)` call
+  // after that would return null. These references are captured once, here,
+  // before the card is ever opened, and reused for the life of the app
+  // instead of being re-queried -- a plain JS object reference stays valid
+  // even while its node is detached, which re-querying by id does not.
+  const documentMenuSummary = byId("document-menu").querySelector("summary");
+  const documentCardBody = byId("document-card-body");
+  const dockSideButton = byId("dock-side");
+  const snapshotPeriodField = byId("snapshot-period-field");
+  const snapshotPeriodInput = byId("snapshot-period");
 
   function returnDropdownHome(entry) {
     const { panel, home, next } = entry;
@@ -352,19 +367,28 @@ export function createToolbar(app, dom) {
     // The toggle used to just read "Dock side" — no indication of which side
     // is current or what pressing it does. The label now names the live
     // state directly; the title spells out the effect for anyone hovering.
-    const dockSide = byId("dock-side");
+    // `dockSideButton` is the cached reference (see its declaration above),
+    // not a fresh byId("dock-side") -- that call would return null once the
+    // document card has been opened and closed at least once.
     const otherSide = session.dockSide === "left" ? "right" : "left";
-    dockSide.textContent = `Dock side: ${session.dockSide === "left" ? "Left" : "Right"}`;
-    dockSide.title = `Move the dock to the ${otherSide} edge`;
-    dockSide.setAttribute("aria-label", dockSide.title);
+    dockSideButton.textContent = `Dock side: ${session.dockSide === "left" ? "Left" : "Right"}`;
+    dockSideButton.title = `Move the dock to the ${otherSide} edge`;
+    dockSideButton.setAttribute("aria-label", dockSideButton.title);
+    // The document control has no panel of its own any more (see
+    // pocket-instrument.html), so its aria-expanded is kept in sync with the
+    // dock card it opens here, the same way dock.js does for #new-frame/
+    // #manage-frames.
+    documentMenuSummary.setAttribute("aria-expanded", String(Boolean(app.dockCardBody?.("panel:document-settings"))));
     const lensBar = byId("lens-bar");
     for (const lens of session.lensOrder) {
       const button = lensBar.querySelector(`[data-lens="${lens}"]`);
       if (button) lensBar.append(button);
     }
-    // The ToDo/Notes buttons and the hidden-lens drop always sit after the lenses,
-    // whatever order the lenses themselves are in.
-    for (const id of ["open-todos", "open-notes", "hidden-lenses"]) {
+    // The ToDo/Notes buttons, the relocated view-wide tools (bug 5's audit —
+    // "shared date" and "Configure lenses" used to be misfiled under the
+    // document dropdown), and the hidden-lens drop always sit after the
+    // lenses, in this order, whatever order the lenses themselves are in.
+    for (const id of ["open-todos", "open-notes", "lens-bar-tools", "hidden-lenses"]) {
       const node = byId(id);
       if (node) lensBar.append(node);
     }
@@ -463,9 +487,12 @@ export function createToolbar(app, dom) {
     return repairs.length ? ` · ${repairs.map((repair) => repair.message).join(" · ")}` : "";
   }
 
-  function closeDocumentMenu() {
-    closeBarDropdown("document-menu");
-  }
+  // There is no `closeDocumentMenu` any more. The document dropdown became a
+  // dock card, so "document-menu" is never registered in `dropdowns` and the
+  // function could only ever have been a no-op that still looked like it did
+  // something. A call that reads as "close the menu" and closes nothing is the
+  // same trap as a fallback window that guesses: the next reader trusts it.
+  // Removed together with its three callers rather than left exported.
 
   function closeCreateMenu() {
     closeBarDropdown("create-menu");
@@ -550,7 +577,10 @@ export function createToolbar(app, dom) {
     const button = (text, action, title = "") => {
       const node = document.createElement("button");
       node.type = "button";
-      node.className = "lens-control";
+      // bar-control: the context bar stretches its children now (see
+      // .bar-control in app.css), which every context-bar control opts into
+      // the same way — not just the ones the owner happened to notice.
+      node.className = "lens-control bar-control";
       node.textContent = text;
       node.title = title;
       node.addEventListener("click", () => {
@@ -561,7 +591,7 @@ export function createToolbar(app, dom) {
     };
     const number = (labelText, value, min, max, action) => {
       const label = document.createElement("label");
-      label.className = "lens-control";
+      label.className = "lens-control bar-control";
       label.append(document.createTextNode(labelText));
       const input = document.createElement("input");
       input.type = "number";
@@ -578,7 +608,7 @@ export function createToolbar(app, dom) {
     };
     const checkbox = (labelText, value, action) => {
       const label = document.createElement("label");
-      label.className = "lens-control";
+      label.className = "lens-control bar-control";
       const input = document.createElement("input");
       input.type = "checkbox";
       input.checked = value;
@@ -591,7 +621,7 @@ export function createToolbar(app, dom) {
     };
     const select = (labelText, options, value, action) => {
       const label = document.createElement("label");
-      label.className = "lens-control";
+      label.className = "lens-control bar-control";
       label.append(document.createTextNode(labelText));
       const input = document.createElement("select");
       for (const [optionValue, optionText] of options) {
@@ -619,7 +649,7 @@ export function createToolbar(app, dom) {
     };
     const readout = (text) => {
       const node = document.createElement("span");
-      node.className = "lens-readout";
+      node.className = "lens-readout bar-control";
       node.textContent = text;
       return node;
     };
@@ -642,9 +672,10 @@ export function createToolbar(app, dom) {
     const hourLabel = (hour) => hour === 0 || hour === 24 ? "12 AM" : hour === 12 ? "12 PM" : `${hour % 12} ${hour < 12 ? "AM" : "PM"}`;
     const todayControl = button("◎", goToToday, "Center this lens on today");
     todayControl.id = "today";
-    todayControl.classList.add("today-target");
+    todayControl.classList.add("today-target", "square");
     const resetControl = button("↺", resetCurrentLensView, `Reset ${LENS_CATALOG[lens].title} view to defaults`);
     resetControl.id = "reset-view";
+    resetControl.classList.add("square");
     resetControl.setAttribute("aria-label", `Reset ${LENS_CATALOG[lens].title} view to defaults`);
     if (lens === "intimate") {
       const visibleHours = Math.max(1, (projection.clientHeight - 70) / session.intimateHourPixels);
@@ -774,6 +805,7 @@ export function createToolbar(app, dom) {
     options.className = "lens-control-overflow";
     options.open = optionsWasOpen;
     const summary = document.createElement("summary");
+    summary.className = "bar-control";
     summary.textContent = "Options";
     summary.title = `More ${lens} controls`;
     const optionPanel = document.createElement("div");
@@ -878,6 +910,15 @@ export function createToolbar(app, dom) {
     const { session } = app;
     let draftOrder = [...session.lensOrder];
     let draftEnabled = new Set(session.enabledLenses);
+    // Per-lens promotion thresholds, drafted alongside order and visibility so
+    // one Apply/Save commits the whole workspace. The owner's field report:
+    // "nor in the lenses setting window is there a clear way to see or
+    // configure the threshold." This is that surface -- the numbers are visible
+    // on every row, not buried, because a threshold you cannot see is a
+    // threshold you cannot reason about when an event does not appear.
+    let draftThresholds = Object.fromEntries(
+      draftOrder.map((lens) => [lens, { ...session.lensThresholds[lens] }])
+    );
     const wrapper = document.createElement("form");
     wrapper.className = "event-form";
     const note = document.createElement("p");
@@ -886,7 +927,7 @@ export function createToolbar(app, dom) {
     // into the drop at the bar's right end, where it stays reachable. Nothing is
     // deleted and no lens setting is lost, which is why this is a display choice
     // and lives in the view session rather than the document.
-    note.textContent = "Uncheck a lens to take it off the view bar. Hidden lenses stay reachable from the drop at the bar's right end, and keep all their own settings. Arrange the order here too; the number keys follow whatever order you see.";
+    note.textContent = "Uncheck a lens to take it off the view bar. Hidden lenses stay reachable from the drop at the bar's right end, and keep all their own settings. Arrange the order here too; the number keys follow whatever order you see. Each lens promotes an event to important or landmark once its composed display weight reaches that lens's threshold; a group's weight formula is authored on the frame itself.";
     // A dedicated class rather than the Frames panel's `.frame-group-list` /
     // `.frame-group-row` — those are also used by frames-panel.js's group
     // presence controls, which this wave does not touch, and the two lists
@@ -932,7 +973,44 @@ export function createToolbar(app, dom) {
           if (index >= 0 && index < draftOrder.length - 1) [draftOrder[index + 1], draftOrder[index]] = [draftOrder[index], draftOrder[index + 1]];
           render();
         });
-        row.append(enabled, previous, next, meta);
+        // The two promotion thresholds for this lens, editable in place. They
+        // share one scale with the composed display weight
+        // (`factImportanceWeight`), which is why they read as "≥ a weight"
+        // rather than as an opaque level: an event whose weight reaches the
+        // important threshold IS important in this lens.
+        const thresholds = document.createElement("span");
+        thresholds.className = "lens-threshold-fields";
+        const thresholdInput = (tier, label) => {
+          const field = document.createElement("label");
+          field.className = "lens-threshold-field";
+          const caption = document.createElement("small");
+          caption.textContent = label;
+          const input = document.createElement("input");
+          input.type = "number";
+          input.min = "0";
+          input.step = "0.1";
+          input.className = "lens-threshold-input";
+          input.name = `threshold-${tier}-${lens}`;
+          input.dataset.lens = lens;
+          input.dataset.tier = tier;
+          input.value = String(draftThresholds[lens]?.[tier] ?? LENS_IMPORTANCE_THRESHOLD_DEFAULTS[tier]);
+          input.title = `${spec.title}: promote to ${tier} at this composed display weight or above`;
+          // Held in the draft rather than pushed straight onto the session, so
+          // Restore defaults and Apply behave like every other control here.
+          input.addEventListener("input", () => {
+            const value = Number(input.value);
+            draftThresholds[lens] = {
+              ...draftThresholds[lens],
+              [tier]: Number.isFinite(value) && value >= 0
+                ? value
+                : LENS_IMPORTANCE_THRESHOLD_DEFAULTS[tier]
+            };
+          });
+          field.append(caption, input);
+          return field;
+        };
+        thresholds.append(thresholdInput("important", "Important ≥"), thresholdInput("landmark", "Landmark ≥"));
+        row.append(enabled, previous, next, thresholds, meta);
         list.append(row);
       }
     };
@@ -941,8 +1019,22 @@ export function createToolbar(app, dom) {
     actions.className = "inspector-actions";
     const restore = document.createElement("button");
     restore.type = "button"; restore.className = "instrument-button"; restore.textContent = "Restore defaults";
-    restore.addEventListener("click", () => { draftOrder = [...DEFAULT_LENS_ORDER]; draftEnabled = new Set(DEFAULT_LENS_ORDER); render(); });
-    const commit = () => session.configureLenses({ lensOrder: draftOrder, enabledLenses: [...draftEnabled] });
+    restore.addEventListener("click", () => {
+      draftOrder = [...DEFAULT_LENS_ORDER];
+      draftEnabled = new Set(DEFAULT_LENS_ORDER);
+      draftThresholds = Object.fromEntries(
+        DEFAULT_LENS_ORDER.map((lens) => [lens, { ...LENS_IMPORTANCE_THRESHOLD_DEFAULTS }])
+      );
+      render();
+    });
+    const commit = () => {
+      session.configureLenses({ lensOrder: draftOrder, enabledLenses: [...draftEnabled] });
+      // Thresholds go through the session's own setter so normalization lives
+      // in one place (src/session.js) rather than being re-derived here.
+      for (const [lens, thresholds] of Object.entries(draftThresholds)) {
+        session.setLensThreshold(lens, thresholds);
+      }
+    };
     // Apply makes the checked/ordered draft the live workspace without closing
     // the dialog — the same commit-without-close path the theme editor got
     // (owner item 13, generalized past the theme editor alone). It is cheap
@@ -1062,25 +1154,25 @@ export function createToolbar(app, dom) {
   // every registered dropdown uniformly — see its "Mutual exclusion" comment
   // above. Neither menu carries any special-case code of its own any more.
 
+  // theme-settings and dock-side now live on the document/settings dock card
+  // (see openDocumentCard below), not a dropdown — there is no menu left to
+  // close before opening the theme editor or flipping the dock side.
   byId("theme-settings").addEventListener("click", () => {
-    closeDocumentMenu();
     openThemeEditor();
   });
+  // "Configure lenses" moved from the document dropdown onto the view bar
+  // itself (bug 5's audit: it is view-scoped, not document-scoped) — see
+  // #lens-settings in pocket-instrument.html's <nav id="lens-bar">.
   byId("lens-settings").addEventListener("click", () => {
-    closeDocumentMenu();
     openLensWorkspace();
   });
-  byId("dock-side").addEventListener("click", () => {
-    closeDocumentMenu();
+  dockSideButton.addEventListener("click", () => {
     app.toggleDockSide();
   });
-  // Settings opens the surfaces that exist today. The settings takeover view that
-  // replaces the stage is ROADMAP #3; this button is the entry point it will
-  // inherit, so the owner has one predictable place to look in the meantime.
-  byId("settings").addEventListener("click", () => {
-    closeDocumentMenu();
-    openLensWorkspace();
-  });
+  // The standalone "Settings" entry point is gone: the document control
+  // (#document-menu) itself now opens the settings/document card directly,
+  // so a second control that did the same thing one click further in was
+  // redundant, not a distinct destination.
   byId("open-todos").addEventListener("click", () => app.openRoster("todo"));
   byId("open-notes").addEventListener("click", () => app.openRoster("note"));
 
@@ -1100,7 +1192,6 @@ export function createToolbar(app, dom) {
 
   byId("open-document").addEventListener("click", async () => {
     if (!confirmDocumentReplacement()) return;
-    closeDocumentMenu();
     if (!globalThis.showOpenFilePicker) {
       byId("document-file").click();
       return;
@@ -1146,7 +1237,6 @@ export function createToolbar(app, dom) {
 
   byId("save-document").addEventListener("click", async () => {
     const { store, chronolog } = app;
-    closeDocumentMenu();
     try {
       if (!store.handle && !store.api && LOCAL_WORKSPACE_TARGET.api) {
         // Nothing was attached, so this document has never been journaled.
@@ -1163,7 +1253,6 @@ export function createToolbar(app, dom) {
 
   byId("save-as-document").addEventListener("click", async () => {
     const { store } = app;
-    closeDocumentMenu();
     try {
       if (globalThis.showSaveFilePicker) await store.chooseFile();
       else store.download("chronolog.chronolog");
@@ -1176,6 +1265,88 @@ export function createToolbar(app, dom) {
   // compare-and-swap that made it necessary. Concurrent edits now collide per
   // record and merge in place, so there is no keep-both decision to put to the
   // owner.
+
+  // Bug 5: the document control opens #document-card-body as a dock card
+  // instead of a floating dropdown panel. A second click while it is already
+  // open closes it, the same toggle shape as the Frames browser trigger and
+  // the ToDo/Notes roster triggers.
+  function openDocumentCard() {
+    const cardId = "panel:document-settings";
+    if (app.dockCardBody(cardId)) {
+      app.closeDockCard(cardId);
+      return;
+    }
+    documentCardBody.hidden = false;
+    loadSnapshotPeriod();
+    app.openInspector("Document", documentCardBody, "document-settings");
+  }
+  documentMenuSummary.addEventListener("click", (event) => {
+    // Suppress the native <details> disclosure toggle entirely — this is a
+    // button dressed as a summary only so byId("document-menu").querySelector
+    // ("summary") keeps working for src/ui/frames-panel.js's and
+    // src/ui/inspector.js's existing focus-return calls.
+    event.preventDefault();
+    openDocumentCard();
+  });
+
+  // "Frames workspace" is genuinely document-scoped (it browses the
+  // document's own frame data) so it stays on the document card, but the
+  // real trigger (#manage-frames) stays permanently attached outside the
+  // dock — see its comment in pocket-instrument.html — because
+  // src/ui/frames-panel.js re-queries it by id every time the Frames browser
+  // opens. This proxy is the visible control on the card; it simply clicks
+  // the real one.
+  byId("manage-frames-proxy").addEventListener("click", () => {
+    byId("manage-frames").click();
+  });
+
+  // Snapshot-compaction period: ROADMAP #1 flags this as a still-unexposed
+  // setting with a live server endpoint (GET/PUT /api/settings,
+  // snapshotPeriodMinutes, default 10). It only means anything against the
+  // local server, so the field stays hidden without LOCAL_WORKSPACE_TARGET.api
+  // (e.g. a document opened straight off disk with no autosave target).
+  //
+  // Series projection horizon (ROADMAP #1's other still-unexposed setting) is
+  // deliberately not on this card: there is no server or session field it
+  // could bind to today (the ~2-year horizon is a literal in src/engine.js's
+  // occurrence expansion), and engine.js belongs to a concurrently-running
+  // worker this wave. Exposing a control with nothing behind it would be the
+  // half-fix the owner's standing order rules out.
+  async function loadSnapshotPeriod() {
+    if (!LOCAL_WORKSPACE_TARGET.api || !globalThis.fetch) {
+      snapshotPeriodField.hidden = true;
+      return;
+    }
+    snapshotPeriodField.hidden = false;
+    try {
+      const response = await globalThis.fetch("/api/settings");
+      if (!response.ok) throw new Error(await response.text() || "Could not read settings");
+      const settings = await response.json();
+      snapshotPeriodInput.value = String(settings.snapshotPeriodMinutes ?? 10);
+    } catch (error) {
+      app.toast(error.message, true);
+    }
+  }
+  snapshotPeriodInput.addEventListener("change", async () => {
+    const minutes = Number(snapshotPeriodInput.value);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      app.toast("Snapshot interval must be a positive number of minutes.", true);
+      return;
+    }
+    try {
+      const response = await globalThis.fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ snapshotPeriodMinutes: minutes })
+      });
+      if (!response.ok) throw new Error(await response.text() || "Could not save settings");
+      const settings = await response.json();
+      snapshotPeriodInput.value = String(settings.snapshotPeriodMinutes);
+      app.toast(`Snapshot interval set to ${settings.snapshotPeriodMinutes} minute${settings.snapshotPeriodMinutes === 1 ? "" : "s"}.`);
+    } catch (error) {
+      app.toast(error.message, true);
+    }
+  });
 
   window.addEventListener("keydown", (event) => {
     const { session, history } = app;
@@ -1281,7 +1452,6 @@ export function createToolbar(app, dom) {
     updateCalendarSelect: updateFrameSelect,
     updateChrome,
     updateLensControls,
-    closeDocumentMenu,
     reconcileRadialCycle,
     selectCycle,
     barDropdowns: dropdowns

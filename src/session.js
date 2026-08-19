@@ -8,6 +8,7 @@ import {
 import { clampDockWidth, normalizeDockSide } from "./dock-layout.js";
 import { FrameSelection } from "./frame-selection.js";
 import { normalizeRadialGuideValues, positiveRadialCycle } from "./radial.js";
+import { IMPORTANCE_WEIGHT_THRESHOLD, factImportanceWeight } from "./visual-language.js";
 
 const DEFAULT_DOCK_WIDTH = 1 / 3;
 
@@ -109,6 +110,45 @@ export const LENS_VIEW_DEFAULTS = Object.freeze({
   }),
   radial: Object.freeze({ radialLabels: true, radialDivisions: 0, radialMajorEvery: 0, radialMarks: "auto" })
 });
+// The importance-promotion thresholds used to be one fixed pair shared by
+// every lens (`IMPORTANCE_WEIGHT_THRESHOLD` in `src/visual-language.js`); the
+// owner's field report asked for a visible, configurable threshold per lens
+// instead. `IMPORTANCE_WEIGHT_THRESHOLD` stays the one place the numbers 2
+// and 4 are spelled out -- this just re-exports it under the name the lens
+// workspace UI reasons about, so a lens nobody has configured yet renders
+// exactly as it always has.
+export const LENS_IMPORTANCE_THRESHOLD_DEFAULTS = IMPORTANCE_WEIGHT_THRESHOLD;
+
+function normalizeLensThreshold(input) {
+  const important = Number(input?.important);
+  const landmark = Number(input?.landmark);
+  return {
+    important: Number.isFinite(important) && important >= 0 ? important : LENS_IMPORTANCE_THRESHOLD_DEFAULTS.important,
+    landmark: Number.isFinite(landmark) && landmark >= 0 ? landmark : LENS_IMPORTANCE_THRESHOLD_DEFAULTS.landmark
+  };
+}
+
+function normalizeLensThresholds(input = {}) {
+  const thresholds = {};
+  for (const lens of DEFAULT_LENS_ORDER) thresholds[lens] = normalizeLensThreshold(input?.[lens]);
+  return thresholds;
+}
+
+// The threshold-aware sibling of `factImportance` (`src/visual-language.js`):
+// same composed weight (`factImportanceWeight` remains the one seam that
+// computes it), compared against a caller-supplied `{ important, landmark }`
+// pair instead of the fixed global default. `factImportance` itself is
+// untouched and stays the default-threshold case every existing caller keeps
+// using -- this is additive, for the lens workspace once it renders and
+// edits `ViewSession#lensThresholds`.
+export function factImportanceForLens(context, fact, thresholds = LENS_IMPORTANCE_THRESHOLD_DEFAULTS) {
+  const weight = factImportanceWeight(context, fact);
+  const { important, landmark } = normalizeLensThreshold(thresholds);
+  if (weight >= landmark) return "landmark";
+  if (weight >= important) return "important";
+  return "standard";
+}
+
 const LENSES = DEFAULT_LENS_ORDER;
 const RADIAL_MODES = ["spiral", "concentric"];
 const INTIMATE_HOUR_PIXELS_MIN = 8;
@@ -262,6 +302,21 @@ export class ViewSession {
     this.dockWidth = clampDockWidth(input.dockWidth ?? DEFAULT_DOCK_WIDTH);
     // Append-only card order, rearranged only by the user dragging a handle.
     this.dockOrder = Array.isArray(input.dockOrder) ? [...input.dockOrder] : [];
+    // Per-lens importance-promotion thresholds -- view state, not document
+    // data, exactly like everything else in this constructor: which weight
+    // counts as "important" in Strategic says nothing about the timeline
+    // itself. Defaults to `LENS_IMPORTANCE_THRESHOLD_DEFAULTS` (2/4) for
+    // every lens, so a lens nobody has configured renders identically to
+    // before this setting existed.
+    this.lensThresholds = normalizeLensThresholds(input.lensThresholds);
+  }
+
+  // The one place a lens's thresholds change, so the lens workspace UI has a
+  // single call that validates and normalizes rather than writing
+  // `lensThresholds` directly.
+  setLensThreshold(lens, thresholds) {
+    if (!Object.hasOwn(LENS_CATALOG, lens)) return;
+    this.lensThresholds[lens] = normalizeLensThreshold({ ...this.lensThresholds[lens], ...thresholds });
   }
 
   currentFocus() {
@@ -530,7 +585,10 @@ export class ViewSession {
       selection: this.selection,
       dockSide: this.dockSide,
       dockWidth: this.dockWidth,
-      dockOrder: [...this.dockOrder]
+      dockOrder: [...this.dockOrder],
+      lensThresholds: Object.fromEntries(
+        Object.entries(this.lensThresholds).map(([lens, thresholds]) => [lens, { ...thresholds }])
+      )
     };
   }
 }
