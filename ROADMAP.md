@@ -32,6 +32,14 @@ Ordered by priority.
    today/reset buttons; blank space is fine, a time-span label spanning
    the bar is not. Option menus on Tactical open leftward and get cut by
    the window edge — panels must flip to stay inside the viewport.
+   Edge-flip and z-level are properties of one shared dropdown class —
+   every bar dropdown inherits them; no per-dropdown rediscovery (the
+   lenses hamburger rendering under the context bar was the second
+   instance of the same disease). The lens bar puts its hamburger on the
+   right edge and its options fill the bar's width. The dock-side toggle
+   gets a label. The lens workspace layout compacts: name, checkbox, and
+   up/down share a line; descriptions join the tags; no scrolling to see
+   the list.
 3. **Settings window** — theme, workspace defaults, dock side, layout
    presets, lens hiding, the series projection horizon (default ~2
    years), and the snapshot-compaction period (server endpoint already
@@ -77,7 +85,19 @@ Ordered by priority.
    levels; the fixed standard/important/landmark enum retires into that
    model. New notes and todos auto-anchor to now; notes and todos
    right-align in Intimate. Includes the sigils-and-zones display work and
-   an ICS path (VJOURNAL) so Notes round-trip. Open questions remain —
+   an ICS path (VJOURNAL) so Notes round-trip. **The Notes default is
+   Obsidian-shaped**: a name, properties and tags (groups) under a
+   rolled-up section, and a big markdown text window that renders
+   everything except the line under the cursor in edit mode. Staples
+   occur naturally at creation and edit, can be typed inline
+   ([8.19@7:22]) in the text, or entered as freeform fields/properties;
+   the note appears wherever it is stapled, and which staples render in
+   which lenses is configurable (per group or globally: every edit, only
+   creation, only inline references, only properties, combinations).
+   This generalizes: todos, events, and any future object carry
+   arbitrarily many staples of arbitrary type, arbitrarily placed, and
+   render accordingly. Advanced identity may build gestalt note-event
+   hybrids, but that is not the default. Open questions remain —
    this is labeled as work, not settled design. Field evidence for the
    retirement: converting a group named "important" to the legacy
    importance kind removes it from groups, stops it coloring its events,
@@ -117,26 +137,40 @@ Ordered by priority.
     authoring path must handle real cases like end-anchored work shifts
     and irregular night-shift cycles (event-defined periods already model
     the cycles; entry is the gap). Needs design.
-11. **Slim the retained ICS payload** — 93.8% of the owner's real document
+11. **Pattern authoring beyond the RRULE dropdown** — the repeat control
+    is a rigid list of common Gregorian periods. "Every odd day of every
+    even month of every odd year, except where any of those numbers is
+    prime" is a repeat pattern with no entry path — and the dropdown
+    plays worse still with non-Gregorian calendars. The formula language
+    exists for exactly this; the authoring surface doesn't. Needs design
+    alongside #10.
+12. **Custom calendars are first-class** — with custom day/month/year
+    names: the minimap must respect the new names; units must be
+    addable/removable; Strategic must adapt (full months per line, weeks
+    per line, custom month labels) and Wall the same; no artificial Now
+    line on a calendar with no now-mapping; jump-to-date must exist.
+    Epochs/ages need handling — BCE/CE, or first/second/third ages — as
+    part of the same model.
+13. **Slim the retained ICS payload** — 93.8% of the owner's real document
     is a per-event duplicate of its own parsed ICS node
     (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
     round-trip fidelity while storing the source once, not per event.
-12. **Control-bar aesthetics.**
-13. **New logo** — plain text until a better mark earns the spot.
-14. **More calendar subscriptions** — Google Calendar and other providers,
+14. **Control-bar aesthetics.**
+15. **New logo** — plain text until a better mark earns the spot.
+16. **More calendar subscriptions** — webcal:// URLs must work (normalize the scheme to https); Google Calendar and other providers,
     each through its published ICS URL.
-15. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
+17. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
     web, built on the journal's per-op foundation.
-16. **Mobile version** — Android first. The dock becomes a full-screen
+18. **Mobile version** — Android first. The dock becomes a full-screen
     sheet under a width breakpoint; card paging becomes swipe gestures.
-17. **Super-strategic band** — the lens beyond Strategic, which caps at 18
+19. **Super-strategic band** (owner naming candidate: the epoch view — decades to centuries to millennia or longer) — the lens beyond Strategic, which caps at 18
     months where this band would take over. Needs design.
-18. **Field-level merge** — real merging on top of per-op sequencing. Needs
+20. **Field-level merge** — real merging on top of per-op sequencing. Needs
     design.
-19. **Compiled native binaries** — the distribution end-state; the portable
+21. **Compiled native binaries** — the distribution end-state; the portable
     Node bundles are interim. Native shells may pop dock cards out into
     real second OS windows on desktop platforms.
-20. **The document's own timeline** — a lens over the journal itself:
+22. **The document's own timeline** — a lens over the journal itself:
     scroll back through what the document was, watch a deleted series
     vanish and return. The journal already records every op; this is the
     view it makes possible. The very far bottom, on purpose.
