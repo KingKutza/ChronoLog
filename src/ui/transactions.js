@@ -1,4 +1,10 @@
-import { clone, overridePatternId, removeOverridesForPatterns, removeStaplesForPatterns } from "../model.js";
+import {
+  clone,
+  overridePatternId,
+  removeOverridesForPatterns,
+  removeStaplesForObjects,
+  removeStaplesForPatterns
+} from "../model.js";
 import { bundleOps, recordOps } from "../ops.js";
 import { applySeriesHeal, healCandidateIds, planSeriesHeal } from "../series-heal.js";
 
@@ -31,6 +37,25 @@ export function createTransactions(app) {
     if (!patternIds.size) return tracked;
     for (const [id, relation] of Object.entries(documentValue.relations)) {
       if (relation.type === "staple" && patternIds.has(relation.series)) tracked.add(id);
+    }
+    return tracked;
+  }
+
+  // The object-keyed sibling of `trackPatternStaples`, just above. A staple on
+  // an OBJECT belongs to that object the way a staple on a series belongs to
+  // its pattern, so a bundle that can delete an event has to track that
+  // event's own staples the same way it tracks its series' staples -- or undo
+  // would restore the event without them.
+  function trackObjectStaples(documentValue, objectIds, tracked) {
+    // `removeStaplesForObjects` (model.js) accepts either a Set or a plain
+    // iterable; every caller here passes whichever shape it already has on
+    // hand (an array in `captureEventBundle`, a Set in `captureEventSetBundle`
+    // and `capturePatternBundle`), so this normalizes the same way rather than
+    // assuming one shape.
+    const ids = objectIds instanceof Set ? objectIds : new Set([...(objectIds || [])].filter(Boolean));
+    if (!ids.size) return tracked;
+    for (const [id, relation] of Object.entries(documentValue.relations)) {
+      if (relation.type === "staple" && ids.has(relation.object)) tracked.add(id);
     }
     return tracked;
   }
@@ -79,6 +104,20 @@ export function createTransactions(app) {
     removeStaplesForPatterns(documentValue, removed);
   }
 
+  // The object-keyed sibling of `cascadeRemovedPatterns`, just above, and the
+  // actual cascade AGENTS.md asks for: "deleting an event must delete its
+  // overrides [staples] in the same undoable transaction." Scoped to the
+  // bundle's own candidate event ids for the same reason the pattern sweep is
+  // scoped to its own patterns — sweeping every orphaned object staple in the
+  // document is the load-time repair's job, not one edit's.
+  function cascadeRemovedObjects(documentValue, candidateEventIds) {
+    const removed = new Set();
+    for (const eventId of candidateEventIds || []) {
+      if (eventId && !documentValue.events[eventId]) removed.add(eventId);
+    }
+    removeStaplesForObjects(documentValue, removed);
+  }
+
   // `replacedEventIds` / the extra `events` entries exist for the same reason as in
   // capturePatternBundle: editing a series' template event can converge one of that
   // series' exceptions, and the heal then deletes an event that is NOT `eventId`. The
@@ -102,6 +141,11 @@ export function createTransactions(app) {
     for (const override of Object.values(overrides)) {
       for (const id of override.replacements || []) if (id !== eventId) replaced.add(id);
     }
+    // This event's own object staples, and the staples of any event a heal
+    // already replaced it with -- both are "records this bundle can delete",
+    // so both travel with it the same way a series' staples travel with its
+    // pattern (`trackPatternStaples`, above).
+    trackObjectStaples(documentValue, [eventId, ...replaced], trackedStaples);
     return {
       event: clone(documentValue.events[eventId]),
       relations: Object.fromEntries(Object.entries(documentValue.relations)
@@ -144,7 +188,10 @@ export function createTransactions(app) {
         || bundlePatterns.has(overridePatternId(override))) delete documentValue.overrides[id];
     }
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.type === "staple" && bundlePatterns.has(relation.series)) delete documentValue.relations[id];
+      if (relation.type !== "staple") continue;
+      if (bundlePatterns.has(relation.series)
+        || relation.object === eventId
+        || replaced.has(relation.object)) delete documentValue.relations[id];
     }
     if (bundle.event) documentValue.events[eventId] = clone(bundle.event);
     else delete documentValue.events[eventId];
@@ -175,6 +222,13 @@ export function createTransactions(app) {
           eventIds: [eventId],
           patternIds: Object.keys(before.patterns || {})
         });
+        // A first, provisional capture just to learn the full post-mutation
+        // `replacedEventIds` (including anything a heal just converged away),
+        // so the object-staple cascade below sees the same candidate set the
+        // final capture will -- then the real capture runs after the cascade
+        // so `after` reflects the post-cascade state that gets journaled.
+        const provisional = captureEventBundle(documentValue, eventId, before.trackedOverrideIds, before);
+        cascadeRemovedObjects(documentValue, [eventId, ...(provisional.replacedEventIds || [])]);
         after = captureEventBundle(documentValue, eventId, before.trackedOverrideIds, before);
       }
       Object.assign(metadata, bundleOps(before, after, { eventId }));
@@ -187,6 +241,7 @@ export function createTransactions(app) {
       .filter(([, pattern]) => ids.has(pattern.templateEvent)).map(([id, pattern]) => [id, clone(pattern)]));
     const tracked = trackPatternOverrides(documentValue, patterns, new Set());
     const trackedStaples = trackPatternStaples(documentValue, patterns, new Set());
+    trackObjectStaples(documentValue, ids, trackedStaples);
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (override.replacements?.some((eventId) => ids.has(eventId))) tracked.add(id);
     }
@@ -206,7 +261,9 @@ export function createTransactions(app) {
     const ids = new Set(eventIds);
     for (const id of ids) delete documentValue.events[id];
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (ids.has(relation.event)) delete documentValue.relations[id];
+      if (ids.has(relation.event) || (relation.type === "staple" && ids.has(relation.object))) {
+        delete documentValue.relations[id];
+      }
     }
     for (const [id, pattern] of Object.entries(documentValue.patterns)) {
       if (ids.has(pattern.templateEvent)) delete documentValue.patterns[id];
@@ -236,6 +293,7 @@ export function createTransactions(app) {
         mutate(documentValue);
         cascadeRemovedPatterns(documentValue, before.patterns);
         convergeSeries(documentValue, { eventIds });
+        cascadeRemovedObjects(documentValue, eventIds);
         after = captureEventSetBundle(documentValue, eventIds);
       }
       Object.assign(metadata, bundleOps(before, after));
@@ -359,6 +417,11 @@ export function createTransactions(app) {
     for (const override of Object.values(overrides)) {
       for (const eventId of override.replacements || []) replaced.add(eventId);
     }
+    // A replaced (materialized-then-overridden) occurrence can carry its own
+    // object staples, same as any other event -- so if a heal removes one
+    // during this edit, its staples travel with it, the same way this
+    // series' own end/inflection staples already travel via `trackedStaples`.
+    trackObjectStaples(documentValue, replaced, trackedStaples);
     return {
       patterns,
       overrides,
@@ -382,16 +445,18 @@ export function createTransactions(app) {
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (overridePatternId(override) === patternId) delete documentValue.overrides[id];
     }
+    // Driven by the stable id list rather than by `bundle.events`: on redo this
+    // runs with the after-bundle, whose events map is empty precisely when a
+    // heal removed one -- keying off the map would leave that event's stale
+    // staples behind.
+    const replaced = new Set(bundle.replacedEventIds || Object.keys(bundle.events || {}));
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.type === "staple" && relation.series === patternId) delete documentValue.relations[id];
+      if (relation.type !== "staple") continue;
+      if (relation.series === patternId || replaced.has(relation.object)) delete documentValue.relations[id];
     }
     // Clear the replaced events' current records before restoring, so this works
     // symmetrically whether the transaction being undone deleted them (a heal) or
-    // left them in place. Driven by the STABLE id list rather than by `bundle.events`:
-    // on redo this runs with the after-bundle, whose events map is empty precisely
-    // when the heal removed one — keying off the map would leave the undone event in
-    // place and make redo a no-op for it.
-    const replaced = new Set(bundle.replacedEventIds || Object.keys(bundle.events || {}));
+    // left them in place.
     if (replaced.size) {
       for (const [id, relation] of Object.entries(documentValue.relations)) {
         if (replaced.has(relation.event) || replaced.has(relation.member)) delete documentValue.relations[id];
@@ -420,6 +485,12 @@ export function createTransactions(app) {
         // Scoped by pattern, not by event: a series edit can converge an occurrence
         // it never named.
         convergeSeries(documentValue, { patternIds: [patternId] });
+        // Same two-pass shape as `executeEventChange`: learn the post-heal
+        // `replacedEventIds` first, so a materialized occurrence a heal just
+        // removed has its own object staples swept in this same transaction,
+        // then capture for real once the cascade has run.
+        const provisional = capturePatternBundle(documentValue, patternId, before);
+        cascadeRemovedObjects(documentValue, provisional.replacedEventIds || []);
         after = capturePatternBundle(documentValue, patternId, before);
       }
       Object.assign(metadata, bundleOps(before, after));

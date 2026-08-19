@@ -12,7 +12,7 @@
     <header id="hud" aria-label="ChronoLog controls">
       <div id="brand" aria-label="ChronoLog: a timeline instrument">ChronoLog</div>
       <details id="create-menu" data-bar-dropdown>
-        <summary aria-label="Create an object"><span class="responsive-label-long">New</span><span class="responsive-label-short" aria-hidden="true">+</span></summary>
+        <summary class="bar-control" aria-label="Create an object"><span class="responsive-label-long">New</span><span class="responsive-label-short" aria-hidden="true">+</span></summary>
         <div class="create-menu-panel">
           <button class="instrument-button" id="new-event" type="button"><strong>Event</strong><small>A scheduled point or span</small></button>
           <button class="instrument-button" id="new-todo" type="button"><strong>ToDo</strong><small>A zero-duration task</small></button>
@@ -20,51 +20,61 @@
           <button class="instrument-button" id="create-frame" type="button"><strong>Frame</strong><small>A calendar, line, or group</small></button>
         </div>
       </details>
-      <button class="instrument-button optional" id="new-frame" type="button" aria-controls="dock" aria-expanded="false">Frames</button>
+      <button class="instrument-button optional bar-control" id="new-frame" type="button" aria-controls="dock" aria-expanded="false">Frames</button>
       <details id="frame-select" data-bar-dropdown>
-        <summary aria-label="Frame"><span class="responsive-label-long">Frame:</span> <span class="frame-select-summary-value"></span></summary>
+        <summary class="bar-control" aria-label="Frame"><span class="responsive-label-long">Frame:</span> <span class="frame-select-summary-value"></span></summary>
         <div class="frame-select-panel" role="group" aria-label="Frame selection"></div>
       </details>
-      <div class="history-controls" aria-label="Edit history">
-        <button class="icon-button" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
-        <button class="icon-button" id="redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo (Ctrl+Shift+Z)">↷</button>
-      </div>
       <span id="save-status" data-state="clean" role="status" aria-live="polite" aria-label="Save status: Saved" title="Saved"></span>
-      <details id="document-menu" data-bar-dropdown>
-        <summary title="Document actions" aria-label="Document actions"><span class="responsive-label-long">Document</span><span class="responsive-label-short" aria-hidden="true">⋮</span></summary>
-        <div class="document-menu-panel">
-          <button class="instrument-button" id="manage-frames" type="button" aria-controls="dock" aria-expanded="false">Frames workspace</button>
-          <button class="instrument-button" id="settings" type="button">Settings</button>
-          <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
-          <button class="instrument-button" id="lens-settings" type="button">Configure lenses</button>
-          <button class="instrument-button" id="dock-side" type="button" title="Move the dock to the other edge">Dock side: Right</button>
-          <button class="instrument-button" id="new-pattern" type="button">Advanced patterns</button>
-          <label class="status-chip" title="Keep one focus coordinate between projections"><input id="shared-focus" type="checkbox" checked>shared date</label>
-          <button class="instrument-button" id="open-document" type="button">Open document</button>
-          <button class="instrument-button" id="save-document" type="button">Save now</button>
-          <button class="instrument-button" id="save-as-document" type="button">Save as</button>
-          <button class="instrument-button" id="sync-calendars" type="button">Sync web calendars</button>
-          <button class="instrument-button" id="import-ics" type="button">Import ICS</button>
-          <button class="instrument-button" id="export-ics" type="button">Export ICS</button>
-        </div>
+      <!-- Undo, the deliberate save, and Redo as one history cluster at the
+           bar's right end, immediately before the document control -- bug 4's
+           ordering and placement. "Save now" used to be buried in the document
+           dropdown; it is the deliberate on-demand save (as opposed to
+           autosave), so it belongs beside undo/redo, not filed under
+           "Document". -->
+      <div class="history-controls" aria-label="Edit history">
+        <button class="icon-button bar-control square" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
+        <button class="instrument-button small bar-control" id="save-document" type="button" title="Save now" aria-label="Save now">Save</button>
+        <button class="icon-button bar-control square" id="redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo (Ctrl+Shift+Z)">↷</button>
+      </div>
+      <!-- The document control now opens a dock card (src/ui/toolbar.js's
+           openDocumentCard) instead of a floating dropdown panel -- bug 5. It
+           stays a <details>/<summary> pair only so the existing
+           byId("document-menu").querySelector("summary") focus-return call in
+           src/ui/frames-panel.js and src/ui/inspector.js keeps working
+           unchanged; the click handler calls preventDefault() so the native
+           disclosure never actually opens. -->
+      <details id="document-menu">
+        <summary class="bar-control" title="Document and settings" aria-label="Document and settings" aria-controls="dock" aria-expanded="false"><span class="responsive-label-long">Document</span><span class="responsive-label-short" aria-hidden="true">⋮</span></summary>
       </details>
     </header>
 
     <nav id="lens-bar" aria-label="Time lens">
-      <button type="button" data-lens="intimate" aria-label="Intimate"><span class="responsive-label-long">Intimate</span><span class="responsive-label-short" aria-hidden="true">Int</span></button>
-      <button type="button" data-lens="tactical" aria-label="Tactical"><span class="responsive-label-long">Tactical</span><span class="responsive-label-short" aria-hidden="true">Tac</span></button>
-      <button type="button" data-lens="strategic" aria-label="Strategic"><span class="responsive-label-long">Strategic</span><span class="responsive-label-short" aria-hidden="true">Strat</span></button>
-      <button type="button" data-lens="wall" aria-label="Wall"><span class="responsive-label-long">Wall</span><span class="responsive-label-short" aria-hidden="true">Wall</span></button>
-      <button type="button" data-lens="lines" aria-label="Lines"><span class="responsive-label-long">Lines</span><span class="responsive-label-short" aria-hidden="true">Lines</span></button>
-      <button type="button" data-lens="spiral" aria-label="Spiral"><span class="responsive-label-long">Spiral</span><span class="responsive-label-short" aria-hidden="true">Spir</span></button>
-      <button type="button" data-lens="radial" aria-label="Radial"><span class="responsive-label-long">Radial</span><span class="responsive-label-short" aria-hidden="true">Rad</span></button>
+      <button class="bar-control" type="button" data-lens="intimate" aria-label="Intimate"><span class="responsive-label-long">Intimate</span><span class="responsive-label-short" aria-hidden="true">Int</span></button>
+      <button class="bar-control" type="button" data-lens="tactical" aria-label="Tactical"><span class="responsive-label-long">Tactical</span><span class="responsive-label-short" aria-hidden="true">Tac</span></button>
+      <button class="bar-control" type="button" data-lens="strategic" aria-label="Strategic"><span class="responsive-label-long">Strategic</span><span class="responsive-label-short" aria-hidden="true">Strat</span></button>
+      <button class="bar-control" type="button" data-lens="wall" aria-label="Wall"><span class="responsive-label-long">Wall</span><span class="responsive-label-short" aria-hidden="true">Wall</span></button>
+      <button class="bar-control" type="button" data-lens="lines" aria-label="Lines"><span class="responsive-label-long">Lines</span><span class="responsive-label-short" aria-hidden="true">Lines</span></button>
+      <button class="bar-control" type="button" data-lens="spiral" aria-label="Spiral"><span class="responsive-label-long">Spiral</span><span class="responsive-label-short" aria-hidden="true">Spir</span></button>
+      <button class="bar-control" type="button" data-lens="radial" aria-label="Radial"><span class="responsive-label-long">Radial</span><span class="responsive-label-short" aria-hidden="true">Rad</span></button>
       <!-- ToDo and Notes sit after the seven lenses and are coloured distinctly
            because they are not lenses: they open dock cards rather than changing
            what the stage projects. -->
-      <button class="view-bar-card" type="button" id="open-todos" aria-controls="dock"><span class="responsive-label-long">ToDo</span><span class="responsive-label-short" aria-hidden="true">Do</span></button>
-      <button class="view-bar-card" type="button" id="open-notes" aria-controls="dock"><span class="responsive-label-long">Notes</span><span class="responsive-label-short" aria-hidden="true">Note</span></button>
+      <button class="view-bar-card bar-control" type="button" id="open-todos" aria-controls="dock"><span class="responsive-label-long">ToDo</span><span class="responsive-label-short" aria-hidden="true">Do</span></button>
+      <button class="view-bar-card bar-control" type="button" id="open-notes" aria-controls="dock"><span class="responsive-label-long">Notes</span><span class="responsive-label-short" aria-hidden="true">Note</span></button>
+      <!-- These two used to be misfiled in the document dropdown under a
+           "Documents" label even though neither is document data -- both
+           affect how the lenses/views behave, so bug 5's audit moves them
+           here, onto the view bar, next to the other view-wide controls. -->
+      <div class="lens-bar-tools" id="lens-bar-tools" role="group" aria-label="View options">
+        <label class="status-chip bar-control" title="Keep one focus coordinate between projections">
+          <input id="shared-focus" type="checkbox" checked>
+          <span class="responsive-label-long">Shared date</span><span class="responsive-label-short" aria-hidden="true">⚭</span>
+        </label>
+        <button class="instrument-button small bar-control" id="lens-settings" type="button" title="Configure lenses" aria-label="Configure lenses"><span class="responsive-label-long">Configure</span><span class="responsive-label-short" aria-hidden="true">⚙</span></button>
+      </div>
       <details id="hidden-lenses" data-bar-dropdown hidden>
-        <summary title="Hidden lenses" aria-label="Hidden lenses">⋯</summary>
+        <summary class="bar-control square" title="Hidden lenses" aria-label="Hidden lenses">⋯</summary>
         <div class="hidden-lens-panel"></div>
       </details>
     </nav>
@@ -99,6 +109,45 @@
          #lens-controls at once instead of only the bar a panel happens to
          live in. -->
     <div id="dropdown-layer"></div>
+
+    <!-- The document control (#document-menu, above) opens this as a dock
+         card body -- bug 5's "a proper settings card in the dock, not that
+         mess". It sits here, hidden, until first opened, and the same node
+         is reused on every open/close cycle (src/ui/toolbar.js caches the
+         reference rather than re-querying it, since the dock detaches a
+         closed card's whole subtree from the document). Genuinely
+         document-scoped actions and genuine settings both belong on this one
+         card -- ROADMAP #1 calls dock cards the settings surface -- so
+         neither group is nested under a redundant "Documents" label; the
+         "Settings" heading below names only what actually differs. -->
+    <div id="document-card-body" hidden>
+      <div class="document-card-actions">
+        <button class="instrument-button" id="open-document" type="button">Open document</button>
+        <button class="instrument-button" id="save-as-document" type="button">Save as</button>
+        <button class="instrument-button" id="manage-frames-proxy" type="button">Frames workspace</button>
+        <button class="instrument-button" id="new-pattern" type="button">Advanced patterns</button>
+        <button class="instrument-button" id="sync-calendars" type="button">Sync web calendars</button>
+        <button class="instrument-button" id="import-ics" type="button">Import ICS</button>
+        <button class="instrument-button" id="export-ics" type="button">Export ICS</button>
+      </div>
+      <div class="document-card-settings">
+        <p class="fieldset-title">Settings</p>
+        <button class="instrument-button" id="theme-settings" type="button">Color theme</button>
+        <button class="instrument-button" id="dock-side" type="button" title="Move the dock to the other edge">Dock side: Right</button>
+        <label class="field" id="snapshot-period-field" hidden>
+          <span>Snapshot save interval (minutes)</span>
+          <input id="snapshot-period" type="number" min="1" max="1440">
+        </label>
+      </div>
+    </div>
+    <!-- The real "Frames workspace" trigger stays exactly where
+         src/ui/frames-panel.js expects to find it (it re-queries #manage-frames
+         by id every time the Frames browser opens, unlike the document card's
+         other controls) -- permanently attached, never moved into the dock, so
+         that lookup never goes stale across the document card's own
+         open/close cycles. #manage-frames-proxy above is the visible control;
+         clicking it clicks this one. -->
+    <button id="manage-frames" type="button" aria-controls="dock" aria-expanded="false" hidden>Frames workspace</button>
 
     <input id="document-file" type="file" accept=".chronolog,.json,application/x-chronolog,application/json" hidden>
     <input id="ics-file" type="file" accept=".ics,text/calendar" multiple hidden>

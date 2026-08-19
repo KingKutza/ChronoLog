@@ -1,5 +1,12 @@
 import { importICS, property } from "./ics.js";
-import { clone, createDocument, removeOverridesForPatterns, touch } from "./model.js";
+import {
+  clone,
+  createDocument,
+  removeOverridesForPatterns,
+  removeStaplesForObjects,
+  removeStaplesForPatterns,
+  touch
+} from "./model.js";
 
 // Invariant: the reconciler only ever ASSIGNS or DELETES whole records in
 // `document` (document.events[id] = ..., delete document.events[id], and the
@@ -111,6 +118,15 @@ function removeDanglingEventReferences(document, eventId) {
   // enough: a plain suppression carries no replacement to filter, and would
   // survive as a pointer to a pattern that no longer exists.
   removeOverridesForPatterns(document, removedPatterns);
+  // A staple belongs to its series or its object the same way an override
+  // belongs to its pattern (src/ui/transactions.js's `cascadeRemovedPatterns`
+  // / `cascadeRemovedObjects` apply the identical sweep for the editor's own
+  // delete paths) -- the reconciler deletes whole event records here too
+  // (this function's own doc comment), so it needs the same two sweeps or a
+  // subscribed calendar's own removal of an event leaves a dangling staple
+  // that fails validateDocument at the next load.
+  removeStaplesForPatterns(document, removedPatterns);
+  removeStaplesForObjects(document, [eventId]);
 }
 
 function removeSourceOwnedRecords(document, sourceId) {
@@ -129,6 +145,11 @@ function removeSourceOwnedRecords(document, sourceId) {
   // An override the owner authored by hand against an imported series is not
   // source-owned, so the sweep above leaves it — but its pattern has just gone.
   removeOverridesForPatterns(document, removedPatterns);
+  // Same reasoning as `removeDanglingEventReferences`: a hand-authored staple
+  // on an imported series is not itself source-owned (the first loop above
+  // only removes relations whose OWN provenance.source matches), so it
+  // survives that sweep -- but its pattern has just gone, same as an override.
+  removeStaplesForPatterns(document, removedPatterns);
 }
 
 function removeSource(document, sourceId) {

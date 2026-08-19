@@ -218,7 +218,7 @@ button {
   z-index: 35;
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 7px;
   padding: 5px 8px;
   border: 1px solid color-mix(in srgb, var(--strong) 80%, transparent);
@@ -288,6 +288,10 @@ button {
 
 #brand {
   flex: none;
+  /* #hud stretches its children so every real bar-control reaches full
+     height (see .bar-control above); the wordmark is not a control and
+     keeps its own intrinsic height, centered like before. */
+  align-self: center;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -332,6 +336,30 @@ button {
   place-items: center;
   padding: 0;
   font-size: 16px;
+}
+
+/* Bar controls: any clickable/anchor element that sits directly on the
+   document bar, view bar, or context bar. All three bars carry the same
+   34px content height (the primary/control row minus the bar's own
+   padding) -- a control that hardcodes its own height (32px here, 30px
+   there, or whatever a dashed box with `place-items: center` happens to
+   collapse to) only ever matches that by coincidence, which is exactly how
+   the lens bar's hamburger ended up visibly shorter than its sibling lens
+   buttons, which stretch instead of hardcoding a height. `height: 100%`
+   resolves against the bar's own content box, so a bar-control fills it
+   exactly regardless of what its own content would otherwise ask for;
+   `align-self: stretch` covers the bar dropdowns, which are grid
+   containers of one rather than flex items once you are inside them.
+   `.square` pairs this with `aspect-ratio: 1` so an icon control's width
+   follows the bar's real height instead of a hand-picked pixel value that
+   was really an approximation of it. */
+.bar-control {
+  height: 100%;
+  align-self: stretch;
+}
+.bar-control.square {
+  width: auto;
+  aspect-ratio: 1;
 }
 
 .select-control {
@@ -449,7 +477,18 @@ button {
   flex: none;
   align-self: stretch;
   display: grid;
-  max-width: 28px;
+}
+
+/* Two controls that used to be misfiled under the document dropdown's
+   "Documents" label even though neither is document data -- see bug 5's
+   audit in AGENTS.md/the 8.19 field report. Sized to content like
+   #hidden-lenses, not stretched across the bar like a lens button. */
+.lens-bar-tools {
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
 }
 
 #hidden-lenses > summary {
@@ -489,7 +528,7 @@ button {
   z-index: 21;
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 5px;
   padding: 4px 6px;
   border: 1px solid var(--strong);
@@ -557,6 +596,12 @@ button {
 }
 .create-menu-panel small { color: var(--muted); font-weight: 500; }
 
+/* The document control is a <details>/<summary> with no panel of its own any
+   more -- see pocket-instrument.html's comment on #document-menu. Clicking it
+   opens #document-card-body as a dock card (src/ui/toolbar.js's
+   openDocumentCard); the native disclosure toggle is suppressed with
+   preventDefault(), so `[open]` never actually happens and no chevron is
+   shown promising an inline panel that would not open. */
 #document-menu { flex: none; margin-left: auto; position: relative; }
 #document-menu > summary {
   min-height: 30px;
@@ -571,27 +616,24 @@ button {
   font: 700 10px/1 var(--data);
 }
 #document-menu > summary::-webkit-details-marker { display: none; }
-#document-menu > summary::after { content: "▾"; margin-left: 5px; }
-#document-menu > summary:hover,
-#document-menu[open] > summary { border-color: var(--ink); background: var(--paper); }
-/* See .create-menu-panel above: placed by registerBarDropdown, portaled into
-   #dropdown-layer, no z-index of its own needed. */
-.document-menu-panel {
-  position: fixed;
-  width: min(310px, calc(100vw - 24px));
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--strong);
-  border-radius: 10px;
-  background: var(--paper);
-  box-shadow: var(--shadow);
-}
-.document-menu-panel > * { width: 100%; }
-.document-menu-panel .status-chip { grid-column: 1 / -1; }
+#document-menu > summary:hover { border-color: var(--ink); background: var(--paper); }
+
+/* The document/settings dock card's body. Document actions (open/save-as/
+   frames/patterns/sync/import/export) and genuine settings (theme, dock
+   side, snapshot period) are both legitimate content for this one card --
+   ROADMAP #1 names dock cards as the settings surface -- so they sit as two
+   plain groups, not nested under a "Documents" label repeating what the
+   card's own title already says. */
+#document-card-body { display: grid; gap: 14px; }
+.document-card-actions,
+.document-card-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.document-card-settings { padding-top: 10px; border-top: 1px solid var(--hair); }
+.document-card-actions > *,
+.document-card-settings > * { width: 100%; }
+.document-card-settings .field { grid-column: 1 / -1; margin-bottom: 0; }
+
 .history-controls { display: inline-flex; flex: none; gap: 4px; }
-.history-controls .icon-button { width: 30px; height: 30px; font-size: 15px; }
+.history-controls .icon-button { font-size: 15px; }
 
 button.lens-control { cursor: pointer; color: var(--ink); }
 button.lens-control:hover { border-color: var(--ink); background: var(--paper); }
@@ -1701,14 +1743,26 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
 .lines-state-error { fill: var(--now); }
 .lines-state-unsupported { fill: #a46b12; }
 
-/* A flush `butt` cap is load-bearing, not cosmetic: an arc's endpoints already sit
-   exactly on the radial ray of its start/stop date, and a round cap bulges the
-   rendered stroke past that exact point along the path's tangent, so the mark
-   reads as overshooting the date it terminates on. Keep this `butt` — the arc
-   renderer deliberately sets no linecap of its own, so this rule is the single
-   place the cap is decided. See src/radial.js's arcPath/polar tests. */
-.radial-event-arc { cursor: pointer; fill: none; stroke-linecap: butt; stroke-dasharray: 1; animation: radial-slide 220ms ease-out both; }
+/* An event mark's round cap is the sigil, not a bug: it is a point-in-time
+   indicator in every radial-family lens (Radial's ring arcs and the
+   Spiral's own event arcs), and both already draw a constant-radius arc so
+   the mark's own long axis sits exactly perpendicular to its own radius
+   (see arcPath and the Spiral event loop in src/projections.js). Keep this
+   `round` — the arc renderer deliberately sets no linecap of its own, so
+   this rule is the single place the cap is decided.
+
+   The TRACK (a Spiral's own ribbon) is the opposite case and must terminate
+   flush on its start/stop ray: that is handled as an explicit geometry
+   question (spiralRibbonPath in src/radial.js draws it as a filled polygon,
+   not a stroked path with a cap), never by a linecap rule here. Do not give
+   an event mark this rule's flush treatment, and do not give the track this
+   rule's round one — that swap is exactly the regression this comment
+   exists to prevent. */
+.radial-event-arc { cursor: pointer; fill: none; stroke-linecap: round; stroke-dasharray: 1; animation: radial-slide 220ms ease-out both; }
 .radial-event-arc.sigil-repeat { stroke-dasharray: 3 2; }
+/* This butt is unrelated to the track/event-mark cap decision above -- it is
+   the task sigil's own tiny dotted dash pattern, where a round cap would
+   read as circular dots instead of the vocabulary's square ones. */
 .radial-event-arc.sigil-task { stroke-dasharray: 1 3; stroke-linecap: butt; }
 .radial-event-arc.sigil-milestone { filter: drop-shadow(0 0 1px currentColor); }
 .radial-event-arc.sigil-terminator { stroke-dasharray: 5 1 1 1; }
@@ -1804,8 +1858,8 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 .lens-workspace-list { display: grid; gap: 6px; margin-top: 7px; }
 .lens-workspace-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  grid-template-areas: "check up down" "meta meta meta";
+  grid-template-columns: 1fr auto auto auto;
+  grid-template-areas: "check up down thresholds" "meta meta meta meta";
   column-gap: 6px;
   row-gap: 2px;
   align-items: center;
@@ -1815,6 +1869,30 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
   background: white;
 }
 .lens-workspace-row .check-chip { grid-area: check; min-width: 0; }
+/* The two promotion thresholds share the row rather than taking one of their
+   own: ROADMAP #1 asks the lens workspace to fit without scrolling, and seven
+   lenses each gaining a line would break that. */
+.lens-threshold-fields {
+  grid-area: thresholds;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lens-threshold-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font: 500 9px/1.3 var(--data);
+  white-space: nowrap;
+}
+.lens-threshold-input {
+  width: 44px;
+  min-height: 0;
+  padding: 2px 4px;
+  font: 500 10px/1.2 var(--data);
+  text-align: right;
+}
 .lens-workspace-meta {
   grid-area: meta;
   min-width: 0;
@@ -1906,7 +1984,6 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
   #lens-bar .responsive-label-short { display: inline; }
   #create-menu > summary .responsive-label-short { font-size: 18px; }
   #document-menu > summary { width: 32px; justify-content: center; padding: 0; }
-  #document-menu > summary::after { display: none; }
   #document-menu > summary .responsive-label-short { font-size: 16px; }
   #lens-bar button { overflow: hidden; letter-spacing: 0; text-overflow: ellipsis; }
 }

@@ -13,12 +13,13 @@ import {
   addRelation,
   createId,
   durationMagnitude,
-  seriesEndStaple,
+  putStaple,
   stableVirtualId,
   suppressVirtual,
   touch
 } from "./model.js";
 import { recurrenceEndMode, recurrenceUntilForCoordinate } from "./recurrence-end.js";
+import { resolveObjectExtent, seriesSegments, staplesForObject } from "./staples.js";
 
 function splitOutsideQuotes(value, separator) {
   const parts = [];
@@ -130,7 +131,20 @@ export function eventComponentKey(component) {
 // every other property (ATTENDEE, VALARM, CLASS, X-*, RECURRENCE-ID, DTSTART
 // and friends, ...) is not reconstructible from the model and is kept
 // verbatim as the event's irreducible round-trip delta.
-const RECONSTRUCTED_PROPERTY_NAMES = new Set(["UID", "SUMMARY", "DESCRIPTION", "LOCATION"]);
+//
+// X-CHRONOLOG-ANCHOR/-SPREAD join this set for the same reason: they are
+// ChronoLog's own reserved namespace (not a foreign calendar's data), and
+// `applyAnchorAnnotations` always clears and rebuilds them fresh from
+// `staplesForObject` on every export -- so retaining a stale copy from a
+// prior import would be pure duplication too, same as UID/SUMMARY above.
+const RECONSTRUCTED_PROPERTY_NAMES = new Set([
+  "UID",
+  "SUMMARY",
+  "DESCRIPTION",
+  "LOCATION",
+  "X-CHRONOLOG-ANCHOR",
+  "X-CHRONOLOG-SPREAD"
+]);
 
 export function residualEventComponent(component) {
   return {
@@ -268,20 +282,86 @@ function occurrenceKey(date, start) {
   return day;
 }
 
-function eventFromEntry(document, entry, warnings) {
-  let duration = Rational.parse(0);
+// One derivation of an entry's duration in seconds, shared by a primary
+// event/task (`eventFromEntry`) and a following segment's own magnitude
+// (`importFollowingSegmentStaple`) -- both read DTSTART/DTEND or DURATION off
+// a raw component the same way, so this is the one place that comparison
+// lives rather than a second copy of it.
+function entryDurationSeconds(entry, warnings) {
   if (entry.start && entry.end) {
     if (!entry.start.dateOnly && !entry.end.dateOnly && !sameTimeTyping(entry.start, entry.end)) {
       warnings.push(
         `Event ${entry.uid}: DTSTART and DTEND use different time zones; duration is their wall-clock difference`
       );
     }
-    duration = civilCoordinateToDays(entry.end.coordinate)
+    return civilCoordinateToDays(entry.end.coordinate)
       .sub(civilCoordinateToDays(entry.start.coordinate))
       .mul(86400);
-  } else {
-    duration = parseDuration(property(entry.component, "DURATION")?.value) || Rational.parse(0);
   }
+  return parseDuration(property(entry.component, "DURATION")?.value) || Rational.parse(0);
+}
+
+// A day-fraction magnitude, exact throughout (Rational text, never a float) --
+// the reconstruction target for an anchor's OFFSET param and a staple's
+// SPREAD BEFORE/AFTER params (see `applyAnchorAnnotations`, the export side).
+// ICS has no native concept of src/staples.js's nested-level magnitude shape,
+// so this collapses to a single "day" level; the VALUE it resolves to
+// (via `durationMagnitudeDays`) is exact and identical either way, which is
+// what a fuzziness/offset amount actually is for -- the level breakdown
+// (e.g. authored as "2 hours" vs "1/12 day") is not preserved, only the
+// resolved magnitude, and that is a documented limitation of the encoding.
+function dayFractionMagnitude(text) {
+  return { frame: "measure:human-time", value: { levels: [{ level: "day", value: text }] } };
+}
+
+// Reconstructs the object-anchor staples an export wrote as X-CHRONOLOG-ANCHOR
+// / X-CHRONOLOG-SPREAD properties (see `applyAnchorAnnotations`). A calendar
+// with none of these properties -- any calendar that is not a ChronoLog
+// re-import -- gets no staples invented: MEANING IS AUTHORED, NEVER INFERRED,
+// so this only ever reconstructs what an earlier ChronoLog export explicitly
+// wrote, never a guess from a title, a category, or a duration.
+//
+// Anchors are reconstructed against THIS import's own calendar frame, not
+// whatever frame id the export happened to carry -- a fresh import always
+// mints a fresh frame (see `addFrame` below), so a raw foreign frame id could
+// never resolve anyway. The exact wall-clock instant round-trips regardless,
+// because the encoding is an ICS timestamp, not a frame-relative value.
+function importAnchorStaples(document, component, objectId, calendarFrameId) {
+  const anchorProps = properties(component, "X-CHRONOLOG-ANCHOR");
+  if (!anchorProps.length) return;
+  const spreadById = new Map();
+  for (const prop of properties(component, "X-CHRONOLOG-SPREAD")) {
+    const id = parameter(prop, "ID");
+    if (!id) continue;
+    const before = parameter(prop, "BEFORE");
+    const after = parameter(prop, "AFTER");
+    if (!before && !after) continue;
+    spreadById.set(id, {
+      ...(before ? { before: dayFractionMagnitude(before) } : {}),
+      ...(after ? { after: dayFractionMagnitude(after) } : {})
+    });
+  }
+  for (const prop of anchorProps) {
+    const parsed = parseICSDate(prop);
+    if (!parsed) continue;
+    const role = parameter(prop, "ROLE") || "start";
+    const offset = parameter(prop, "OFFSET");
+    const id = parameter(prop, "ID");
+    const spread = id ? spreadById.get(id) : null;
+    putStaple(document, {
+      object: objectId,
+      kind: "anchor",
+      role,
+      frame: calendarFrameId,
+      coordinate: parsed.coordinate,
+      ...(offset ? { payload: { offset: dayFractionMagnitude(offset) } } : {}),
+      ...(spread ? { spread } : {})
+    });
+  }
+}
+
+function eventFromEntry(document, entry, warnings) {
+  const duration = entryDurationSeconds(entry, warnings);
   const event = addEvent(document, {
     traits: ["event", ...(entry.task ? ["task"] : [])],
     magnitudes: {
@@ -303,6 +383,7 @@ function eventFromEntry(document, entry, warnings) {
     }
   });
   entry.event = event;
+  importAnchorStaples(document, entry.component, event.id, entry.calendarFrame.id);
   if (entry.start) {
     entry.relation = addRelation(document, {
       type: "attachment",
@@ -384,9 +465,23 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
       }
     };
 
-    const entries = componentEntries(calendar).map((component) =>
+    // A following segment (a series' rule-change sibling VEVENT, carrying
+    // X-CHRONOLOG-SERIES and X-CHRONOLOG-SEGMENT-INDEX -- see
+    // `followingSegmentComponent`, the export side) is not a new event or
+    // pattern: it is one inflection staple on the base series, reconstructed
+    // below by `importFollowingSegmentStaple`. Excluded from `entries` here so
+    // the ordinary event/pattern machinery below never sees it -- otherwise a
+    // ChronoLog re-import would manufacture a spurious standalone event for
+    // every following segment, alongside the staple that already reconstructs
+    // it. A calendar missing either property is treated as an ordinary event:
+    // only both together identify a ChronoLog-authored sibling.
+    const allEntries = componentEntries(calendar).map((component) =>
       normalizedEntry(component, frame, sourceId)
     );
+    const segmentEntries = allEntries.filter((entry) =>
+      property(entry.component, "X-CHRONOLOG-SERIES") && property(entry.component, "X-CHRONOLOG-SEGMENT-INDEX"));
+    const segmentEntrySet = new Set(segmentEntries);
+    const entries = allEntries.filter((entry) => !segmentEntrySet.has(entry));
     // The shared, once-per-source home for every event's retained ICS data --
     // keyed by `eventComponentKey` so `eventComponent` (export) and the sync
     // reconciler's `sourceEventKey` can find an event's component without
@@ -474,9 +569,55 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
       ids.push(entry.event.id);
       existingByUid.set(entry.uid, ids);
     }
+
+    for (const segmentEntry of segmentEntries) {
+      const seriesUid = property(segmentEntry.component, "X-CHRONOLOG-SERIES")?.value;
+      const basePatternEntry = entries.find((entry) => entry.uid === seriesUid && entry.pattern);
+      if (!basePatternEntry) continue;
+      importFollowingSegmentStaple(document, segmentEntry, basePatternEntry.pattern, frame, result.warnings);
+    }
   }
   touch(document);
   return result;
+}
+
+// Reconstructs one following segment's inflection staple from a sibling
+// VEVENT the export side wrote (`followingSegmentComponent`). X-CHRONOLOG-
+// INFLECTION carries the partitioning staple's OWN coordinate and frame --
+// the exact instant the reigning rule stops -- as its own property rather
+// than being derived from the sibling's DTSTART, because those are two
+// independently authored values (LEXICON's Rob-and-John scenario: the
+// inflection point and the new rule's own first occurrence need not be the
+// same weekday, time, or even the same day). Missing that property means
+// nothing to anchor the partition to, so this reconstructs nothing rather
+// than guess.
+function importFollowingSegmentStaple(document, segmentEntry, pattern, frame, warnings) {
+  const inflectionProperty = property(segmentEntry.component, "X-CHRONOLOG-INFLECTION");
+  const inflectionDate = inflectionProperty ? parseICSDate(inflectionProperty) : null;
+  if (!inflectionDate) return;
+  const seconds = entryDurationSeconds(segmentEntry, warnings);
+  // Reconstructed against THIS import's own calendar frame, not whatever
+  // frame id the export happened to carry in the FRAME param -- a fresh
+  // import always mints a fresh frame (see `addFrame` above), so a raw
+  // foreign frame id could never resolve anyway. Same reasoning as
+  // `importAnchorStaples`: the exact wall-clock instant round-trips
+  // regardless, because the encoding is an ICS timestamp, not a
+  // frame-relative value.
+  putStaple(document, {
+    series: pattern.id,
+    kind: "inflection",
+    frame: frame.id,
+    coordinate: inflectionDate.coordinate,
+    payload: {
+      rule: {
+        rrule: segmentEntry.rrule ? parseRRule(segmentEntry.rrule.value) : {},
+        coordinate: segmentEntry.start?.coordinate,
+        frame: frame.id,
+        magnitude: durationMagnitude(seconds.toJSON(), "second"),
+        exdates: segmentEntry.exdates.map((date) => occurrenceKey(date, segmentEntry.start).toJSON())
+      }
+    }
+  });
 }
 
 function serializeParams(params = []) {
@@ -532,6 +673,21 @@ function removeProperty(component, name) {
   component.properties = component.properties.filter((item) => item.name !== name);
 }
 
+// Unlike `setProperty`, always adds a new property line rather than replacing
+// one of the same name -- RFC 5545 allows repeating an X-property, and that
+// repetition is exactly how multiple object staples (one X-CHRONOLOG-ANCHOR /
+// X-CHRONOLOG-SPREAD pair per staple) are represented on a single VEVENT.
+function appendProperty(component, name, value, params = []) {
+  component.properties.push({ name, params, value });
+}
+
+// A coordinate with no time-of-day levels at all is date-only, the same test
+// `parseICSDate` uses on import (`!match[4]`) -- a structural fact about the
+// coordinate's own level list, not a guess about what it means.
+function coordinateIsDateOnly(value) {
+  return !(value?.levels || []).some((level) => level.level === "hour");
+}
+
 function coordinateToICS(value, dateOnly = false, utc = false) {
   // Signed years beyond 0000-9999 deliberately deviate from RFC 5545 so remote dates round-trip.
   const yearValue = BigInt(levelValue(value, "year"));
@@ -546,8 +702,8 @@ function coordinateToICS(value, dateOnly = false, utc = false) {
   return `${year}${month}${day}T${hour}${minute}${second}${utc ? "Z" : ""}`;
 }
 
-function magnitudeSeconds(event) {
-  const levels = event?.magnitudes?.duration?.value?.levels || [];
+function magnitudeSecondsFromMagnitude(magnitude) {
+  const levels = magnitude?.value?.levels || [];
   let seconds = Rational.parse(0);
   const factors = {
     week: 604800,
@@ -563,6 +719,10 @@ function magnitudeSeconds(event) {
     }
   }
   return seconds;
+}
+
+function magnitudeSeconds(event) {
+  return magnitudeSecondsFromMagnitude(event?.magnitudes?.duration);
 }
 
 function startParams(relation) {
@@ -651,6 +811,262 @@ function eventComponent(document, event, relation, now, componentName = "VEVENT"
   return component;
 }
 
+// Anchors, magnitudes, and spreads are ChronoLog-native (LEXICON's staple
+// anchoring): every other calendar needs the DERIVED extent as ordinary
+// DTSTART/DTEND, so an end-anchored shift does not export as a broken event,
+// while a ChronoLog re-import needs the AUTHORED INTENT losslessly. This
+// carries both: it overwrites DTSTART/DTEND with `resolveObjectExtent`'s
+// resolved days only when the object actually carries an anchor (an
+// unstapled object resolves identically to its own placement relation, per
+// src/staples.js's own doc comment, so leaving the untouched code path alone
+// for that overwhelmingly common case keeps a re-export of an unchanged
+// document byte-identical), and appends one X-CHRONOLOG-ANCHOR / optional
+// X-CHRONOLOG-SPREAD pair per staple on the object, stale copies cleared
+// first so a changed staple set never leaves an orphaned property behind.
+//
+// Encoding: X-CHRONOLOG-ANCHOR;ID=<staple id>;ROLE=<role>[;OFFSET=<exact day
+// fraction>]:<ICS timestamp of the staple's own coordinate, always full
+// precision, never VALUE=DATE>. X-CHRONOLOG-SPREAD;ID=<staple id>
+// [;BEFORE=<exact day fraction>][;AFTER=<exact day fraction>]:<role, for a
+// human reading the file>. Every magnitude is an exact Rational day-fraction
+// TEXT (`Rational.toJSON`), never a float -- `dayFractionMagnitude` parses it
+// straight back with no rounding. ID correlates an ANCHOR/SPREAD pair (and
+// disambiguates the rare overdetermined case of two anchors sharing a role);
+// it is ChronoLog's own internal relation id, meaningless to any other
+// calendar, which is exactly what an X-property is for.
+function applyAnchorAnnotations(component, document, engine, event) {
+  if (!engine || !event?.id) return;
+  const staples = staplesForObject(document, event.id);
+  removeProperty(component, "X-CHRONOLOG-ANCHOR");
+  removeProperty(component, "X-CHRONOLOG-SPREAD");
+  if (!staples.length) return;
+  const extent = resolveObjectExtent(document, engine, event.id);
+  if (extent.anchors.length && extent.frame && extent.startDays !== null && extent.endDays !== null) {
+    try {
+      const startCoordinate = engine.daysCoordinate(extent.frame, extent.startDays);
+      setProperty(component, "DTSTART", coordinateToICS(startCoordinate, false, false));
+      const durationDays = extent.endDays.sub(extent.startDays);
+      if (durationDays.compare(0) > 0) {
+        setProperty(component, "DTEND", coordinateToICS(engine.daysCoordinate(extent.frame, extent.endDays), false, false));
+      } else {
+        removeProperty(component, "DTEND");
+      }
+    } catch {
+      // Leave the placement-derived DTSTART/DTEND from `eventComponent` as-is
+      // rather than export a broken time from an unresolvable frame.
+    }
+  }
+  for (const staple of staples) {
+    appendProperty(
+      component,
+      "X-CHRONOLOG-ANCHOR",
+      coordinateToICS(staple.coordinate, false, false),
+      [
+        { name: "ID", values: [staple.id] },
+        { name: "ROLE", values: [staple.role || "start"] },
+        ...(staple.payload?.offset
+          ? [{ name: "OFFSET", values: [durationMagnitudeSecondsAsDays(staple.payload.offset)] }]
+          : [])
+      ]
+    );
+    if (staple.spread) {
+      const before = staple.spread.before ? durationMagnitudeSecondsAsDays(staple.spread.before) : null;
+      const after = staple.spread.after ? durationMagnitudeSecondsAsDays(staple.spread.after) : null;
+      if (before || after) {
+        appendProperty(component, "X-CHRONOLOG-SPREAD", staple.role || "start", [
+          { name: "ID", values: [staple.id] },
+          ...(before ? [{ name: "BEFORE", values: [before] }] : []),
+          ...(after ? [{ name: "AFTER", values: [after] }] : [])
+        ]);
+      }
+    }
+  }
+}
+
+// The exact day-fraction text a magnitude resolves to (`Rational.toJSON`,
+// never a float) -- what `dayFractionMagnitude` on the import side parses
+// straight back with no rounding.
+function durationMagnitudeSecondsAsDays(magnitude) {
+  return magnitudeSecondsFromMagnitude(magnitude).div(86400).toJSON();
+}
+
+// The ICS text an RRULE's own UNTIL parses to, in exact Rational days -- the
+// same regex `engine.js`'s private `compactIcsDay` uses, reimplemented here
+// only because that one is not exported (only the whole-pattern
+// `seriesEffectiveUntilDays`, segment 0's cutoff, is). Reuses this file's own
+// `parseICSDate` rather than a second date parser.
+function icsRuleUntilDays(rrule) {
+  const until = rrule?.UNTIL;
+  if (!until) return null;
+  const parsed = parseICSDate({ value: until });
+  return parsed ? civilCoordinateToDays(parsed.coordinate) : null;
+}
+
+// A following segment's own effective stop: the earlier of its own written
+// RRULE UNTIL and the staple that closes it (`segment.untilDays`, null for a
+// series' final segment). Mirrors src/engine.js's private
+// `segmentEffectiveUntilDays` exactly (same two-value Rational minimum) --
+// that function only serves segment 0 under the exported name
+// `seriesEffectiveUntilDays`, which this file keeps using unchanged; segment
+// 1 and beyond have no existing export to reuse, so this is the equivalent
+// arithmetic for them, in exact Rational days throughout, never a string
+// comparison.
+function segmentUntilDaysLocal(segment) {
+  const ruleUntil = icsRuleUntilDays(segment?.rrule);
+  const stapleUntil = segment?.untilDays ?? null;
+  if (!stapleUntil) return ruleUntil;
+  if (!ruleUntil) return stapleUntil;
+  return ruleUntil.compare(stapleUntil) <= 0 ? ruleUntil : stapleUntil;
+}
+
+// How many occurrences of THIS segment's rule actually survive through the
+// staple that closes it -- the truncated COUNT that keeps a COUNT-based rule
+// legal (RFC 5545 forbids COUNT and UNTIL together) without silently
+// dropping the COUNT semantics or the staple. `engine.queryFacts` already
+// enforces this exact segment's own COUNT and its closing staple's UNTIL
+// together when it generates occurrenceFacts (src/engine.js), so counting
+// the virtual facts it returns for exactly this segment's window IS the
+// truncated count; no RRULE math is re-derived here, only asked of the one
+// authority that already computes it.
+function truncatedSegmentCount(engine, pattern, segment) {
+  if (!engine || segment?.untilDays == null) return null;
+  const frame = pattern.frame;
+  if (!frame) return null;
+  let lowerDays = segment.fromDays;
+  if (lowerDays === null) {
+    const relation = engine.document.relations[pattern.templateRelation];
+    if (!relation?.coordinate) return null;
+    try {
+      lowerDays = engine.coordinateDays(relation.frame, relation.coordinate);
+    } catch {
+      return null;
+    }
+  }
+  let windowStart, windowEnd;
+  try {
+    windowStart = engine.daysCoordinate(frame, lowerDays);
+    windowEnd = engine.daysCoordinate(frame, segment.untilDays);
+  } catch {
+    return null;
+  }
+  let facts;
+  try {
+    facts = engine.queryFacts({
+      frame,
+      start: windowStart,
+      end: windowEnd,
+      limit: Infinity,
+      applyOverrides: false
+    }).facts;
+  } catch {
+    return null;
+  }
+  return facts.filter((fact) => fact.kind === "virtual" && fact.virtualId.startsWith(`${pattern.id}/`)).length;
+}
+
+// Fresh EXDATE properties for a following segment's own exclusions
+// (`segment.exdates`, day-JSON Rational strings) -- there is no "original ICS
+// text" to preserve here the way segment 0's `exdateProperties` preserves an
+// import's own formatting, because a following segment's exdates are
+// ChronoLog-authored data with no prior ICS representation at all.
+function exdatePropertiesForSegment(segment, dateOnly, utc, params) {
+  const days = segment.exdates || [];
+  if (!days.length) return [];
+  const value = days
+    .map((day) => coordinateToICS(daysToCivilCoordinate(Rational.parse(day)), dateOnly, utc))
+    .join(",");
+  return [{ name: "EXDATE", params, value }];
+}
+
+// The RRULE text for one following segment, applying the same COUNT-vs-UNTIL
+// legality rule segment 0 gets (see the COUNT branch in `exportICS`, and
+// `truncatedSegmentCount`/`segmentUntilDaysLocal` above).
+function followingSegmentRuleText(engine, pattern, segment) {
+  let rrule = segment.rrule || {};
+  if (recurrenceEndMode(rrule) === "count") {
+    if (segment.untilDays != null) {
+      const truncated = truncatedSegmentCount(engine, pattern, segment);
+      if (truncated !== null) {
+        rrule = { ...rrule };
+        delete rrule.UNTIL;
+        rrule.COUNT = String(truncated);
+      }
+    }
+  } else {
+    const effectiveDays = segmentUntilDaysLocal(segment);
+    if (effectiveDays) {
+      try {
+        rrule = {
+          ...rrule,
+          UNTIL: recurrenceUntilForCoordinate(engine.daysCoordinate(segment.frame || pattern.frame, effectiveDays))
+        };
+      } catch {
+        // Leave the segment's own authored UNTIL (or none) as-is.
+      }
+    }
+  }
+  return Object.keys(rrule).length ? Object.entries(rrule).map(([key, value]) => `${key}=${value}`).join(";") : "";
+}
+
+// One following segment's sibling VEVENT. A following segment has no VEVENT
+// of its own anywhere in the document -- it is staple payload
+// (src/staples.js's `seriesSegments`), not a materialized record -- so this
+// builds the component fresh on every export rather than reading/writing a
+// retained copy the way `eventComponent` does for a real event.
+function followingSegmentComponent(document, engine, pattern, segment, index, baseUid, now) {
+  if (!segment?.baseCoordinate || !baseUid) return null;
+  const templateEvent = document.events[pattern.templateEvent];
+  const templateRelation = document.relations[pattern.templateRelation];
+  const component = { name: "VEVENT", properties: [], components: [] };
+  // A deterministic, stable UID derived from the base UID plus the segment
+  // index -- a re-export of an unchanged document must produce byte-identical
+  // UIDs, never a random one, or every sync would churn.
+  setProperty(component, "UID", `${baseUid}.chronolog-segment-${index}`);
+  setProperty(component, "SUMMARY", escapeICSText(templateEvent?.payload?.title || "(untitled)"));
+  if (templateEvent?.payload?.description) {
+    setProperty(component, "DESCRIPTION", escapeICSText(templateEvent.payload.description));
+  }
+  if (templateEvent?.payload?.location) {
+    setProperty(component, "LOCATION", escapeICSText(templateEvent.payload.location));
+  }
+  const dateOnly = coordinateIsDateOnly(segment.baseCoordinate);
+  const utc = Boolean(templateRelation?.parameters?.utc);
+  const params = dateOnly
+    ? [{ name: "VALUE", values: ["DATE"] }]
+    : templateRelation?.parameters?.timeZone
+      ? [{ name: "TZID", values: [templateRelation.parameters.timeZone] }]
+      : [];
+  setProperty(component, "DTSTART", coordinateToICS(segment.baseCoordinate, dateOnly, utc), params);
+  const magnitude = segment.magnitude || templateEvent?.magnitudes?.duration;
+  const seconds = magnitudeSecondsFromMagnitude(magnitude);
+  if (seconds.compare(0) > 0) {
+    const startDays = civilCoordinateToDays(segment.baseCoordinate);
+    const endDays = startDays.add(seconds.div(86400));
+    setProperty(component, "DTEND", coordinateToICS(daysToCivilCoordinate(endDays), dateOnly, utc), params);
+  }
+  setProperty(component, "RRULE", followingSegmentRuleText(engine, pattern, segment));
+  for (const exdate of exdatePropertiesForSegment(segment, dateOnly, utc, params)) {
+    component.properties.push(exdate);
+  }
+  setProperty(component, "X-CHRONOLOG-SERIES", baseUid);
+  setProperty(component, "X-CHRONOLOG-SEGMENT-INDEX", String(index));
+  // The partitioning staple's OWN coordinate/frame -- the exact inflection
+  // point, independent of this segment's own DTSTART (LEXICON's Rob-and-John
+  // scenario: the inflection point and the new rule's first occurrence are
+  // two separately authored values, not the same instant in general).
+  const opener = segment.openedBy;
+  if (opener?.frame && opener?.coordinate) {
+    setProperty(
+      component,
+      "X-CHRONOLOG-INFLECTION",
+      coordinateToICS(opener.coordinate, false, false),
+      [{ name: "FRAME", values: [opener.frame] }]
+    );
+  }
+  setProperty(component, "DTSTAMP", icsTimestamp(now || new Date()));
+  return component;
+}
+
 export function exportICS(document, {
   frame,
   start,
@@ -702,28 +1118,51 @@ export function exportICS(document, {
       exportedTasks.add(event.id);
     }
     const component = eventComponent(document, event, relation, now);
+    applyAnchorAnnotations(component, document, engine, event);
     const pattern = nativePatterns.find((item) => item.templateRelation === relation.id);
     if (pattern) {
-      // An end-staple is separate authored data, never written into
-      // `pattern.rrule.UNTIL` (LEXICON's staple anchoring / Rob-and-John
+      // An end/inflection staple is separate authored data, never written
+      // into `pattern.rrule.UNTIL` (LEXICON's staple anchoring / Rob-and-John
       // scenario: the rule keeps saying what it says). So the effective stop
       // is derived here, at export time, and never persisted back onto the
-      // pattern. COUNT and an end-staple both bound the series, but RFC 5545
-      // forbids exporting COUNT and UNTIL together -- deriving a combined
-      // UNTIL would silently drop the COUNT semantics on round-trip, so a
-      // staple on a COUNT-based rule is left as authored (a later wave's
-      // problem) rather than guessed at here.
+      // pattern. Guarded by segment 0's own `untilDays` -- NOT `seriesIsSegmented`,
+      // which asks "does this series have more than one ACTIVE rule segment"
+      // and is deliberately false for a plain end-staple (no following rule,
+      // by src/staples.js's own doc comment: "one staple with no following
+      // rule yields ... a bounded segment 0 and nothing after it"). Segment 0
+      // can be bounded without the series being segmented, so this checks the
+      // bound directly -- an unstapled series' rule text stays untouched (a
+      // re-export of an unchanged document stays byte-identical) because only
+      // an ACTUAL partitioning staple sets `untilDays` at all.
       let effectiveRrule = pattern.rrule;
-      if (engine && seriesEndStaple(document, pattern.id) && recurrenceEndMode(pattern.rrule) !== "count") {
-        const effectiveDays = seriesEffectiveUntilDays(engine, pattern);
-        if (effectiveDays) {
-          try {
-            effectiveRrule = {
-              ...(pattern.rrule || {}),
-              UNTIL: recurrenceUntilForCoordinate(engine.daysCoordinate(pattern.frame, effectiveDays))
-            };
-          } catch {
-            effectiveRrule = pattern.rrule;
+      const segment0 = engine ? seriesSegments(engine, pattern)[0] : null;
+      if (segment0?.untilDays != null) {
+        if (recurrenceEndMode(pattern.rrule) === "count") {
+          // RFC 5545 forbids COUNT and UNTIL in the same rule. ROADMAP #4's
+          // open item: rather than write an illegal UNTIL alongside COUNT (or
+          // silently drop the staple), the emitted set is truncated by
+          // shrinking COUNT itself to however many occurrences the engine's
+          // own projection -- which already enforces this segment's COUNT and
+          // its closing staple together -- actually produces through the
+          // staple. No RRULE math is re-derived here; the engine is the one
+          // authority for "how many occurrences actually happen".
+          const truncated = truncatedSegmentCount(engine, pattern, segment0);
+          if (truncated !== null) {
+            effectiveRrule = { ...(pattern.rrule || {}) };
+            delete effectiveRrule.UNTIL;
+            effectiveRrule.COUNT = String(truncated);
+          }
+        } else {
+          const effectiveDays = seriesEffectiveUntilDays(engine, pattern);
+          if (effectiveDays) {
+            try {
+              effectiveRrule = {
+                ...(pattern.rrule || {}),
+                UNTIL: recurrenceUntilForCoordinate(engine.daysCoordinate(pattern.frame, effectiveDays))
+              };
+            } catch {
+              effectiveRrule = pattern.rrule;
+            }
           }
         }
       }
@@ -761,6 +1200,20 @@ export function exportICS(document, {
       else component.properties.push(...exdateProperties);
     }
     calendar.components.push(component);
+    // A series whose rule changes part-way through cannot be one VEVENT --
+    // RFC 5545 has no concept of it. Every segment after segment 0 (already
+    // above, as `component`) becomes its own sibling VEVENT with its own
+    // DTSTART/DURATION/RRULE, carrying X-CHRONOLOG-SERIES so a ChronoLog
+    // re-import rejoins them into one identity while any other calendar
+    // simply sees the real meetings -- hiding them would be data loss.
+    if (pattern && engine) {
+      const baseUid = property(component, "UID")?.value;
+      const segments = seriesSegments(engine, pattern);
+      for (let index = 1; index < segments.length; index += 1) {
+        const sibling = followingSegmentComponent(document, engine, pattern, segments[index], index, baseUid, now);
+        if (sibling) calendar.components.push(sibling);
+      }
+    }
   }
 
   if (engine && start && end) {
@@ -769,7 +1222,9 @@ export function exportICS(document, {
         && !nativePatterns.some((pattern) => fact.virtualId.startsWith(`${pattern.id}/`))
     );
     for (const fact of generated) {
-      calendar.components.push(eventComponent(document, fact.event, fact.relation, now));
+      const generatedComponent = eventComponent(document, fact.event, fact.relation, now);
+      applyAnchorAnnotations(generatedComponent, document, engine, fact.event);
+      calendar.components.push(generatedComponent);
     }
   }
 

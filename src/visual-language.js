@@ -3,6 +3,8 @@
 // meaning.  This module deliberately contains no DOM code so it can be tested
 // as part of the model-facing renderer contract.
 
+import { applyWeightFormula, defaultWeightRuntime, normalizeWeightFormula, weightContributionOrder } from "./weight-formula.js";
+
 export const THEME_FIELDS = Object.freeze({
   ground: "Ground",
   surface: "Surface",
@@ -204,41 +206,84 @@ function baseImportanceVerdict(context, sourceId, source) {
 // importance trait would -- literally "modified by everything that touches
 // it, such as a multiplier by its frame membership."
 const IMPORTANCE_BASE_WEIGHT = Object.freeze({ standard: 1, important: 2, landmark: 4 });
-const IMPORTANCE_WEIGHT_THRESHOLD = Object.freeze({ important: 2, landmark: 4 });
+// Exported so `src/session.js`'s per-lens thresholds have exactly one place
+// to default from -- the lens workspace UI settles on 2/4 for a lens no one
+// has touched for the same reason a frame with no `display.weight` composes
+// as 1: an unauthored knob must reproduce the prior fixed behavior exactly.
+export const IMPORTANCE_WEIGHT_THRESHOLD = Object.freeze({ important: 2, landmark: 4 });
+
+// The pool of frames a fact's weight is composed from: the event's own
+// direct frame attachments (`engine.eventFrames`, how an imported calendar's
+// own frame reaches its events) union its group/importance-frame
+// memberships including nested groups (`engine.eventDisplayGroupMemberships`,
+// the same union the color cascade's step 2 and `baseImportanceVerdict` both
+// read) -- deduplicated, so a frame reached both ways is asked for its
+// contribution once, not twice.
+function contributingFrameIds(engine, sourceId) {
+  return new Set([
+    ...(engine?.eventFrames?.(sourceId) || []),
+    ...(engine?.eventDisplayGroupMemberships?.(sourceId) || []).map(({ group }) => group)
+  ]);
+}
+
+/**
+ * The full derivation behind `factImportanceWeight`'s single number and
+ * `factImportance`'s three-verdict vocabulary, for the event editor's
+ * "how did this weight happen" readout: the base weight for the event's own
+ * trait/importance-frame verdict, then one step per contributing frame,
+ * showing the weight immediately before and after that frame's weight
+ * formula (see `src/weight-formula.js`), applied in
+ * `weightContributionOrder`'s canonical, deterministic order -- mixed `+`
+ * and `*` do not commute, so which order matters and is part of the
+ * contract, not a rendering nicety.
+ *
+ * `context` is duck-typed as `{ document, engine }`, matching the shape every
+ * lens renderer already threads through `src/projections.js`; an optional
+ * `context.runtime` supplies the `FormulaRuntime` weight formulas evaluate
+ * against, falling back to one shared lazily-created default
+ * (`defaultWeightRuntime`) so every existing caller keeps working untouched.
+ */
+export function explainFactWeight(context, fact) {
+  const document = context?.document;
+  const engine = context?.engine;
+  const runtime = context?.runtime || defaultWeightRuntime();
+  const { sourceId, source } = importanceSource(context, fact);
+  const baseVerdict = baseImportanceVerdict(context, sourceId, source);
+  const base = IMPORTANCE_BASE_WEIGHT[baseVerdict] ?? IMPORTANCE_BASE_WEIGHT.standard;
+  const frameIds = contributingFrameIds(engine, sourceId);
+  const steps = [];
+  let weight = base;
+  for (const frameId of weightContributionOrder(context, [...frameIds])) {
+    const frame = document?.frames?.[frameId];
+    const from = weight;
+    const to = applyWeightFormula(runtime, frame?.display?.weight, weight);
+    steps.push({
+      frame: frameId,
+      title: frame?.title || frameId,
+      formula: normalizeWeightFormula(frame?.display?.weight),
+      from,
+      to
+    });
+    weight = to;
+  }
+  const verdict = weight >= IMPORTANCE_WEIGHT_THRESHOLD.landmark ? "landmark"
+    : weight >= IMPORTANCE_WEIGHT_THRESHOLD.important ? "important" : "standard";
+  return { base, baseVerdict, steps, final: weight, verdict };
+}
 
 /**
  * The composed display weight behind `factImportance`'s three-verdict
- * vocabulary: a base weight for the event's own trait/importance-frame
- * verdict, multiplied by the `display.weight` of every frame the event
- * belongs to. "Belongs to" is the union already used elsewhere for display
- * purposes -- the event's own direct frame attachments (`engine.eventFrames`,
- * which is how an imported calendar's own frame reaches its events) plus its
- * group/importance-frame memberships including nested groups
- * (`engine.eventDisplayGroupMemberships`, the same union the color cascade's
- * step 2 and `baseImportanceVerdict` both read) -- deduplicated, so a frame
- * reached both ways contributes its weight once, not twice. A frame with no
- * authored weight (or an invalid/negative one) contributes nothing, i.e. acts
- * as 1: meaning is authored, never inferred, and a missing knob must not
- * silently change anything.
+ * vocabulary -- see `explainFactWeight` for the full per-frame derivation
+ * this is the final number from. A frame with no authored weight (or one
+ * whose formula fails to parse or evaluate, or evaluates to a non-finite or
+ * negative result) contributes nothing: meaning is authored, never inferred,
+ * and a missing or broken knob must not silently change anything.
  *
  * `context` is duck-typed as `{ document, engine }`, matching the shape every
  * lens renderer already threads through `src/projections.js`.
  */
 export function factImportanceWeight(context, fact) {
-  const document = context?.document;
-  const engine = context?.engine;
-  const { sourceId, source } = importanceSource(context, fact);
-  const verdict = baseImportanceVerdict(context, sourceId, source);
-  let weight = IMPORTANCE_BASE_WEIGHT[verdict] ?? IMPORTANCE_BASE_WEIGHT.standard;
-  const frameIds = new Set([
-    ...(engine?.eventFrames?.(sourceId) || []),
-    ...(engine?.eventDisplayGroupMemberships?.(sourceId) || []).map(({ group }) => group)
-  ]);
-  for (const frameId of frameIds) {
-    const frameWeight = Number(document?.frames?.[frameId]?.display?.weight);
-    if (Number.isFinite(frameWeight) && frameWeight >= 0) weight *= frameWeight;
-  }
-  return weight;
+  return explainFactWeight(context, fact).final;
 }
 
 /**

@@ -4,6 +4,7 @@ import { additiveFrameTraits, frameAuthoringCapabilities, preservedFrameSchema }
 import { addFrame, addPattern, clone, createId } from "../model.js";
 import { mapSnapshot, opsFromMaps } from "../ops.js";
 import { calendarFrames, groupFrames } from "../projections.js";
+import { defaultWeightForNewFrame, resolveAuthoredWeight } from "../weight-formula.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
 
 // The Frames workspace: the frame/group/pattern authoring forms, the Frames
@@ -120,9 +121,18 @@ export function createFramesPanel(app) {
   function frameForm(frame = null, presetKind = "group", embedded = false) {
     const { chronolog } = app;
     const isNew = !frame;
+    // A newly created group or importance frame defaults to a `w * 1.5`
+    // promotion (LEXICON.md: "Groups should probably default to a ... *1.5
+    // ... so events that cross more frames default to being more
+    // prominent") -- see `defaultWeightForNewFrame`'s own note on why this
+    // is deliberately narrower than a blanket default for every frame kind.
+    // This only ever seeds a fresh form's initial value; an existing record
+    // (`frame` truthy) never reaches this branch at all.
+    const newFrameWeight = defaultWeightForNewFrame(presetKind);
     const value = frame || {
       id: "", title: `New ${presetKind}`, traits: frameKindTraits(presetKind),
-      basis: "", color: "#2e8b57", coordinate: null, period: null, display: {}
+      basis: "", color: "#2e8b57", coordinate: null, period: null,
+      display: newFrameWeight === undefined ? {} : { weight: newFrameWeight }
     };
     const recordId = value.id || createId("frame");
     const kind = isNew ? presetKind : frameKind(value);
@@ -157,9 +167,9 @@ export function createFramesPanel(app) {
       <label class="field"><span>Color</span><input name="color" type="color" value="${escapeHTML(value.color || "#2e8b57")}"></label>
     </div>
     <div class="form-row">
-      <label class="field"><span>Display weight</span><input name="displayWeight" type="number" min="0" step="0.1" value="${escapeHTML(String(value.display?.weight ?? 1))}"></label>
+      <label class="field"><span>Display weight</span><input name="displayWeight" type="text" inputmode="decimal" value="${escapeHTML(String(value.display?.weight ?? 1))}" placeholder="1"></label>
     </div>
-    <p class="field-note">A frame is a group: this multiplies the derived Strategic-promotion/importance weight of every event that belongs to it -- calendars, groups, and importance sets alike. 1 is neutral and changes nothing. Set it higher (for example 4) to promote a whole calendar wholesale into Strategic's named view -- for example, giving an imported "US holidays" calendar a weight of 4 promotes every one of its events -- or lower it (down to 0) to demote. It composes multiplicatively with every other frame the same event belongs to, including nested group membership.</p>
+    <p class="field-note">A frame is a group: this reshapes the derived Strategic-promotion/importance weight of every event that belongs to it -- calendars, groups, and importance sets alike -- through a formula written in one variable, <code>w</code>, the weight arriving from everything else the event belongs to. A plain number <code>n</code> is shorthand for <code>w * n</code>; 1 (or <code>w</code>, or blank) is neutral and changes nothing. A formula may use <code>+ - * / ^</code>, parentheses, and standard precedence: <code>w + 0.5</code> adds a fixed bonus, <code>w * 1.5</code> scales it, <code>(w + 1) * 2</code> groups explicitly. Every frame the event belongs to applies its own formula in turn, including nested group membership; an invalid formula changes nothing.</p>
     ${kind === "group" ? `<div class="form-row">
       <label class="field"><span>Strategic</span><select name="strategic">${options([
         ["auto", "Automatic"], ["show", "Promote to name"], ["hide", "Demote / hide"]
@@ -329,15 +339,13 @@ export function createFramesPanel(app) {
           const selectedLenses = data.getAll("frameLenses").map(String);
           if (selectedLenses.length === frameLenses.length) delete display.lenses;
           else display.lenses = selectedLenses;
-          const weightInput = String(data.get("displayWeight") || "").trim();
-          if (weightInput) {
-            const weight = Number(weightInput);
-            if (!Number.isFinite(weight) || weight < 0) throw new Error("Display weight must be zero or greater.");
-            if (weight === 1) delete display.weight;
-            else display.weight = weight;
-          } else {
-            delete display.weight;
-          }
+          // Sugar (a plain number) or a full `chronolog-formula/1` formula --
+          // `resolveAuthoredWeight` is the one place that decision is made
+          // and validated, including the storage-economy rule that identity
+          // input deletes the field rather than storing a no-op formula.
+          const resolvedWeight = resolveAuthoredWeight(app.engine.runtime, data.get("displayWeight"));
+          if (resolvedWeight === undefined) delete display.weight;
+          else display.weight = resolvedWeight;
           if (data.has("importanceLevel")) {
             display.importance = String(data.get("importanceLevel") || "important");
             if (String(data.get("radialMinDays") || "").trim()) display.radialMinDays = Number(data.get("radialMinDays"));
@@ -963,7 +971,6 @@ export function createFramesPanel(app) {
   });
   byId("manage-frames").addEventListener("click", () => {
     const returnTarget = byId("document-menu").querySelector("summary");
-    app.closeDocumentMenu();
     toggleFramesBrowser(returnTarget);
   });
   byId("new-pattern").addEventListener("click", () => openObjectBrowser("pattern"));

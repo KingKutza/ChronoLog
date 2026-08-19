@@ -634,7 +634,11 @@ export function createDragController(app, dom) {
     event.preventDefault();
     // A double click implies its own single click, so the object is already
     // selected by the time this runs — the two agree rather than compete.
-    if (item.dataset.virtualId) app.openVirtualInspector(item.dataset.virtualId);
+    // The exact day this fact was rendered at (stamped by bindFact) is the
+    // resolution window -- see openVirtualInspector's comment: this is what
+    // makes a clicked occurrence resolve regardless of which lens or render
+    // buffer put it on screen.
+    if (item.dataset.virtualId) app.openVirtualInspector(item.dataset.virtualId, item.dataset.factDay);
     else app.openEventInspector(item.dataset.eventId);
   });
 

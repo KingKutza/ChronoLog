@@ -8,7 +8,7 @@ import {
   formatCivil,
   nowDays
 } from "./exact.js";
-import { arcPath, polar, radialCycleWindow, radialGuideSettings, radialRenderState } from "./radial.js";
+import { arcPath, polar, radialCycleWindow, radialGuideSettings, radialRenderState, spiralRibbonPath } from "./radial.js";
 import { objectKindForEvent } from "./object-kinds.js";
 import { factMatchesSelection } from "./session.js";
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
@@ -460,15 +460,28 @@ function renderIntimate(target, context) {
     // Notes and ToDos are floats, not blocks of committed time, so they get their
     // own lane group and right-align in the column. They read as marginalia beside
     // the day rather than competing with events for its width.
+    //
+    // Lane assignment is otherwise frame-agnostic: `displayLayer` ("base" vs.
+    // "included") says which frame supplied a fact for coloring/labeling
+    // purposes only -- it used to also gate a second, independent lane group
+    // for companion-frame facts, sized by a fixed shrinking-width formula that
+    // never looked at what it actually overlapped. That is the 8.19 field
+    // report's item 2: swap which selected frame is primary and the facts that
+    // used to render normally pile into that narrow companion strip instead,
+    // because their lane math changed with their displayLayer even though
+    // nothing about their temporal overlap did. Every selected frame overlays
+    // equally (src/frame-selection.js; AGENTS.md's frame model, point 4), so
+    // lane assignment -- and the width/position it drives -- must depend only
+    // on temporal overlap: one lane group for all timed (non-float) facts,
+    // primary and companion together.
     const isFloat = (item) => ["todo", "note"].includes(objectKindForEvent(item.fact.event));
-    assignLanes(timed.filter((item) => item.fact.displayLayer !== "included" && !isFloat(item)));
-    assignLanes(timed.filter((item) => item.fact.displayLayer === "included"));
-    assignLanes(timed.filter((item) => item.fact.displayLayer !== "included" && isFloat(item)));
+    assignLanes(timed.filter((item) => !isFloat(item)));
+    assignLanes(timed.filter((item) => isFloat(item)));
     for (const item of timed.slice(0, 80)) {
       const included = item.fact.displayLayer === "included";
       const important = factImportance(context, item.fact) !== "standard";
       const continuation = item.fact.continuation && durationMinutes(item.fact.event) < 1440;
-      const float = !included && isFloat(item);
+      const float = isFloat(item);
       const button = element("button", `intimate-event${included ? " included-event" : ""}${float ? " float-event" : ""}${important ? " important-event" : ""}${continuation ? " continuation-event" : ""}`);
       button.type = "button";
       bindFact(button, item.fact);
@@ -476,10 +489,7 @@ function renderIntimate(target, context) {
       button.style.setProperty("--event-color", factColor(context, item.fact));
       button.style.top = `${item.start / 60 * hourPixels}px`;
       button.style.height = `${Math.max(13, (item.end - item.start) / 60 * hourPixels)}px`;
-      if (included) {
-        button.style.right = `${3 + item.lane * 9}px`;
-        button.style.width = `${Math.max(18, 36 - item.lane * 5)}%`;
-      } else if (float) {
+      if (float) {
         // Right-edge anchoring is the ruling (ROADMAP #9: floats read as
         // marginalia down the right of the day); it is not a reason to
         // narrow one. Absent a genuine overlapping float, a float claims the
@@ -1032,20 +1042,32 @@ function renderTopologyLines(target, context, topology) {
   svg.dataset.linesState = orderedEvents.length ? "ordinary" : "empty"; target.append(svg);
 }
 
-// The arc's own endpoints (from arcPath, or from the per-sample spiral path
-// built in renderRadial) are already exact -- they sit exactly on the radial
-// ray of the start/stop date. A round stroke-linecap would bulge the rendered
-// mark past that exact endpoint along the path's tangent direction: on a
-// circular arc (Radial) the bulge is tangential, so the arc visually overshoots
-// its true start/stop angle; on the spiral it overshoots in the mixed
-// radial+angular travel direction.
+// An event mark is a point-in-time indicator, not a boundary that has to
+// read flush: it keeps a round cap in both radial-family lenses (Radial's
+// ring arcs and the Spiral's own event arcs), deliberately, in every lens
+// that uses this helper. That is a different question from whether the
+// mark's own path sits exactly where it should -- Radial's arcPath is a
+// constant-radius circular arc (tangent exactly perpendicular to its own
+// radius, so the mark's long axis reads as sitting square on the radius it
+// occupies) and the Spiral event loop in renderRadial deliberately mirrors
+// that (a constant-radius arcPath at the event's own midpoint radius) rather
+// than tracking the spiral's own radial growth across the event's span --
+// see the comment there. Neither path construction has anything to do with
+// this cap.
 //
-// So this renderer deliberately sets NO stroke-linecap. The cap is decided once,
-// in `.radial-event-arc` in app.css, which is `butt` for exactly this reason.
-// Note the sibling paths in this file do set "stroke-linecap": "round" as an
-// attribute -- do not copy that here, and do not re-add a cap override: an
-// author style or attribute here would silently outrank the stylesheet and make
-// that CSS rule a dead letter.
+// The track (the timeline's own spiral ribbon, or a Radial ring's backing
+// circle) is the opposite case: its own start/stop termini must read flush,
+// which is a geometry question (see spiralRibbonPath in src/radial.js), not
+// a cap question. Conflating the two -- giving the TRACK's terminus a cap
+// decision, or giving an EVENT mark the track's flush-terminus treatment --
+// is exactly the bug this class of comment exists to prevent.
+//
+// So this renderer deliberately sets NO stroke-linecap of its own. The cap
+// is decided once, in `.radial-event-arc` in app.css (`round`). Note the
+// sibling paths in this file (Lines, the radial guide rings) do set
+// "stroke-linecap" as an attribute for their own reasons -- do not copy that
+// here: an author style or attribute here would silently outrank the
+// stylesheet and make that CSS rule a dead letter.
 function radialEventPath(context, fact, attributes) {
   const path = svgElement("path", {
     class: "radial-event-arc",
@@ -1178,23 +1200,20 @@ function renderRadial(target, context) {
     svg.dataset.radialInner = String(inner);
     svg.dataset.radialSpacing = String(spacing);
     const samples = Math.max(180, turns * 120);
-    let path = "";
-    for (let index = 0; index <= samples; index += 1) {
-      const progress = index / samples;
-      const angle = -Math.PI / 2 + progress * turns * Math.PI * 2;
-      const radius = inner + progress * turns * spacing;
-      const [x, y] = polar(cx, cy, radius, angle);
-      path += `${index ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
-    }
     const backingColor = context.document.frames[session.activeFrame]?.color || "#84735d";
+    // The track (this timeline's own spiral ribbon) is a filled polygon, not
+    // a stroked open path with a linecap -- see spiralRibbonPath's doc
+    // comment for why only a radius-offset polygon lands flush on the
+    // vertical ray both ends terminate on, exactly, regardless of the
+    // spiral's pitch. Event marks are the opposite case (radialEventPath
+    // below): they keep round caps deliberately.
     svg.append(svgElement("path", {
-      d: path, fill: "none", stroke: backingColor, opacity: 0.16,
-      "stroke-width": Math.max(34, spacing * 0.9),
-      "stroke-linecap": "round"
+      d: spiralRibbonPath(cx, cy, inner, spacing, turns, samples, Math.max(34, spacing * 0.9) / 2),
+      fill: backingColor, opacity: 0.16
     }));
     svg.append(svgElement("path", {
-      d: path, fill: "none", stroke: backingColor, opacity: 0.28,
-      "stroke-width": 1.4, "stroke-linecap": "round"
+      d: spiralRibbonPath(cx, cy, inner, spacing, turns, samples, 0.7),
+      fill: backingColor, opacity: 0.28
     }));
     radialNowLine(svg, start, end, turns);
     const items = result.facts.map((fact) => {
@@ -1216,28 +1235,33 @@ function renderRadial(target, context) {
     for (const item of items) {
       const { fact, progress: startProgress, end: endProgress } = item;
       const laneOffset = (item.lane - (laneCount - 1) / 2) * laneStep;
-      let eventPath = "";
-      const samples = Math.max(2, Math.ceil((endProgress - startProgress) * turns * 80));
-      for (let sample = 0; sample <= samples; sample += 1) {
-        const progress = startProgress + (endProgress - startProgress) * sample / samples;
-        const angle = -Math.PI / 2 + progress * turns * Math.PI * 2;
-        const radius = inner + progress * turns * spacing + laneOffset;
-        const [x, y] = polar(cx, cy, radius, angle);
-        eventPath += `${sample ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)} `;
-      }
+      // An event mark's own long axis sits perpendicular to the radius it
+      // occupies, exactly like a Radial-ring event's arcPath -- a circle's
+      // tangent is exactly perpendicular to its own radius everywhere (see
+      // radial-stability.test.js), which a mixed radial+angular path
+      // following the spiral's own pitch is not. So the mark is drawn as a
+      // constant-radius arc at its own midpoint progress -- the same radius
+      // its label already anchors to below -- rather than tracking the
+      // spiral's growth across its own span. A duration long enough to carry
+      // its own span across a meaningful fraction of a turn will render as a
+      // single arc at that one representative radius rather than a true
+      // multi-turn spiral; ordinary calendar events are far shorter than a
+      // full turn, so this is the shape that actually reads as "sitting on"
+      // one point of the ribbon rather than skewed across it.
+      const midProgress = (startProgress + endProgress) / 2;
+      const radius = inner + midProgress * turns * spacing + laneOffset;
+      const startAngle = -Math.PI / 2 + startProgress * turns * Math.PI * 2;
+      const endAngle = -Math.PI / 2 + endProgress * turns * Math.PI * 2;
       svg.append(radialEventPath(context, fact, {
-        d: eventPath,
+        d: arcPath(cx, cy, radius, startAngle, endAngle),
         stroke: factColor(context, fact),
         "stroke-width": durationMinutes(fact.event)
           ? Math.min(factImportance(context, fact) === "landmark" ? 11 : 8, Math.max(3, laneStep * 0.72))
           : 4
       }));
       if (session.radialLabels && radialLabels.length < 24) {
-        const middleProgress = (startProgress + endProgress) / 2;
-        const angle = -Math.PI / 2 + middleProgress * turns * Math.PI * 2;
-        const radius = inner + middleProgress * turns * spacing + laneOffset;
-        const [x, y] = polar(cx, cy, radius + 8, angle);
-        radialEventLabel(labelLayer, fact, x, y, radialLabels, Math.cos(angle) < 0 ? "end" : "start");
+        const [x, y] = polar(cx, cy, radius + 8, (startAngle + endAngle) / 2);
+        radialEventLabel(labelLayer, fact, x, y, radialLabels, Math.cos((startAngle + endAngle) / 2) < 0 ? "end" : "start");
       }
     }
   } else {

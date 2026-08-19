@@ -99,9 +99,13 @@ function createStubDom() {
     get classList() {
       const self = this;
       const list = {
-        add(name) {
+        // Real DOM classList.add() takes any number of names in one call
+        // (toolbar.js's today/reset-view controls now do exactly that --
+        // `.classList.add("today-target", "square")` -- so a single-name stub
+        // would silently drop the second one).
+        add(...names) {
           const set = new Set(String(self.className).split(/\s+/).filter(Boolean));
-          set.add(name);
+          for (const name of names) set.add(name);
           self.className = [...set].join(" ");
         },
         remove(name) {
@@ -164,6 +168,10 @@ function createStubDom() {
 
     focus() { globalThis.document.activeElement = this; }
     blur() { if (globalThis.document.activeElement === this) globalThis.document.activeElement = null; }
+    // The manage-frames-proxy delegation (bug 5) calls the real, permanently
+    // hidden #manage-frames button's own .click() rather than reimplementing
+    // its behavior, so the stub needs to support that exact call.
+    click() { this.dispatch("click"); }
   }
 
   const elementsById = new Map();
@@ -179,17 +187,20 @@ function createStubDom() {
   // exist and accept addEventListener/property writes without throwing.
   for (const id of [
     "shared-focus", "undo", "redo", "new-event", "new-todo", "new-note", "create-frame",
-    "theme-settings", "lens-settings", "dock-side", "settings",
+    "theme-settings", "lens-settings", "dock-side",
     "open-todos", "open-notes", "open-document", "document-file",
-    "save-document", "save-as-document", "lens-bar"
+    "save-document", "save-as-document", "lens-bar", "lens-bar-tools",
+    "manage-frames", "manage-frames-proxy", "new-pattern",
+    "sync-calendars", "import-ics", "export-ics",
+    "document-card-body", "snapshot-period-field", "snapshot-period"
   ]) byId(id);
 
   // Static dropdowns enroll by carrying `data-bar-dropdown` in the shell (the
-  // same attribute pocket-instrument.html's four static <details> carry) —
-  // toolbar.js sweeps for it once at construction rather than being handed a
-  // hand-kept list of ids and panel classes, so the panel is discovered as
-  // "whichever child of the <details> is not its <summary>", never a named
-  // class.
+  // same attribute pocket-instrument.html's three remaining static <details>
+  // carry) — toolbar.js sweeps for it once at construction rather than being
+  // handed a hand-kept list of ids and panel classes, so the panel is
+  // discovered as "whichever child of the <details> is not its <summary>",
+  // never a named class.
   function dropdown(id, panelClass) {
     const container = byId(id, "details");
     container.setAttribute("data-bar-dropdown", "");
@@ -201,7 +212,6 @@ function createStubDom() {
   }
 
   const createMenu = dropdown("create-menu", "create-menu-panel");
-  const documentMenu = dropdown("document-menu", "document-menu-panel");
   const hiddenLenses = dropdown("hidden-lenses", "hidden-lens-panel");
   const frameSelect = dropdown("frame-select", "frame-select-panel");
   // updateFrameSelect() writes the leading-frame summary into this span,
@@ -209,6 +219,14 @@ function createStubDom() {
   const frameSelectSummaryValue = new StubElement("span");
   frameSelectSummaryValue.className = "frame-select-summary-value";
   frameSelect.querySelector("summary").append(frameSelectSummaryValue);
+  // Bug 5: the document control is a <details> with only a <summary> child —
+  // no panel, and no data-bar-dropdown — because it opens a dock card
+  // (src/ui/toolbar.js's openDocumentCard) rather than a floating dropdown.
+  // Its click handler calls preventDefault() itself, so the stub does not
+  // need to model native <details> toggling for this one.
+  const documentMenu = byId("document-menu", "details");
+  const documentMenuSummary = new StubElement("summary");
+  documentMenu.append(documentMenuSummary);
   const dropdownLayer = byId("dropdown-layer");
   const lensControls = new StubElement("section");
   const projection = new StubElement("div");
@@ -251,7 +269,7 @@ function createStubDom() {
   });
 
   return {
-    StubElement, elementsById, createMenu, documentMenu, hiddenLenses, frameSelect,
+    StubElement, elementsById, createMenu, documentMenu, documentMenuSummary, hiddenLenses, frameSelect,
     dropdownLayer, lensControls, projection, documentStub, windowStub
   };
 }
@@ -294,8 +312,12 @@ test("every registered bar dropdown ends up in the shared layer, edge-flipped, w
     // dropdown that calls registerBarDropdown is covered by this test with no
     // change here, which is the whole point of the class.
     const ids = h.toolbar.barDropdowns.ids();
-    assert.ok(ids.includes("create-menu") && ids.includes("document-menu") && ids.includes("hidden-lenses") && ids.includes("frame-select"),
+    assert.ok(ids.includes("create-menu") && ids.includes("hidden-lenses") && ids.includes("frame-select"),
       "every static attachment point enrolled at construction");
+    // The document control is deliberately not one of them any more (bug 5):
+    // it opens a dock card, not a dropdown panel, so it carries no
+    // data-bar-dropdown attribute and never registers here.
+    assert.ok(!ids.includes("document-menu"), "the document control is a dock-card trigger now, not a bar dropdown");
     for (const id of ids) {
       const entry = h.toolbar.barDropdowns.get(id);
       assert.equal(entry.panel.parentElement, entry.container, `${id}'s panel starts at home, not already in the layer`);
@@ -589,7 +611,10 @@ test("every registered dropdown satisfies the full bar-dropdown contract", () =>
   try {
     h.toolbar.updateLensControls();
     const ids = h.toolbar.barDropdowns.ids();
-    assert.ok(ids.length >= 5, "the four static drops plus the dynamic lens-control-overflow are all enrolled");
+    // create-menu, hidden-lenses, frame-select are the remaining static
+    // drops (bug 5 took the document control out of this set entirely —
+    // it opens a dock card instead), plus the dynamic lens-control-overflow.
+    assert.ok(ids.length >= 4, "the three static drops plus the dynamic lens-control-overflow are all enrolled");
     const outsider = new h.StubElement("div");
     for (const id of ids) {
       const entry = h.toolbar.barDropdowns.get(id);
@@ -663,6 +688,92 @@ test("the lens workspace's Apply button commits the draft without closing the di
   }
 });
 
+// 8.19 Part Three, Track B: "nor in the lenses setting window is there a clear
+// way to see or configure the threshold." The promotion thresholds used to be
+// two module constants nobody could see, let alone set. They are now visible
+// and editable per lens, on the lens's own row.
+//
+// The defaults matter as much as the control: they are exactly the constants
+// that were hardcoded before (2 and 4), so a document that never touches this
+// surface renders identically. That is the regression guard for the whole
+// weight rework, asserted here at the UI seam.
+test("the lens workspace exposes per-lens promotion thresholds, defaulted so nothing changes", () => {
+  const h = harness();
+  try {
+    let inspectorNode = null;
+    h.app.openInspector = (title, node) => { inspectorNode = node; };
+    h.app.dismissInspector = () => {};
+    h.elementsById.get("lens-settings").dispatch("click");
+    assert.ok(inspectorNode, "opening \"Configure lenses\" built a form");
+
+    const thresholdInputs = inspectorNode.querySelectorAll("input")
+      .filter((node) => node.dataset?.tier);
+    const lenses = new Set(thresholdInputs.map((node) => node.dataset.lens));
+    assert.equal(
+      lenses.size,
+      h.app.session.lensOrder.length,
+      "every lens on the workspace gets its own threshold controls"
+    );
+    for (const lens of lenses) {
+      const forLens = thresholdInputs.filter((node) => node.dataset.lens === lens);
+      assert.deepEqual(
+        forLens.map((node) => node.dataset.tier).sort(),
+        ["important", "landmark"],
+        `${lens} exposes both promotion tiers`
+      );
+    }
+    assert.deepEqual(
+      thresholdInputs.filter((node) => node.dataset.tier === "important").map((node) => node.value),
+      thresholdInputs.filter((node) => node.dataset.tier === "important").map(() => "2"),
+      "the important threshold defaults to the previously-hardcoded 2"
+    );
+    assert.deepEqual(
+      thresholdInputs.filter((node) => node.dataset.tier === "landmark").map((node) => node.value),
+      thresholdInputs.filter((node) => node.dataset.tier === "landmark").map(() => "4"),
+      "the landmark threshold defaults to the previously-hardcoded 4"
+    );
+  } finally {
+    h.restore();
+  }
+});
+
+// Editing a threshold has to actually reach the session, and it has to travel
+// on the same Apply the rest of the workspace draft uses -- a control that
+// looks live but commits nowhere is worse than no control.
+test("editing a lens threshold commits to the session through Apply", () => {
+  const h = harness();
+  try {
+    let inspectorNode = null;
+    let dismissed = false;
+    h.app.openInspector = (title, node) => { inspectorNode = node; };
+    h.app.dismissInspector = () => { dismissed = true; };
+    h.elementsById.get("lens-settings").dispatch("click");
+
+    const target = inspectorNode.querySelectorAll("input")
+      .find((node) => node.dataset?.tier === "landmark");
+    assert.ok(target, "a landmark threshold input exists");
+    const lens = target.dataset.lens;
+    assert.equal(h.app.session.lensThresholds[lens].landmark, 4, "starts at the default");
+
+    target.value = "7.5";
+    target.dispatch("input");
+    const apply = inspectorNode.querySelectorAll("button").find((node) => node.id === "apply-lens-workspace");
+    apply.dispatch("click");
+
+    assert.equal(dismissed, false, "Apply does not close the dialog");
+    assert.equal(h.app.session.lensThresholds[lens].landmark, 7.5, "the edited threshold reached the session");
+    assert.equal(
+      h.app.session.lensThresholds[lens].important, 2,
+      "the tier that was not edited keeps its default"
+    );
+    // View state, not document state -- so it has to survive the session's own
+    // serialization (AGENTS.md's lens extension contract).
+    assert.equal(h.app.session.toJSON().lensThresholds[lens].landmark, 7.5, "and it serializes");
+  } finally {
+    h.restore();
+  }
+});
+
 // Owner item 3, "New Lacks a New Frame Option": the create-menu ("New") panel
 // gained a fourth entry alongside Event/ToDo/Note. It is wired the same way
 // those three are — close the menu, then hand off to the one place frame
@@ -683,6 +794,112 @@ test("the New menu offers a Frame entry that closes the menu and hands off to cr
     frameButton.dispatch("click");
     assert.equal(created, 1, "invoking the menu entry calls app.createFrame() exactly once");
     assert.equal(h.createMenu.open, false, "picking an entry closes the New menu, like Event/ToDo/Note do");
+  } finally {
+    h.restore();
+  }
+});
+
+// 8.19 Part Three, bug 3: the reported defect (the lens bar hamburger is not
+// full-height) is fixed at the .bar-control CLASS level in app.css, which a
+// Node test cannot measure directly (there is no layout engine here). What
+// this harness CAN verify is the other half of "fix the class, audit every
+// sibling": every context-bar control that src/ui/toolbar.js itself builds
+// (today/reset/Options-summary/lens-control/lens-readout instances) actually
+// carries that class, the same way test/ui-contract.test.js checks the
+// static document-bar/view-bar markup.
+test("every dynamically-built context-bar control carries the shared bar-control class", () => {
+  const h = harness();
+  try {
+    h.toolbar.updateLensControls();
+    const controls = h.lensControls.descendants();
+    const today = controls.find((node) => node.id === "today");
+    const resetView = controls.find((node) => node.id === "reset-view");
+    const optionsSummary = controls.find((node) => node.tagName === "SUMMARY");
+    assert.ok(today.classList.contains("bar-control") && today.classList.contains("square"), "today is a full-height square");
+    assert.ok(resetView.classList.contains("bar-control") && resetView.classList.contains("square"), "reset-view is a full-height square");
+    assert.ok(optionsSummary.classList.contains("bar-control"), "the Options dropdown's summary is the same shape of control as #hidden-lenses");
+    const readouts = controls.filter((node) => String(node.className).split(/\s+/).includes("lens-readout"));
+    assert.ok(readouts.length > 0 && readouts.every((node) => node.classList.contains("bar-control")), "every lens-readout carries bar-control");
+    const lensControlNodes = controls.filter((node) => String(node.className).split(/\s+/).includes("lens-control"));
+    assert.ok(lensControlNodes.length > 0 && lensControlNodes.every((node) => node.classList.contains("bar-control")), "every lens-control carries bar-control");
+  } finally {
+    h.restore();
+  }
+});
+
+// Bug 5: the document control opens a dock card instead of a floating
+// dropdown panel, and a second click on it (while the card is open) closes
+// the card again — the same toggle shape as the Frames browser trigger.
+test("the document control opens the document/settings card as a dock card, and toggles it closed on a second click", () => {
+  const h = harness();
+  try {
+    let openedTitle = null;
+    let openedBody = null;
+    let openedPanel = null;
+    let closedId = null;
+    let cardOpen = false;
+    h.app.openInspector = (title, body, panel) => { openedTitle = title; openedBody = body; openedPanel = panel; cardOpen = true; };
+    h.app.dockCardBody = (id) => (cardOpen && id === "panel:document-settings" ? openedBody : null);
+    h.app.closeDockCard = (id) => { closedId = id; cardOpen = false; };
+
+    h.documentMenuSummary.dispatch("click");
+    assert.equal(openedTitle, "Document");
+    assert.equal(openedPanel, "document-settings");
+    assert.equal(openedBody, h.elementsById.get("document-card-body"), "the same persistent body node is reused, not a fresh one built per open");
+    assert.equal(openedBody.hidden, false, "the body is unhidden once it is actually being shown in a card");
+
+    h.documentMenuSummary.dispatch("click");
+    assert.equal(closedId, "panel:document-settings", "a second click while open closes the card instead of reopening it");
+  } finally {
+    h.restore();
+  }
+});
+
+// Bug 5's audit, item by item — which ids ended up nested inside
+// #document-card-body versus relocated elsewhere, is a question about the
+// real static markup's tree structure, which this stub (flat byId() stand-ins
+// with no authored nesting) does not reproduce; test/ui-contract.test.js's
+// "the document card holds the audited document/settings content..." test
+// covers that against the actual pocket-instrument.html. What this harness
+// adds is the retired "Settings" entry point no longer exists at all.
+test("the standalone Settings control is gone — the document control is the only entry point", () => {
+  const h = harness();
+  try {
+    assert.equal(h.elementsById.has("settings"), false, "no #settings id is looked up any more");
+  } finally {
+    h.restore();
+  }
+});
+
+// The "Frames workspace" entry stays document-scoped, but its real trigger
+// (#manage-frames) is permanently attached outside the dock so
+// src/ui/frames-panel.js's repeated byId("manage-frames") lookups never go
+// stale across the document card's own open/close cycles (see the comment on
+// #manage-frames in pocket-instrument.html). The proxy on the card just
+// clicks it.
+test("the document card's Frames workspace proxy delegates to the real, permanently-attached manage-frames trigger", () => {
+  const h = harness();
+  try {
+    let realClicks = 0;
+    h.elementsById.get("manage-frames").addEventListener("click", () => { realClicks += 1; });
+    h.elementsById.get("manage-frames-proxy").dispatch("click");
+    assert.equal(realClicks, 1);
+  } finally {
+    h.restore();
+  }
+});
+
+// ROADMAP #1's snapshot-compaction period: the field only means anything
+// against the local server, so it stays hidden without a local workspace
+// target (e.g. this stub harness, which passes LOCAL_WORKSPACE_TARGET: {}).
+test("the snapshot period field stays hidden without a local workspace target", () => {
+  const h = harness();
+  try {
+    h.app.openInspector = () => {};
+    h.app.dockCardBody = () => null;
+    h.app.closeDockCard = () => {};
+    h.documentMenuSummary.dispatch("click");
+    assert.equal(h.elementsById.get("snapshot-period-field").hidden, true);
   } finally {
     h.restore();
   }

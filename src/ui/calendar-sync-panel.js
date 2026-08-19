@@ -11,8 +11,8 @@ const IMPORT_MAPS = ["frames", "events", "patterns", "relations", "overrides"];
 // The ICS feed UI: file import/export, staple suggestions surfaced after an
 // import, and the read-only HTTPS calendar-feed subscription panel. `app`
 // carries the live document/engine/session/history plus the cross-module
-// calls into the toolbar (`app.closeDocumentMenu`) and the Frames panel
-// (`app.selectLeadingFrame`) that a successful import triggers.
+// call into the Frames panel (`app.selectLeadingFrame`) that a successful
+// import triggers.
 export function createCalendarSyncPanel(app) {
   function openStapleSuggestions(suggestions) {
     const { chronolog } = app;
@@ -340,12 +340,10 @@ export function createCalendarSyncPanel(app) {
   }
 
   byId("sync-calendars").addEventListener("click", () => {
-    app.closeDocumentMenu();
     openCalendarSyncInspector();
   });
 
   byId("import-ics").addEventListener("click", () => {
-    app.closeDocumentMenu();
     byId("ics-file").click();
   });
   byId("ics-file").addEventListener("change", async (event) => {
@@ -370,7 +368,6 @@ export function createCalendarSyncPanel(app) {
 
   byId("export-ics").addEventListener("click", () => {
     const { chronolog, session, engine } = app;
-    app.closeDocumentMenu();
     try {
       const window = session.window();
       const text = exportICS(chronolog, {

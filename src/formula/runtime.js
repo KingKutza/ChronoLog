@@ -115,6 +115,13 @@ export class FormulaRuntime {
     this.precision = precision;
     this.maxIntegerDigits = maxIntegerDigits;
     this.cache = new Map();
+    // A separate cache from `this.cache`: a module's source and a bare
+    // expression's source are both plain strings, and the same text could in
+    // principle be handed to both `compile()` and `compileExpression()` (a
+    // lone name is a valid expression but not a valid module), so keying
+    // them together would risk one call site handing the other a cached AST
+    // of the wrong shape.
+    this.expressionCache = new Map();
   }
 
   parse(source) {
@@ -127,6 +134,49 @@ export class FormulaRuntime {
     const module = this.instantiate(ast);
     this.cache.set(source, module);
     return module;
+  }
+
+  // A bare expression -- `w * 1.5 + 0.5`, not a `const`/`fn` module -- for
+  // callers (the weight-formula pipeline, so far) that just want one value
+  // back rather than an exported module surface. `expression()` only reads
+  // as much as forms one expression; anything left over is trailing garbage
+  // (`1 + 1)` or `2 2`) that would otherwise be silently discarded rather
+  // than rejected, so the next token after the expression must be EOF or
+  // parsing fails the same way a truncated program should.
+  compileExpression(source) {
+    if (this.expressionCache.has(source)) return this.expressionCache.get(source);
+    const parser = new Parser(source);
+    const ast = parser.expression();
+    const trailing = parser.tokens.next();
+    if (trailing.type !== "eof") {
+      throw new SyntaxError(`Unexpected trailing input ${trailing.value || "token"} at ${trailing.start}`);
+    }
+    this.expressionCache.set(source, ast);
+    return ast;
+  }
+
+  // Evaluates a bare expression against a supplied variable map, sandboxed
+  // exactly like a module call: the same `builtins()`, the same fuel/depth/
+  // output-size limits (`evaluate()`, `assertOutputSize()`), no ambient host
+  // access. A weight formula runs once per contributing frame per fact per
+  // render, so this is on a hot path -- `compileExpression` above is what
+  // keeps repeated calls with the same source from re-parsing every time.
+  //
+  // Returns a plain JS value at the boundary rather than a `Rational`: a
+  // numeric result is rounded through the usual `limitNumber` discipline and
+  // converted with `toNumber()` so callers never have to know this runtime
+  // deals in exact rationals internally; a non-numeric result (a string, a
+  // boolean, a record) is unwrapped with the same `toPlain()` every module
+  // call already returns.
+  evaluateExpression(source, variables = {}) {
+    const ast = this.compileExpression(source);
+    const global = new Environment();
+    for (const [name, value] of Object.entries(this.builtins())) global.define(name, value);
+    for (const [name, value] of Object.entries(variables)) global.define(name, deepInput(value));
+    const state = { fuel: this.defaultFuel, emitted: 0, depth: 0 };
+    const result = this.evaluate(ast, global, state);
+    this.assertOutputSize(result);
+    return isRational(result) ? this.limitNumber(result).toNumber() : toPlain(result);
   }
 
   instantiate(ast) {

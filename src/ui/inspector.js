@@ -9,14 +9,13 @@ import {
   addEvent,
   addPattern,
   addRelation,
-  clearSeriesEndStaple,
   clone,
   createId,
   durationMagnitude,
   durationMagnitudeDays,
   eventRelations,
-  setSeriesEndStaple,
-  seriesEndStaple
+  putStaple,
+  removeStaple
 } from "../model.js";
 import { OBJECT_KINDS, normalizeObjectKind, objectKindForEvent, traitsForObjectKind } from "../object-kinds.js";
 import { delOp, putOp } from "../ops.js";
@@ -26,6 +25,16 @@ import {
   recurrenceEndMode,
   recurrenceUntilDate
 } from "../recurrence-end.js";
+import {
+  ANCHOR_ROLE_ORDER,
+  isFuzzyStaple,
+  resolveObjectExtent,
+  STAPLE_KINDS,
+  stapleKind,
+  staplesForObject,
+  staplesForSeries
+} from "../staples.js";
+import { explainFactWeight } from "../visual-language.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
 
 // Whether the event-color field on submit should become the object's own
@@ -39,6 +48,274 @@ import { byId, escapeHTML } from "./dom-helpers.js";
 // DOM harness.
 export function resolveSubmittedEventColor(explicit, colorValue, fallback = "#d4552d") {
   return explicit ? String(colorValue || fallback) : null;
+}
+
+// Parses the editor's own "year-month-day[ hour:minute[:second]]" date/time
+// text into a coordinate. Pure (no `app` reach-in), so it is shared by the
+// main placement fields, the Completed field, and the staples section's Add
+// control without duplicating the grammar three times.
+function parseDateText(text) {
+  const match = /^([+-]?\d+)-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}(?:\.\d+)?))?)?$/.exec(
+    String(text).trim()
+  );
+  if (!match) throw new Error("Use year-month-day and optional hour:minute:second");
+  return coordinate([
+    { level: "year", value: match[1] },
+    { level: "month", value: match[2] },
+    { level: "day", value: match[3] },
+    { level: "hour", value: match[4] || "0" },
+    { level: "minute", value: match[5] || "0" },
+    { level: "second", value: match[6] || "0" }
+  ]);
+}
+
+// A relation's (or a staple's -- same `coordinate`/`parameters.dateOnly`
+// shape) date/time split into the two text fields the editor's date and time
+// inputs hold. Pure, so the staples list can format a row without a DOM.
+function relationDateParts(relation) {
+  if (!relation?.coordinate) return { date: "", time: "" };
+  const value = relation.coordinate;
+  const year = levelValue(value, "year", 0n).toString().padStart(4, "0");
+  const month = levelValue(value, "month", 1n).toString().padStart(2, "0");
+  const day = levelValue(value, "day", 1n).toString().padStart(2, "0");
+  const hour = levelValue(value, "hour", 0n).toString().padStart(2, "0");
+  const minute = levelValue(value, "minute", 0n).toString().padStart(2, "0");
+  return { date: `${year}-${month}-${day}`, time: relation.parameters?.dateOnly ? "" : `${hour}:${minute}` };
+}
+
+// The registry-driven dropdown source the owner's ruling requires (STAPLE_KINDS
+// in src/staples.js is the one place a staple kind is added), filtered to the
+// scope actually being authored -- a series-only kind ("end"/"inflection"/
+// "phase") never appears while adding a staple to a bare, non-recurring event.
+export function stapleKindOptions(scope) {
+  return Object.entries(STAPLE_KINDS)
+    .filter(([, definition]) => definition.targets.includes(scope))
+    .map(([value, definition]) => [value, definition.label]);
+}
+
+const CUSTOM_ANCHOR_ROLE = "__custom__";
+
+function magnitudeOrNull(amount, unit) {
+  const text = String(amount ?? "").trim();
+  if (!text) return null;
+  return durationMagnitude(text, unit || "minute");
+}
+
+// The staples section's Add control, as a decision pulled out of the DOM --
+// the same mitigation `resolveSubmittedEventColor` and
+// test/frame-creation.test.js already use, because a form this data-rich
+// cannot be driven through FormData in the repo's stub-DOM harness. Builds
+// exactly the record `putStaple` expects (minus `id`, which the caller
+// assigns so a single-record transaction can name it up front), given plain
+// field values already read off the (possibly stubbed) form. Throws a
+// user-facing message on anything unresolvable, same as `parseDateText`.
+export function buildStapleInput({
+  scope,
+  targetId,
+  kind,
+  role = "start",
+  roleName = "",
+  dateText = "",
+  timeText = "",
+  frame,
+  fuzzy = false,
+  spreadBeforeAmount = "",
+  spreadBeforeUnit = "minute",
+  spreadAfterAmount = "",
+  spreadAfterUnit = "minute",
+  offsetAmount = "",
+  offsetUnit = "minute",
+  ruleRepeat = "",
+  ruleInterval = "1",
+  ruleDateText = "",
+  ruleTimeText = "",
+  ruleDurationAmount = "",
+  ruleDurationUnit = "minute"
+} = {}) {
+  const definition = stapleKind(kind);
+  if (!definition) throw new Error("Choose a staple kind.");
+  if (!definition.targets.includes(scope)) {
+    throw new Error(`${definition.label} cannot be placed on ${scope === "series" ? "a series" : "an event"}.`);
+  }
+  if (!targetId) throw new Error(scope === "series" ? "This event has no series to staple yet." : "Nothing to staple this to.");
+  const dateValue = String(dateText || "").trim();
+  if (!dateValue) throw new Error("A staple needs a date.");
+  const timeValue = String(timeText || "").trim();
+  // The "end" kind alone keeps the shipped end-staple's own default: a bare
+  // date means through the end of that day (LEXICON's "the staple's own
+  // occurrence survives; nothing after it projects"), exactly what
+  // `setSeriesEndStaple` always did. Every other kind follows the "no time
+  // means midnight" convention the Start date field already uses -- nothing
+  // in any other kind's meaning calls for an end-of-day default.
+  const timeForCoordinate = timeValue || (kind === "end" ? "23:59:59" : "00:00");
+  const coordinateValue = parseDateText(`${dateValue} ${timeForCoordinate}`);
+  const input = {
+    ...(scope === "series" ? { series: targetId } : { object: targetId }),
+    kind,
+    frame,
+    coordinate: coordinateValue
+  };
+  if (!timeValue) input.parameters = { dateOnly: true };
+  if (definition.anchors) {
+    const isCustom = role === CUSTOM_ANCHOR_ROLE;
+    const resolvedRole = isCustom ? String(roleName || "").trim() : role;
+    if (!resolvedRole) throw new Error("Name this anchor's role.");
+    input.role = resolvedRole;
+    // A named point's distance from the object's start ("magnitude pairing"
+    // -- src/staples.js's `namedOffsetDays`); start/end/midpoint derive their
+    // magnitude from a second anchor or the object's own duration instead, so
+    // an offset only means something for a role outside that fixed set.
+    if (isCustom) {
+      const offset = magnitudeOrNull(offsetAmount, offsetUnit);
+      if (offset) input.payload = { ...(input.payload || {}), offset };
+    }
+  }
+  if (fuzzy) {
+    // Asymmetric on purpose (src/staples.js's own note): "about 5ish" and a
+    // hard ceiling are different shapes, so before/after are two independent
+    // fields, never one +/-.
+    input.spread = {
+      before: magnitudeOrNull(spreadBeforeAmount, spreadBeforeUnit) || durationMagnitude("0", "minute"),
+      after: magnitudeOrNull(spreadAfterAmount, spreadAfterUnit) || durationMagnitude("0", "minute")
+    };
+  }
+  // The following rule, for a kind that can carry one. This is the second half
+  // of LEXICON's Rob-and-John ruling -- "then either define a new rule
+  // post-staple or a new series, on preference" -- and leaving it out would
+  // reproduce the exact objection this substrate answers: a staple that can
+  // only ever terminate. Blank repeat IS the other preference: the staple
+  // partitions and nothing follows, which is what an end staple is.
+  const repeatChoice = String(ruleRepeat || "").trim();
+  if (definition.carriesRule && repeatChoice) {
+    const frequency = repeatChoice === "WEEKDAYS" ? "WEEKLY" : repeatChoice;
+    const interval = Math.max(1, Math.min(999, Number(ruleInterval) || 1));
+    const rrule = { FREQ: frequency, INTERVAL: String(interval) };
+    if (repeatChoice === "WEEKDAYS") rrule.BYDAY = "MO,TU,WE,TH,FR";
+    const head = { rrule };
+    // The following rule's own start. Without it the new rule would inherit the
+    // staple's instant as its base, and since a partitioning staple opens its
+    // segment EXCLUSIVELY (src/staples.js's boundary convention) the first
+    // occurrence would land a whole cycle later than the user meant. Rob-and-John
+    // needs it regardless: the new meeting is a Thursday lunch, not the old
+    // Monday 6:15.
+    const ruleDate = String(ruleDateText || "").trim();
+    if (ruleDate) {
+      head.coordinate = parseDateText(`${ruleDate} ${String(ruleTimeText || "").trim() || "00:00"}`);
+      head.frame = frame;
+    }
+    const magnitude = magnitudeOrNull(ruleDurationAmount, ruleDurationUnit);
+    if (magnitude) head.magnitude = magnitude;
+    input.payload = { ...(input.payload || {}), rule: head };
+  }
+  return input;
+}
+
+// One staple list row's display fields, pure over the record and the scope it
+// was fetched under ("series" or "object") -- so the list's markup is a dumb
+// map over this, traceable by hand, and this decision is what a test drives
+// directly instead of the DOM.
+export function stapleRowModel(staple, scope) {
+  const definition = stapleKind(staple?.kind);
+  const parts = relationDateParts(staple);
+  return {
+    id: staple?.id || null,
+    scope,
+    kind: staple?.kind || null,
+    kindLabel: definition?.label || staple?.kind || "Staple",
+    role: staple?.role || null,
+    date: parts.date,
+    time: parts.time,
+    fuzzy: isFuzzyStaple(staple)
+  };
+}
+
+// The derived-extent readout's display fields, pure over `resolveObjectExtent`'s
+// own result -- civil-date formatting and the overdetermined staples' kind
+// labels are the only transformation the editor applies, so this is that
+// transformation in one testable place.
+export function extentReadoutModel(extent) {
+  const civilText = (days) => (days === null || days === undefined ? null : formatCivil(daysToCivilCoordinate(days), true));
+  return {
+    start: civilText(extent?.startDays ?? null),
+    end: civilText(extent?.endDays ?? null),
+    source: extent?.source || "unstapled",
+    derivedMagnitude: Boolean(extent?.derivedMagnitude),
+    overdetermined: (extent?.overdetermined || []).map((item) => ({
+      kind: item.staple?.kind || null,
+      kindLabel: stapleKind(item.staple?.kind)?.label || item.staple?.kind || "Staple",
+      role: item.role || null,
+      reason: item.reason
+    }))
+  };
+}
+
+// The weight readout's display fields, pure over `explainFactWeight`'s own
+// result. Almost a pass-through on purpose -- the owner's ask was visibility
+// into an existing derivation, not a new one, so the editor invents nothing
+// here; it names the fields the markup maps over one-for-one.
+export function weightReadoutModel(explanation) {
+  return {
+    base: explanation.base,
+    baseVerdict: explanation.baseVerdict,
+    rows: (explanation.steps || []).map((step) => ({
+      title: step.title,
+      formula: step.formula,
+      from: step.from,
+      to: step.to
+    })),
+    final: explanation.final,
+    verdict: explanation.verdict
+  };
+}
+
+// The unit choices every duration-shaped field in this editor offers
+// (Duration, a fuzzy staple's before/after spread, a named anchor's offset) --
+// one list, so a new unit is one edit instead of three.
+function magnitudeUnitOptions(selected = "minute") {
+  return [["minute", "Minutes"], ["hour", "Hours"], ["day", "Days"], ["second", "Seconds"]]
+    .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+// The three render helpers below are dumb maps over the pure `*Model`
+// functions above -- traced by hand rather than driven through the DOM (the
+// repo's stub-DOM harness cannot parse `innerHTML`/drive `FormData`; see
+// `buildStapleInput`'s own note). Kept tiny and free of decisions on purpose:
+// anything that looks like a choice belongs in the exported, tested model
+// function instead of here.
+function weightReadoutMarkup(model) {
+  const rows = model.rows.map((row) => `<div class="weight-readout-row">
+      <span class="weight-readout-title">${escapeHTML(row.title)}</span>
+      <code class="weight-readout-formula">${escapeHTML(row.formula)}</code>
+      <span class="weight-readout-values">${Number(row.from).toFixed(2)} → ${Number(row.to).toFixed(2)}</span>
+    </div>`).join("");
+  return `
+    <p class="field-note weight-readout-base">Base weight <strong>${Number(model.base).toFixed(2)}</strong> (${escapeHTML(model.baseVerdict)})</p>
+    ${rows}
+    <p class="field-note weight-readout-final">Final weight <strong>${Number(model.final).toFixed(2)}</strong> — <strong>${escapeHTML(model.verdict)}</strong></p>`;
+}
+
+function stapleRowMarkup(row) {
+  return `<li class="staple-row" data-staple-id="${escapeHTML(row.id)}" data-staple-scope="${row.scope}">
+    <span class="staple-kind">${escapeHTML(row.kindLabel)}</span>
+    ${row.role ? `<span class="staple-role">${escapeHTML(row.role)}</span>` : ""}
+    <span class="staple-position">${escapeHTML(row.date)}${row.time ? ` ${escapeHTML(row.time)}` : ""}</span>
+    ${row.fuzzy ? `<span class="staple-fuzzy" title="Fuzzy staple">~ fuzzy</span>` : ""}
+    <span class="staple-scope-label">${row.scope === "series" ? "series" : "this event"}</span>
+    <button class="instrument-button danger" type="button" data-remove-staple>Remove</button>
+  </li>`;
+}
+
+function extentReadoutMarkup(model) {
+  const magnitudeNote = model.source === "anchors" ? "magnitude derived from anchors"
+    : model.source === "anchor+magnitude" ? "an anchor plus this object's own duration"
+      : model.source === "placement" ? "its own placement and duration"
+        : model.source === "unresolved" ? "its placement could not be resolved"
+          : "not stapled yet";
+  const overdetermined = model.overdetermined.map((item) => `<li>${escapeHTML(item.kindLabel)}${item.role ? ` (${escapeHTML(item.role)})` : ""} — not used: ${escapeHTML(item.reason)}</li>`).join("");
+  return `
+    <p class="field-note staple-extent-note">Resolved extent: <strong>${model.start ? escapeHTML(model.start) : "unresolved"}</strong> to <strong>${model.end ? escapeHTML(model.end) : "unresolved"}</strong> (${escapeHTML(magnitudeNote)}).</p>
+    ${overdetermined ? `<p class="field-note staple-extent-warning">Authored but not used for placement:</p><ul class="staple-overdetermined">${overdetermined}</ul>` : ""}`;
 }
 
 // The Inspector panel: generic open/close chrome, the provisional-draft
@@ -198,21 +475,6 @@ export function createInspector(app) {
     });
   }
 
-  function parseDateText(text) {
-    const match = /^([+-]?\d+)-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}(?:\.\d+)?))?)?$/.exec(
-      String(text).trim()
-    );
-    if (!match) throw new Error("Use year-month-day and optional hour:minute:second");
-    return coordinate([
-      { level: "year", value: match[1] },
-      { level: "month", value: match[2] },
-      { level: "day", value: match[3] },
-      { level: "hour", value: match[4] || "0" },
-      { level: "minute", value: match[5] || "0" },
-      { level: "second", value: match[6] || "0" }
-    ]);
-  }
-
   function friendlyDuration(event) {
     const seconds = durationMagnitudeDays(event?.magnitudes?.duration).mul(86400).toNumber();
     if (!Number.isFinite(seconds) || seconds <= 0) return { amount: "0", unit: "minute" };
@@ -236,6 +498,15 @@ export function createInspector(app) {
     return all.find((relation) => relation.frame === session.activeFrame && relation.role !== "completed")
       || all.find((relation) => relation.role !== "completed")
       || null;
+  }
+
+  // The one place that finds "the series this event is the template of", read
+  // fresh every time (rather than captured once at open time) so the staples
+  // section stays correct across its own live-edited card lifetime.
+  function findRecurrencePattern(chronologDocument, eventId) {
+    return Object.values(chronologDocument.patterns).find(
+      (pattern) => pattern.kind === "ics-rrule" && pattern.templateEvent === eventId
+    ) || null;
   }
 
   // A pattern carries its rule twice: the parsed `rrule` the engine reads and the
@@ -263,30 +534,37 @@ export function createInspector(app) {
   // src/recurrence-end.js, where the "Ends on a date" control and the eventual
   // staple model both need it.
 
-  function relationDateParts(relation) {
-    if (!relation?.coordinate) return { date: "", time: "" };
-    const value = relation.coordinate;
-    const year = levelValue(value, "year", 0n).toString().padStart(4, "0");
-    const month = levelValue(value, "month", 1n).toString().padStart(2, "0");
-    const day = levelValue(value, "day", 1n).toString().padStart(2, "0");
-    const hour = levelValue(value, "hour", 0n).toString().padStart(2, "0");
-    const minute = levelValue(value, "minute", 0n).toString().padStart(2, "0");
-    return { date: `${year}-${month}-${day}`, time: relation.parameters?.dateOnly ? "" : `${hour}:${minute}` };
-  }
-
-  function findVisibleFact(virtualId, nearDay = null) {
+  // Resolving a clicked virtual fact needs the day it was ACTUALLY RENDERED
+  // AT, which every fact node already carries: `bindFact` (src/projections.js)
+  // stamps `dataset.factDay` unconditionally, and only ever adds
+  // `dataset.virtualId` to a node it has also stamped a day on. So the day is
+  // required here, not optional.
+  //
+  // It used to be optional, falling back to `session.window(1.25)` -- a
+  // symmetric guess at what was on screen. That guess was the 8.19 field
+  // report's "That generated fact is outside the current query window": a
+  // second, independent derivation of the render window, disagreeing with what
+  // the lens had actually drawn (Intimate's back/forward span is asymmetric,
+  // 2 and 7 by default, and carries a scroll buffer past it). Keeping the
+  // guess as a fallback would leave the bug one forgotten argument away from
+  // returning, so it is deleted rather than deprecated. There is now exactly
+  // one derivation of "where was this drawn", it comes from the drawn fact
+  // itself, and it cannot disagree with the renderer because it IS the
+  // renderer's own answer.
+  function findVisibleFact(virtualId, nearDay) {
     const { session, engine } = app;
-    const window = nearDay === null
-      ? session.window(1.25)
-      : {
-          start: Rational.parse(nearDay).sub(Rational.parse(1).div(86400)),
-          end: Rational.parse(nearDay).add(Rational.parse(1).div(86400))
-        };
+    if (nearDay === null || nearDay === undefined || nearDay === "") {
+      throw new TypeError(
+        "findVisibleFact requires the day the fact was rendered at (a fact node's dataset.factDay)"
+      );
+    }
+    const day = Rational.parse(nearDay);
+    const slack = Rational.parse(1).div(86400);
     return engine.queryFacts({
       frame: session.activeFrame,
-      start: daysToCivilCoordinate(window.start),
-      end: daysToCivilCoordinate(window.end),
-      limit: nearDay === null ? 1600 : 5000
+      start: daysToCivilCoordinate(day.sub(slack)),
+      end: daysToCivilCoordinate(day.add(slack)),
+      limit: 5000
     }).facts.find((fact) => fact.virtualId === virtualId);
   }
 
@@ -373,9 +651,24 @@ export function createInspector(app) {
   // moment the user asks for occurrence mode, and if they then change nothing, the
   // convergence invariant retires it on close (see `dismissObjectCard`) — so the
   // no-op-fork rule holds without the editor having to track dirtiness.
-  function openVirtualInspector(virtualId) {
+  // `nearDay`, when given, is the exact day (`fact.day`, via the clicked
+  // node's own `dataset.factDay` -- every fact node carries it, stamped once
+  // by `bindFact` in src/projections.js) that the caller actually rendered
+  // this occurrence at. Resolving against that exact day rather than a
+  // generic window guess is the fix for the 8.19 field report's item 3:
+  // "click an instance of a series in the right day columns, get 'outside the
+  // current query window'". The Intimate rail pre-renders a buffer of days
+  // past what its own back/forward span implies (see renderIntimate's
+  // `bufferDays`), so a fact genuinely on screen could sit outside any
+  // window this function guessed independently -- two derivations of "what
+  // was rendered" that could only ever coincidentally agree. Deriving the
+  // resolution window from the rendered fact's own day instead of
+  // reconstructing the render window needs no second derivation, and holds
+  // for every surface `bindFact` covers (Intimate, Tactical, Strategic, Wall,
+  // Lines, Spiral, Radial), not only the one that exposed it.
+  function openVirtualInspector(virtualId, nearDay) {
     const { chronolog } = app;
-    const fact = findVisibleFact(virtualId);
+    const fact = findVisibleFact(virtualId, nearDay);
     if (!fact) {
       app.toast("That generated fact is outside the current query window.", true);
       return;
@@ -433,24 +726,17 @@ export function createInspector(app) {
     // dropdown is the bad semantics this item deletes) -- an importance frame
     // is authored exactly like a group already (its base traits always
     // include "group"; frame-edit.js's kind-switching is additive), so the
-    // Groups checkboxes are the one membership surface for both.
-    // `importanceFrames` is kept separately only for the still-standing
-    // "Visible in" select, which offers an "importance-frame" option (owner
-    // item 8 territory, out of scope this stage).
+    // Groups checkboxes are the one membership surface for both. There is no
+    // separate "Visible in" control any more (owner item 8: "Visible in
+    // dropdown on Events is terrible and clunky, and should be removed,
+    // Display weight, and frame membership are the dials on that control") --
+    // Groups membership plus the weight readout below are the two remaining
+    // dials, and `event.display.lenses` (an existing document's authored data)
+    // is read by src/projections.js untouched; nothing here writes it any more.
     const allGroups = groupFrames(chronolog);
-    const importanceFrames = allGroups.filter((frame) => frame.traits.includes("importance"));
-    const recurrence = Object.values(chronolog.patterns).find(
-      (pattern) => pattern.kind === "ics-rrule" && pattern.templateEvent === eventId
-    );
+    const recurrence = findRecurrencePattern(chronolog, eventId);
     const originalRecurrenceChoice = recurrenceFormChoice(recurrence);
     const recurrenceEnd = recurrenceEndMode(recurrence?.rrule);
-    // The end-staple is a separate authored record from the rule above (LEXICON's
-    // staple anchoring / Rob-and-John scenario): "Ends" is what the rule itself
-    // says (its own extent, still honoured); the staple is where the owner
-    // stapled an inflection point onto the series' body. src/engine.js projects
-    // the intersection of the two without either one rewriting the other.
-    const endStaple = recurrence ? seriesEndStaple(chronolog, recurrence.id) : null;
-    const endStapleParts = relationDateParts(endStaple);
     const completedParts = relationDateParts(completed);
     // The display-side union (engine.isDisplayGroup) already includes
     // importance-frame membership, direct or nested, so the manual union this
@@ -466,21 +752,13 @@ export function createInspector(app) {
       .join("; ");
     const objectKind = objectKindForEvent(event);
     const startParts = relationDateParts(relation);
-    // Picks one importance frame to drive the "Visible in" select's
-    // "importance-frame" option below. Groups are now multi-select checkboxes
-    // (see the Groups field), so an event can belong to more than one
-    // importance frame at once -- a case the legacy single-select dropdown
-    // could never produce. This keeps the pre-existing single-frame behavior
-    // rather than redesigning it (owner item 8, ROADMAP #9's wave); see the
-    // report note on this option's coherence once more than one is attached.
-    const attachedImportance = importanceFrames.find((frame) => memberships.has(frame.id));
-    const lensScope = event.display?.lenses || null;
-    const visibility = attachedImportance ? "importance-frame" : !lensScope ? "everywhere"
-      : ["intimate", "spiral", "radial"].every((lens) => lensScope.includes(lens)) && lensScope.length === 3
-        ? "time-signal"
-        : ["strategic", "wall", "radial"].every((lens) => lensScope.includes(lens)) && lensScope.length === 3
-          ? "planning"
-          : "close";
+    // The weight readout (owner item 8's other half): "there is no clarity
+    // into how or what ... no clear way to see the display weight either base
+    // or modified." `explainFactWeight` already derives the full base ->
+    // per-group -> final chain (src/visual-language.js); the editor only
+    // renders it, read-only -- the formula itself is authored on the frame
+    // (Frames panel), not here.
+    const weightReadout = weightReadoutModel(explainFactWeight({ document: chronolog, engine }, { event }));
     const wrapper = document.createElement("form");
     wrapper.className = "event-form";
     // Which object is this form actually editing? Three cases: the template of a
@@ -528,7 +806,7 @@ export function createInspector(app) {
           ${frame.id === relation?.frame ? "selected" : ""}>${escapeHTML(frame.title)}</option>`).join("")}
       </select>
     </label>
-    <div class="form-row recurrence-row">
+    <div class="form-row recurrence-row" data-recurrence-row>
       <label class="field"><span>Repeats</span>
         <select name="repeat">
           ${[["", "Does not repeat"], ["DAILY", "Daily"], ["WEEKDAYS", "Weekdays (Mon–Fri)"], ["WEEKLY", "Weekly"], ["MONTHLY", "Monthly"], ["YEARLY", "Yearly"]]
@@ -553,15 +831,6 @@ export function createInspector(app) {
         <input name="until" type="date" value="${escapeHTML(recurrenceUntilDate(recurrence?.rrule?.UNTIL))}">
       </label>
     </div>
-    ${recurrence ? `<div class="form-row recurrence-options" data-end-staple-row>
-      <label class="field"><span>End staple</span>
-        <input name="endStapleDate" type="date" value="${escapeHTML(endStapleParts.date)}">
-      </label>
-      <label class="field"><span>Time (optional)</span>
-        <input name="endStapleTime" type="time" step="60" value="${escapeHTML(endStapleParts.time)}">
-      </label>
-    </div>
-    <p class="field-note recurrence-options end-staple-note">A staple placed on the series body stops its projection there, without changing what "Ends" above says — the rule keeps its own extent; the staple is a separate, removable inflection point. Clear the date and save to remove the staple and resume the full projection.</p>` : ""}
     <div class="form-row" data-completed-field>
       <label class="field"><span>Completed date (optional)</span>
         <input name="completedDate" type="date" value="${escapeHTML(completedParts.date)}">
@@ -576,16 +845,83 @@ export function createInspector(app) {
     <label class="field"><span>Location or meeting link</span>
       <input name="location" value="${escapeHTML(event.payload?.location || "")}" placeholder="Room, address, Teams, Zoomâ€¦">
     </label>
-    <label class="field"><span>Visible in</span><select name="visibility">
-      ${[...(importanceFrames.length ? [["importance-frame", "Use importance frame"]] : []),
-        ["everywhere", "Every lens"], ["time-signal", "Intimate + Spiral + Radial"], ["planning", "Strategic + Wall + Radial"], ["close", "Intimate + Tactical"]]
-        .map(([value, label]) => `<option value="${value}" ${visibility === value ? "selected" : ""}>${label}</option>`).join("")}
-    </select></label>
     <div class="form-row event-color-row">
       <label class="field"><span>Event color</span><input name="eventColor" type="color" value="${escapeHTML(event.display?.color || "#d4552d")}" data-explicit="${event.display?.color ? "true" : "false"}"></label>
       <button class="instrument-button" id="inherit-event-color" type="button" title="Remove this event's own color; it goes back to inheriting from its frame or group">Inherit color</button>
     </div>
-    <div class="field"><span>Groups</span>
+    <div class="weight-readout" data-weight-readout>${weightReadoutMarkup(weightReadout)}</div>
+    <div class="field staples-section" data-staples-section>
+      <span>Staples</span>
+      <ul class="staple-list" data-staple-list></ul>
+      <div class="staple-extent" data-staple-extent></div>
+      <div class="staple-add-row">
+        ${recurrence ? `<label class="field"><span>Applies to</span>
+          <select name="stapleScope">
+            <option value="series">This series</option>
+            <option value="object">This event</option>
+          </select>
+        </label>` : ""}
+        <label class="field"><span>Kind</span>
+          <select name="stapleKind" data-staple-kind></select>
+        </label>
+        <label class="field" data-staple-role-field hidden><span>Anchors</span>
+          <select name="stapleRole" data-staple-role>
+            ${ANCHOR_ROLE_ORDER.map((role) => `<option value="${role}">${role}</option>`).join("")}
+            <option value="${CUSTOM_ANCHOR_ROLE}">Named point…</option>
+          </select>
+        </label>
+        <label class="field" data-staple-role-name-field hidden><span>Point name</span>
+          <input name="stapleRoleName" placeholder="e.g. shift handover">
+        </label>
+        <div class="form-row">
+          <label class="field"><span>Date</span><input name="stapleDate" type="date"></label>
+          <label class="field"><span>Time (optional)</span><input name="stapleTime" type="time" step="60"></label>
+        </div>
+        <label class="check-chip"><input type="checkbox" name="stapleFuzzy" data-staple-fuzzy> Fuzzy</label>
+        <div class="form-row" data-staple-spread-fields hidden>
+          <label class="field"><span>Before</span>
+            <input name="stapleSpreadBeforeAmount" inputmode="decimal" placeholder="0">
+            <select name="stapleSpreadBeforeUnit">${magnitudeUnitOptions()}</select>
+          </label>
+          <label class="field"><span>After</span>
+            <input name="stapleSpreadAfterAmount" inputmode="decimal" placeholder="0">
+            <select name="stapleSpreadAfterUnit">${magnitudeUnitOptions()}</select>
+          </label>
+        </div>
+        <div class="form-row" data-staple-offset-field hidden>
+          <label class="field"><span>Offset from start</span>
+            <input name="stapleOffsetAmount" inputmode="decimal" placeholder="0">
+            <select name="stapleOffsetUnit">${magnitudeUnitOptions()}</select>
+          </label>
+        </div>
+        <div class="staple-rule-fields" data-staple-rule-fields hidden>
+          <div class="form-row">
+            <label class="field"><span>Then repeats</span>
+              <select name="stapleRuleRepeat" data-staple-rule-repeat>
+                ${[["", "Nothing follows (ends here)"], ["DAILY", "Daily"], ["WEEKDAYS", "Weekdays (Mon–Fri)"], ["WEEKLY", "Weekly"], ["MONTHLY", "Monthly"], ["YEARLY", "Yearly"]]
+                  .map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+              </select>
+            </label>
+            <label class="field"><span>Every</span>
+              <input name="stapleRuleInterval" type="number" min="1" max="999" value="1">
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>New rule starts</span><input name="stapleRuleDate" type="date"></label>
+            <label class="field"><span>At</span><input name="stapleRuleTime" type="time" step="60"></label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>New duration</span>
+              <input name="stapleRuleDurationAmount" inputmode="decimal" placeholder="0">
+              <select name="stapleRuleDurationUnit">${magnitudeUnitOptions()}</select>
+            </label>
+          </div>
+        </div>
+        <button class="instrument-button" type="button" data-add-staple>Add staple</button>
+      </div>
+      <p class="field-note">An open collection -- add as many staples as this ${recurrence ? "event or its series" : "event"} needs, of any kind above (owner ruling: an end staple is one registered kind, not a special case). An end staple stops a series' projection there without changing what "Ends" above says; other kinds anchor a start, end, midpoint, or named point, alone or fuzzed, and combine to derive a magnitude. A rule-change staple partitions the series and carries the rule that follows it -- leave "Then repeats" blank and it simply ends there instead, which is the same choice as starting a separate series. Add/remove act immediately, each its own undoable step. Removing a staple restores whatever it was authored over.</p>
+    </div>
+    <div class="field" data-groups-field><span>Groups</span>
       <div class="check-row">
         ${allGroups.map((frame) => `<label class="check-chip" title="${escapeHTML(membershipExplanation(frame.id))}" style="--group-color:${escapeHTML(frame.color || "#2e8b57")}">
           <input type="checkbox" name="groups" value="${escapeHTML(frame.id)}"
@@ -647,6 +983,137 @@ export function createInspector(app) {
     });
     syncRecurrenceFields();
     syncObjectKind();
+
+    // The staples section: an open collection, not the bespoke end-staple
+    // field it replaces (owner item 4: "I see no clear mechanism to add an
+    // arbitrary number or type of staples"). Add/remove act immediately, each
+    // its own undoable transaction, independent of this form's own Save --
+    // so a staple placed a moment ago survives Cancel/Delete acting on
+    // everything else, and vice versa.
+    const stapleSection = wrapper.querySelector("[data-staples-section]");
+    const stapleList = stapleSection.querySelector("[data-staple-list]");
+    const stapleExtent = stapleSection.querySelector("[data-staple-extent]");
+    const stapleScopeField = wrapper.elements.stapleScope || null;
+    const stapleKindField = stapleSection.querySelector("[data-staple-kind]");
+    const stapleRoleFieldWrap = stapleSection.querySelector("[data-staple-role-field]");
+    const stapleRoleField = stapleSection.querySelector("[data-staple-role]");
+    const stapleRoleNameFieldWrap = stapleSection.querySelector("[data-staple-role-name-field]");
+    const stapleFuzzyField = stapleSection.querySelector("[data-staple-fuzzy]");
+    const stapleSpreadFieldsWrap = stapleSection.querySelector("[data-staple-spread-fields]");
+    const stapleOffsetFieldWrap = stapleSection.querySelector("[data-staple-offset-field]");
+    const stapleRuleFieldsWrap = stapleSection.querySelector("[data-staple-rule-fields]");
+
+    function currentStapleScope() {
+      return stapleScopeField ? stapleScopeField.value : "object";
+    }
+
+    // The registry-driven dropdown, refreshed whenever the scope toggle
+    // changes -- a series-only kind must not be offered while adding a
+    // staple straight to a bare, non-recurring event.
+    function syncStapleKindOptions() {
+      const scope = currentStapleScope();
+      const options = stapleKindOptions(scope);
+      const previous = stapleKindField.value;
+      stapleKindField.innerHTML = options.map(([value, label]) => `<option value="${value}">${escapeHTML(label)}</option>`).join("");
+      stapleKindField.value = options.some(([value]) => value === previous) ? previous : (options[0]?.[0] || "");
+      syncStapleRoleVisibility();
+    }
+
+    function syncStapleRoleVisibility() {
+      const definition = stapleKind(stapleKindField.value);
+      const anchors = Boolean(definition?.anchors);
+      stapleRoleFieldWrap.hidden = !anchors;
+      const named = anchors && stapleRoleField.value === CUSTOM_ANCHOR_ROLE;
+      stapleRoleNameFieldWrap.hidden = !named;
+      stapleOffsetFieldWrap.hidden = !named;
+      // Only a kind that can carry a following rule offers one. The registry
+      // says which (`carriesRule`), so adding a future kind that partitions a
+      // series gets this sub-editor without a second list of kind names here.
+      stapleRuleFieldsWrap.hidden = !definition?.carriesRule;
+    }
+
+    stapleScopeField?.addEventListener("change", syncStapleKindOptions);
+    stapleKindField.addEventListener("change", syncStapleRoleVisibility);
+    stapleRoleField.addEventListener("change", syncStapleRoleVisibility);
+    stapleFuzzyField.addEventListener("change", () => {
+      stapleSpreadFieldsWrap.hidden = !stapleFuzzyField.checked;
+    });
+
+    // Both the series' own staples (when this event is a series template) and
+    // the event's own object staples render together, in one list -- an end
+    // staple is one row among them, not a sibling control. Re-derived fresh
+    // (not captured once at open time) so the list and the derived-extent
+    // readout stay correct across this card's own live-edited lifetime.
+    function refreshStaplesSection() {
+      const pattern = findRecurrencePattern(chronolog, eventId);
+      const rows = [
+        ...(pattern ? staplesForSeries(chronolog, pattern.id).map((staple) => stapleRowModel(staple, "series")) : []),
+        ...staplesForObject(chronolog, eventId).map((staple) => stapleRowModel(staple, "object"))
+      ];
+      stapleList.innerHTML = rows.map(stapleRowMarkup).join("") || `<li class="staple-list-empty">No staples yet.</li>`;
+      stapleExtent.innerHTML = extentReadoutMarkup(extentReadoutModel(resolveObjectExtent(chronolog, engine, eventId)));
+    }
+
+    stapleSection.querySelector("[data-add-staple]").addEventListener("click", () => {
+      try {
+        const scope = currentStapleScope();
+        const pattern = findRecurrencePattern(chronolog, eventId);
+        const targetId = scope === "series" ? pattern?.id : eventId;
+        const input = buildStapleInput({
+          scope,
+          targetId,
+          kind: stapleKindField.value,
+          role: stapleRoleField.value,
+          roleName: wrapper.elements.stapleRoleName?.value,
+          dateText: wrapper.elements.stapleDate.value,
+          timeText: wrapper.elements.stapleTime.value,
+          frame: wrapper.elements.frame.value,
+          fuzzy: stapleFuzzyField.checked,
+          spreadBeforeAmount: wrapper.elements.stapleSpreadBeforeAmount.value,
+          spreadBeforeUnit: wrapper.elements.stapleSpreadBeforeUnit.value,
+          spreadAfterAmount: wrapper.elements.stapleSpreadAfterAmount.value,
+          spreadAfterUnit: wrapper.elements.stapleSpreadAfterUnit.value,
+          offsetAmount: wrapper.elements.stapleOffsetAmount.value,
+          offsetUnit: wrapper.elements.stapleOffsetUnit.value,
+          ruleRepeat: wrapper.elements.stapleRuleRepeat?.value,
+          ruleInterval: wrapper.elements.stapleRuleInterval?.value,
+          ruleDateText: wrapper.elements.stapleRuleDate?.value,
+          ruleTimeText: wrapper.elements.stapleRuleTime?.value,
+          ruleDurationAmount: wrapper.elements.stapleRuleDurationAmount?.value,
+          ruleDurationUnit: wrapper.elements.stapleRuleDurationUnit?.value
+        });
+        const stapleId = createId("relation");
+        if (scope === "series") {
+          app.executePatternChange("Add staple", targetId, (documentValue) => putStaple(documentValue, { ...input, id: stapleId }));
+        } else {
+          app.executeEventChange("Add staple", eventId, (documentValue) => putStaple(documentValue, { ...input, id: stapleId }));
+        }
+        wrapper.elements.stapleDate.value = "";
+        wrapper.elements.stapleTime.value = "";
+        refreshStaplesSection();
+      } catch (error) {
+        app.toast(error.message, true);
+      }
+    });
+
+    stapleList.addEventListener("click", (clickEvent) => {
+      const button = clickEvent.target.closest?.("[data-remove-staple]");
+      if (!button) return;
+      const row = button.closest("[data-staple-id]");
+      const stapleId = row?.dataset.stapleId;
+      if (!stapleId) return;
+      if (row.dataset.stapleScope === "series") {
+        const pattern = findRecurrencePattern(chronolog, eventId);
+        if (pattern) app.executePatternChange("Remove staple", pattern.id, (documentValue) => removeStaple(documentValue, stapleId));
+      } else {
+        app.executeEventChange("Remove staple", eventId, (documentValue) => removeStaple(documentValue, stapleId));
+      }
+      refreshStaplesSection();
+    });
+
+    syncStapleKindOptions();
+    refreshStaplesSection();
+
     const draft = drafts.get(eventId);
     if (draft) {
       draft.form = wrapper;
@@ -736,15 +1203,12 @@ export function createInspector(app) {
             objectKindChoice
           );
           if (!target.traits.includes("event")) target.traits.unshift("event");
-          const visibilityChoice = String(data.get("visibility") || "everywhere");
-          const lensSets = {
-            "time-signal": ["intimate", "spiral", "radial"],
-            planning: ["strategic", "wall", "radial"],
-            close: ["intimate", "tactical"]
-          };
+          // There is no "Visible in" control any more (owner item 8) -- an
+          // event's `display.lenses`, if any document ever authored one, is
+          // left exactly as it is here. `target.display` is still copied
+          // shallowly so the color write below never mutates the original
+          // object's `display` reference in place.
           target.display = { ...(target.display || {}) };
-          if (["everywhere", "importance-frame"].includes(visibilityChoice)) delete target.display.lenses;
-          else target.display.lenses = lensSets[visibilityChoice];
           const submittedColor = resolveSubmittedEventColor(
             wrapper.elements.eventColor.dataset.explicit === "true",
             data.get("eventColor")
@@ -825,7 +1289,11 @@ export function createInspector(app) {
           const existingPattern = Object.values(documentValue.patterns).find(
             (pattern) => pattern.kind === "ics-rrule" && pattern.templateEvent === eventId
           );
-          let activePatternId = null;
+          // Series staples (the end-staple among them) are no longer written
+          // from this submit handler at all -- they are the staples section's
+          // own, separately committed, immediate transactions (see
+          // `refreshStaplesSection` and its Add/Remove handlers above), so
+          // there is no `activePatternId` to thread through here any more.
           if (!repeat && existingPattern) {
             delete documentValue.patterns[existingPattern.id];
           } else if (repeat) {
@@ -846,9 +1314,8 @@ export function createInspector(app) {
               existingPattern.appliesTo = [chosenFrame];
               existingPattern.frame = chosenFrame;
               existingPattern.templateRelation = existing?.id;
-              activePatternId = existingPattern.id;
             } else {
-              const createdPattern = addPattern(documentValue, {
+              addPattern(documentValue, {
                 title: `${target.payload.title} recurrence`,
                 language: "chronolog-formula/1",
                 kind: "ics-rrule",
@@ -860,36 +1327,6 @@ export function createInspector(app) {
                 source: "export fn state(ctx) = {};\nexport fn facts(ctx) = [];",
                 exports: { state: "state", facts: "facts" }
               });
-              activePatternId = createdPattern.id;
-            }
-          }
-          // The end-staple is separate authored data on the series, not a rewrite
-          // of the rule above (LEXICON's staple anchoring / Rob-and-John scenario:
-          // "ending a series is an end-staple, not a command"). It is only ever
-          // read/written while a series still exists; turning "Repeats" off
-          // deletes the pattern above, and `cascadeRemovedPatterns`
-          // (src/ui/transactions.js) takes any staple on it with it, in this same
-          // undoable transaction.
-          if (activePatternId) {
-            const stapleDate = String(data.get("endStapleDate") || "").trim();
-            if (stapleDate) {
-              // A date with no time means through the whole of that day, exactly
-              // like "Ends on a date" above (recurrenceUntilForDate) -- otherwise
-              // a bare date would default to midnight and silently exclude that
-              // same day's own occurrence, reading as an off-by-one bug. Recorded
-              // as `parameters.dateOnly` (the same flag the start-date field
-              // uses) so reopening the editor shows the time field blank again
-              // rather than a misleading 23:59.
-              const stapleTimeText = String(data.get("endStapleTime") || "").trim();
-              setSeriesEndStaple(
-                documentValue,
-                activePatternId,
-                chosenFrame,
-                parseDateText(`${stapleDate} ${stapleTimeText || "23:59:59"}`),
-                stapleTimeText ? null : { dateOnly: true }
-              );
-            } else {
-              clearSeriesEndStaple(documentValue, activePatternId);
             }
           }
         });
@@ -905,6 +1342,10 @@ export function createInspector(app) {
     wrapper.querySelector("#delete-object").addEventListener("click", () => {
       const wasProvisional = drafts.has(eventId);
       if (wasProvisional) drafts.delete(eventId);
+      // The event's own object-scoped staples travel with it in this same
+      // transaction (src/ui/transactions.js's `cascadeRemovedObjects`, the
+      // object-keyed sibling of the series' `cascadeRemovedPatterns`) -- no
+      // separate sweep needed here.
       app.executeEventChange("Delete event", eventId, (documentValue) => {
         delete documentValue.events[eventId];
         for (const relationValue of Object.values(documentValue.relations)) {
