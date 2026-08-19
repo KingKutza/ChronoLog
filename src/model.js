@@ -193,6 +193,8 @@ export function validateDocument(document) {
       validateDisplacement(document, relation, errors);
     } else if (relation.type === "coordinate-mapping") {
       validateCoordinateMapping(document, relation, errors);
+    } else if (relation.type === "staple") {
+      validateStaple(document, relation, errors);
     } else {
       errors.push(`Relation ${id} has an unknown type`);
     }
@@ -344,6 +346,23 @@ function validateTermination(document, relation, errors) {
     const incidence = eventRelations(document, attachment.event);
     if (incidence.length < 2) errors.push(`Stapled termination ${relation.id} must attach to another line`);
   }
+}
+
+// A staple is a series' own end-of-rule inflection point, authored as data
+// rather than a rewrite of the rule (LEXICON.md's staple anchoring and the
+// Rob-and-John scenario). It is NOT the same concept as a `termination`
+// relation, which seals or staples a *line* in the time-travel taxonomy
+// (validateTermination, above) -- a staple's `series` names a pattern, a
+// termination's `line` names a frame, and the two never interchange.
+// Only the "end" kind is implemented this wave; other named-point staples
+// (start, midpoint, magnitude-from-staples, fuzzy) are ROADMAP #4's later
+// stages and are rejected here rather than silently accepted as a shape
+// nothing yet honours.
+function validateStaple(document, relation, errors) {
+  if (!document.patterns?.[relation.series]) errors.push(`Staple ${relation.id} references a missing series`);
+  if (relation.kind !== "end") errors.push(`Staple ${relation.id} kind must be "end" (the only staple kind implemented so far)`);
+  if (!document.frames?.[relation.frame]) errors.push(`Staple ${relation.id} references a missing frame`);
+  if (!isCoordinate(relation.coordinate)) errors.push(`Staple ${relation.id} coordinate must use nested levels`);
 }
 
 function validateDisplacement(document, relation, errors) {
@@ -554,6 +573,71 @@ export function removeOverridesForPatterns(document, patternIds) {
     count += 1;
   }
   return count;
+}
+
+// A staple belongs to its series the way an override does (see
+// `removeOverridesForPatterns`, just above): once the series is gone the
+// staple can never intersect a projection again, so it travels with pattern
+// deletion in the same undoable transaction rather than surviving as a
+// pointer to nothing. Returns how many it removed so callers can report.
+export function removeStaplesForPatterns(document, patternIds) {
+  const removed = patternIds instanceof Set ? patternIds : new Set(patternIds);
+  if (!removed.size) return 0;
+  let count = 0;
+  for (const [id, relation] of Object.entries(document?.relations || {})) {
+    if (relation?.type !== "staple" || !removed.has(relation.series)) continue;
+    delete document.relations[id];
+    count += 1;
+  }
+  return count;
+}
+
+// The one place that finds a series' end-staple, shared by the engine (the
+// projection intersects the rule's own extent with this), the series editor
+// (to show/clear it), and ICS export (to derive the effective UNTIL without
+// ever writing the staple into the rule). A series carries at most one --
+// this wave only implements the "end" kind.
+export function seriesEndStaple(document, patternId) {
+  if (!patternId) return null;
+  return Object.values(document?.relations || {}).find((relation) =>
+    relation?.type === "staple" && relation.series === patternId && relation.kind === "end") || null;
+}
+
+// Placing/removing a series' end-staple, in one derivation shared by the
+// series editor (src/ui/inspector.js) and tests. Mutates in place like
+// `suppressVirtual`/`stapleEvents` above -- the caller wraps this in a
+// transaction. Re-placing an existing staple updates it (one staple per
+// series, this wave), rather than accumulating a second record.
+export function setSeriesEndStaple(document, patternId, frame, coordinateValue, parameters = null) {
+  const existing = seriesEndStaple(document, patternId);
+  if (existing) {
+    existing.frame = frame;
+    existing.coordinate = clone(coordinateValue);
+    if (parameters) existing.parameters = clone(parameters);
+    else delete existing.parameters;
+    touch(document);
+    return existing;
+  }
+  const relation = {
+    id: createId("relation"),
+    type: "staple",
+    series: patternId,
+    kind: "end",
+    frame,
+    coordinate: clone(coordinateValue),
+    ...(parameters ? { parameters: clone(parameters) } : {})
+  };
+  document.relations[relation.id] = relation;
+  touch(document);
+  return relation;
+}
+
+export function clearSeriesEndStaple(document, patternId) {
+  const existing = seriesEndStaple(document, patternId);
+  if (!existing) return false;
+  delete document.relations[existing.id];
+  touch(document);
+  return true;
 }
 
 export function stableVirtualId(patternId, key) {

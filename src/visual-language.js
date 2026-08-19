@@ -160,6 +160,87 @@ export function sigilDescription(fact, durationMinutes = 0, importance = "standa
   return SIGIL_VOCABULARY[sigilForFact(fact, durationMinutes, importance)].label;
 }
 
+function importanceSource(context, fact) {
+  const document = context?.document;
+  const pattern = document?.patterns?.[fact?.event?.provenance?.pattern];
+  const sourceId = pattern?.templateEvent || fact?.event?.id;
+  const source = document?.events?.[sourceId] || fact?.event;
+  return { sourceId, source };
+}
+
+// The base, pre-multiplier verdict: legacy trait strings on the event itself
+// win first (unmodified, see `factImportance`'s own note on that), then an
+// importance frame reached through `eventDisplayGroupMemberships` -- directly
+// or through nested group membership, same as before this item. This is
+// exactly the check `factImportance` used to make its whole decision with;
+// `factImportanceWeight` now treats it as the seed a frame's `display.weight`
+// multiplies rather than the final answer.
+function baseImportanceVerdict(context, sourceId, source) {
+  const document = context?.document;
+  const engine = context?.engine;
+  if (source?.traits?.includes("landmark")) return "landmark";
+  if (source?.traits?.includes("important")) return "important";
+  const importanceFrame = (engine?.eventDisplayGroupMemberships?.(sourceId) || [])
+    .map(({ group }) => document?.frames?.[group])
+    .find((candidate) => candidate?.traits?.includes("importance"));
+  return importanceFrame?.display?.importance || "standard";
+}
+
+// LEXICON.md: "importances are just group affiliations; how members are
+// handled is a property [of the group] ... derived from the event or set on
+// it then modified by everything that touches it, such as a multiplier by
+// its frame membership" (owner's field report, item #5). A frame IS a group,
+// so `display.weight` is one handling property that lives uniformly on every
+// frame -- calendar, group, or importance set -- and every consumer composes
+// it through this one function rather than inventing a frame-specific path.
+//
+// The base weight and the promotion thresholds deliberately share one scale:
+// a base verdict of "important"/"landmark" lands EXACTLY on its own
+// threshold, so at the universal default weight of 1 (neutral, authored
+// only, never inferred -- nothing here is guessed from a name or category)
+// composing multiplies by 1 everywhere and reproduces the pre-existing
+// three-way check exactly. That also means a frame weight alone, multiplying
+// a "standard" base of 1, can carry an event across the same threshold an
+// importance trait would -- literally "modified by everything that touches
+// it, such as a multiplier by its frame membership."
+const IMPORTANCE_BASE_WEIGHT = Object.freeze({ standard: 1, important: 2, landmark: 4 });
+const IMPORTANCE_WEIGHT_THRESHOLD = Object.freeze({ important: 2, landmark: 4 });
+
+/**
+ * The composed display weight behind `factImportance`'s three-verdict
+ * vocabulary: a base weight for the event's own trait/importance-frame
+ * verdict, multiplied by the `display.weight` of every frame the event
+ * belongs to. "Belongs to" is the union already used elsewhere for display
+ * purposes -- the event's own direct frame attachments (`engine.eventFrames`,
+ * which is how an imported calendar's own frame reaches its events) plus its
+ * group/importance-frame memberships including nested groups
+ * (`engine.eventDisplayGroupMemberships`, the same union the color cascade's
+ * step 2 and `baseImportanceVerdict` both read) -- deduplicated, so a frame
+ * reached both ways contributes its weight once, not twice. A frame with no
+ * authored weight (or an invalid/negative one) contributes nothing, i.e. acts
+ * as 1: meaning is authored, never inferred, and a missing knob must not
+ * silently change anything.
+ *
+ * `context` is duck-typed as `{ document, engine }`, matching the shape every
+ * lens renderer already threads through `src/projections.js`.
+ */
+export function factImportanceWeight(context, fact) {
+  const document = context?.document;
+  const engine = context?.engine;
+  const { sourceId, source } = importanceSource(context, fact);
+  const verdict = baseImportanceVerdict(context, sourceId, source);
+  let weight = IMPORTANCE_BASE_WEIGHT[verdict] ?? IMPORTANCE_BASE_WEIGHT.standard;
+  const frameIds = new Set([
+    ...(engine?.eventFrames?.(sourceId) || []),
+    ...(engine?.eventDisplayGroupMemberships?.(sourceId) || []).map(({ group }) => group)
+  ]);
+  for (const frameId of frameIds) {
+    const frameWeight = Number(document?.frames?.[frameId]?.display?.weight);
+    if (Number.isFinite(frameWeight) && frameWeight >= 0) weight *= frameWeight;
+  }
+  return weight;
+}
+
 /**
  * The one shared importance verdict every display consumer reads: the color
  * cascade (via group/importance-frame membership), sigil selection, minimap
@@ -172,21 +253,23 @@ export function sigilDescription(fact, durationMinutes = 0, importance = "standa
  * frame reached directly *or* through nested group membership is seen here
  * too -- not just a direct attachment.
  *
+ * The verdict itself is now derived from `factImportanceWeight` by threshold
+ * (see that function for the frame-weight composition), so every existing
+ * caller keeps its three-string answer unchanged while gaining strategic
+ * promotion via frame membership for free. An explicit per-lens override
+ * (e.g. a group's `display.strategic`) is a harder, separate signal that a
+ * caller such as Strategic checks before ever asking this question -- see
+ * `strategicPresentation` in `src/projections.js` -- so an authored show/hide
+ * always wins over a derived weight, it does not compose with it.
+ *
  * `context` is duck-typed as `{ document, engine }`, matching the shape every
  * lens renderer already threads through `src/projections.js`.
  */
 export function factImportance(context, fact) {
-  const document = context?.document;
-  const engine = context?.engine;
-  const pattern = document?.patterns?.[fact?.event?.provenance?.pattern];
-  const sourceId = pattern?.templateEvent || fact?.event?.id;
-  const source = document?.events?.[sourceId] || fact?.event;
-  if (source?.traits?.includes("landmark")) return "landmark";
-  if (source?.traits?.includes("important")) return "important";
-  const importanceFrame = (engine?.eventDisplayGroupMemberships?.(sourceId) || [])
-    .map(({ group }) => document?.frames?.[group])
-    .find((candidate) => candidate?.traits?.includes("importance"));
-  return importanceFrame?.display?.importance || "standard";
+  const weight = factImportanceWeight(context, fact);
+  if (weight >= IMPORTANCE_WEIGHT_THRESHOLD.landmark) return "landmark";
+  if (weight >= IMPORTANCE_WEIGHT_THRESHOLD.important) return "important";
+  return "standard";
 }
 
 export function normalizeTheme(theme, fallback = THEME_PRESETS.paper) {

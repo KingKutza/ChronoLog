@@ -3,8 +3,16 @@ import assert from "node:assert/strict";
 import { createSampleDocument, createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
 import { civilCoordinateToDays, coordinate, daysFromCivil } from "../src/exact.js";
-import { escapeICSText, exportICS, importICS, parseICSTree, unescapeICSText } from "../src/ics.js";
+import {
+  escapeICSText,
+  eventComponentKey,
+  exportICS,
+  importICS,
+  parseICSTree,
+  unescapeICSText
+} from "../src/ics.js";
 import { addEvent, addRelation, durationMagnitude } from "../src/model.js";
+import { compactDocument, parseDocument } from "../src/store.js";
 
 const NOW = new Date(Date.UTC(2026, 7, 7, 12, 0, 0));
 
@@ -291,4 +299,151 @@ test("content lines without a colon round-trip verbatim", () => {
   assert.ok(output.includes("\r\nX-EVENT-MALFORMED-MARKER\r\n"));
   assert.ok(!output.includes("X-CALENDAR-MALFORMED-MARKER:"));
   assert.ok(!output.includes("X-EVENT-MALFORMED-MARKER:"));
+});
+
+// Retained ICS payload: 93.8% of the owner's real document was a per-event duplicate of
+// that event's own parsed ICS node (`events[*].foreign.ics.component`, ~154 MB
+// of a 169 MB file) -- the importer stored a full copy of every VEVENT/VTODO
+// on its own event AND described UID/SUMMARY/DESCRIPTION/LOCATION a second
+// time in `payload`. A realistic corporate meeting invite (a Teams-style HTML
+// DESCRIPTION dominating the bytes, one ATTENDEE, one VALARM reminder) is what
+// actually triggered it, so that shape is what this test imports.
+function corporateMeetingCalendar(count) {
+  const body = `<html><body><div>Microsoft Teams meeting</div><p>${"Join the meeting now. Learn more about Teams. ".repeat(80)}</p></body></html>`;
+  const events = Array.from({ length: count }, (_, i) => [
+    "BEGIN:VEVENT",
+    `UID:meeting-${i}@example.test`,
+    `DTSTART:202608${String(10 + (i % 15)).padStart(2, "0")}T090000Z`,
+    `DTEND:202608${String(10 + (i % 15)).padStart(2, "0")}T100000Z`,
+    `SUMMARY:Status sync ${i}`,
+    `DESCRIPTION:${body}`,
+    "LOCATION:Conference Room A",
+    "STATUS:CONFIRMED",
+    "CATEGORIES:Work,Meetings",
+    `ATTENDEE;CN=Alice:mailto:alice${i}@example.test`,
+    "BEGIN:VALARM",
+    "ACTION:DISPLAY",
+    "DESCRIPTION:Reminder",
+    "TRIGGER:-PT15M",
+    "END:VALARM",
+    "END:VEVENT"
+  ].join("\r\n"));
+  return vcalendar(events);
+}
+
+test("importing a description-heavy calendar keeps the document close to the ICS size, not ~2x it", () => {
+  const text = corporateMeetingCalendar(40);
+  const icsBytes = Buffer.byteLength(text, "utf8");
+  const document = createStructuralDocument();
+  const result = importICS(text, document, { label: "Work" });
+  assert.equal(result.events.length, 40);
+  const docBytes = Buffer.byteLength(JSON.stringify(document), "utf8");
+  // Before the fix this ratio was north of 3x for this exact fixture (a full
+  // per-event component copy, duplicating text already in `payload`). The
+  // bound has real headroom below the "roughly the event data" bar.
+  assert.ok(
+    docBytes < icsBytes * 1.5,
+    `document (${docBytes}b) should stay well under 1.5x the imported ICS (${icsBytes}b)`
+  );
+  // Round-trips to an equivalent calendar: same event count, same DESCRIPTION,
+  // same ATTENDEE and VALARM data, still parseable.
+  const output = exportICS(document, { frame: result.frames[0], now: NOW });
+  assert.equal((output.match(/BEGIN:VEVENT/g) || []).length, 40);
+  assert.equal((output.match(/BEGIN:VALARM/g) || []).length, 40);
+  assert.match(output, /ATTENDEE;CN=Alice:mailto:alice0@example\.test/);
+  assert.match(output, /Microsoft Teams meeting/);
+  assert.doesNotThrow(() => parseICSTree(output));
+});
+
+test("the shared per-source component never retains UID/SUMMARY/DESCRIPTION/LOCATION -- only the irreducible delta", () => {
+  const { document, result } = importCalendar([
+    "BEGIN:VEVENT",
+    "UID:delta@example.test",
+    "DTSTART:20260806T090000Z",
+    "DTEND:20260806T100000Z",
+    "SUMMARY:Has a summary",
+    "DESCRIPTION:Has a description",
+    "LOCATION:Has a location",
+    "STATUS:CONFIRMED",
+    "ATTENDEE;CN=Someone:mailto:someone@example.test",
+    "X-CUSTOM-FIELD:keep me",
+    "BEGIN:VALARM",
+    "ACTION:DISPLAY",
+    "TRIGGER:-PT15M",
+    "END:VALARM",
+    "END:VEVENT"
+  ]);
+  const event = Object.values(document.events).find((item) => item.payload.uid === "delta@example.test");
+  const sourceId = event.foreign.ics.source;
+  assert.equal(event.foreign.ics.component, undefined, "the event itself holds no component copy");
+  const shared = document.foreign.ics.sources[sourceId].components[event.foreign.ics.key];
+  assert.equal(shared.name, "VEVENT");
+  const names = shared.properties.map((item) => item.name);
+  for (const reconstructed of ["UID", "SUMMARY", "DESCRIPTION", "LOCATION"]) {
+    assert.ok(!names.includes(reconstructed), `${reconstructed} must not be retained -- payload already has it`);
+  }
+  assert.ok(names.includes("ATTENDEE"), "ATTENDEE is not modeled and must survive verbatim");
+  assert.ok(names.includes("X-CUSTOM-FIELD"), "unknown X- properties must survive verbatim");
+  assert.ok(shared.components.some((item) => item.name === "VALARM"), "VALARM must survive verbatim");
+  // Export still reconstructs everything, from payload plus the delta.
+  const output = exportICS(document, { frame: result.frames[0], now: NOW });
+  assert.match(output, /SUMMARY:Has a summary/);
+  assert.match(output, /DESCRIPTION:Has a description/);
+  assert.match(output, /LOCATION:Has a location/);
+  assert.match(output, /ATTENDEE;CN=Someone:mailto:someone@example\.test/);
+  assert.match(output, /X-CUSTOM-FIELD:keep me/);
+  assert.match(output, /BEGIN:VALARM/);
+});
+
+// The early importer shape gave every event its own full component copy at
+// `foreign.ics.component`. This proves the parse-path migration converts that
+// shape into the current shared-reference form, reports the repair, and still
+// exports byte-for-byte the same ICS as before the migration ran.
+test("a legacy document with per-event inline ICS copies loads, dedupes, and still exports the same ICS", () => {
+  const text = corporateMeetingCalendar(3);
+  const modern = createStructuralDocument();
+  const result = importICS(text, modern, { label: "Work" });
+  const before = exportICS(modern, { frame: result.frames[0], now: NOW });
+
+  // Roll the modern document back into the legacy shape: every event gets its
+  // own full inline copy again, and the shared bucket goes away, exactly as
+  // an old snapshot on disk would read.
+  const sourceId = Object.keys(modern.foreign.ics.sources)[0];
+  const legacy = JSON.parse(JSON.stringify(modern));
+  for (const event of Object.values(legacy.events)) {
+    const key = event.foreign.ics.key;
+    const component = legacy.foreign.ics.sources[sourceId].components[key];
+    // The legacy shape retained everything, including the fields the current
+    // importer no longer duplicates.
+    component.properties.push(
+      { name: "UID", params: [], value: event.payload.uid },
+      { name: "SUMMARY", params: [], value: escapeICSText(event.payload.title) },
+      { name: "DESCRIPTION", params: [], value: escapeICSText(event.payload.description) },
+      { name: "LOCATION", params: [], value: escapeICSText(event.payload.location) }
+    );
+    event.foreign.ics = { source: sourceId, component };
+  }
+  delete legacy.foreign.ics.sources[sourceId].components;
+
+  const report = [];
+  const loaded = parseDocument(JSON.stringify(legacy), report);
+  assert.equal(report.length, 1);
+  assert.equal(report[0].kind, "slimmed-ics-payload");
+  assert.equal(report[0].count, 3);
+
+  for (const event of Object.values(loaded.events)) {
+    assert.equal(event.foreign.ics.component, undefined, "the inline copy is gone after the repair");
+    assert.equal(typeof event.foreign.ics.key, "string");
+    const shared = loaded.foreign.ics.sources[sourceId].components[event.foreign.ics.key];
+    assert.ok(shared, "a shared home now exists for every migrated event");
+    assert.equal(shared.name, "VEVENT");
+  }
+
+  const after = exportICS(loaded, { frame: result.frames[0], now: NOW });
+  assert.equal(after, before, "export is unchanged by the migration");
+
+  // Idempotent: compacting an already-migrated document reports nothing further.
+  const secondReport = [];
+  compactDocument(loaded, secondReport);
+  assert.deepEqual(secondReport, []);
 });

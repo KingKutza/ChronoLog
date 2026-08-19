@@ -70,13 +70,19 @@ function publicAddress(address, family) {
   return !blocked.check(address, kind);
 }
 
-async function resolvedPublicAddress(hostname) {
+// `hostname` resolution is itself resolver-shaped and not a fixed contract:
+// `dns.promises.lookup(host, {all:true})` answers with an array of
+// `{address, family}` objects, while the classic single-address form is
+// `(address, family)`. `resolveHost` defaults to the real DNS resolver but
+// is overridable so tests can exercise the actual private/reserved-range
+// guard below against stubbed answers without a live network call.
+async function resolvedPublicAddress(hostname, resolveHost = lookup) {
   if (isIP(hostname)) {
     const family = isIP(hostname);
     if (!publicAddress(hostname, family)) throw new Error("Calendar feeds cannot target a private or reserved address");
     return { address: hostname, family };
   }
-  const addresses = await lookup(hostname, { all: true, verbatim: true });
+  const addresses = await resolveHost(hostname, { all: true, verbatim: true });
   const selected = addresses.find((entry) => publicAddress(entry.address, entry.family));
   if (!selected || addresses.some((entry) => !publicAddress(entry.address, entry.family))) {
     throw new Error("Calendar feed hostname resolves to a private or reserved address");
@@ -84,12 +90,33 @@ async function resolvedPublicAddress(hostname) {
   return selected;
 }
 
+// Node's own connection machinery calls a custom `lookup` option exactly
+// like a DNS resolver, and that contract is not a fixed shape: Happy
+// Eyeballs (`autoSelectFamily`, default-on since Node 20) asks for
+// `options.all` and requires the callback in the array-of-`{address,
+// family}` shape (the same shape `dns.promises.lookup` returns for
+// `{all: true}`), while a plain connect asks for the classic single
+// `(address, family)` shape. The DNS-pinned address here is always a
+// single answer, but it must still be handed back in whichever shape was
+// requested — answering unconditionally in the classic shape feeds Node's
+// array-expecting path a bare number where it expects a list, which fails
+// downstream with "Invalid IP address: undefined". This is the same
+// resolver-shape contract `resolvedPublicAddress` honors on the resolution
+// side above; `pinnedLookup` is the other end of it, exported so the shape
+// contract itself is directly testable without a real socket.
+export function pinnedLookup(address) {
+  return function lookup(_hostname, options, callback) {
+    if (options && options.all) callback(null, [{ address: address.address, family: address.family }]);
+    else callback(null, address.address, address.family);
+  };
+}
+
 function requestCalendar(url, address, headers) {
   return new Promise((resolveRequest, rejectRequest) => {
     const request = httpsRequest(url, {
       method: "GET",
       headers,
-      lookup(_hostname, _options, callback) { callback(null, address.address, address.family); }
+      lookup: pinnedLookup(address)
     }, (response) => {
       const chunks = [];
       let size = 0;
@@ -114,18 +141,27 @@ function requestCalendar(url, address, headers) {
   });
 }
 
-export async function pullHttpsCalendar(value, current = {}, redirects = 0) {
+// `deps` overrides the DNS resolver and the HTTP transport for tests, so the
+// full pipeline — webcal normalization, the private/reserved-range guard,
+// and redirect-chain re-validation — is exercisable with stubbed answers and
+// no live network call. Production callers never pass it; both default to
+// the real implementations above. Redirects thread the same `deps` through
+// every hop, which is what makes "each hop re-validated" actually true: a
+// redirect to a private target re-enters `resolvedPublicAddress` with the
+// same guard, not a bypass.
+export async function pullHttpsCalendar(value, current = {}, redirects = 0, deps = {}) {
+  const { resolveHost = lookup, sendRequest = requestCalendar } = deps;
   const url = checkedUrl(value);
   if (redirects > 5) throw new Error("Calendar feed redirected too many times");
-  const address = await resolvedPublicAddress(url.hostname);
-  const result = await requestCalendar(url, address, {
+  const address = await resolvedPublicAddress(url.hostname, resolveHost);
+  const result = await sendRequest(url, address, {
     accept: "text/calendar, text/plain;q=0.8",
     "user-agent": "ChronoLog calendar sync",
     ...(current?.etag ? { "if-none-match": current.etag } : {}),
     ...(current?.lastModified ? { "if-modified-since": current.lastModified } : {})
   });
   if ([301, 302, 303, 307, 308].includes(result.status) && result.headers.location) {
-    return pullHttpsCalendar(new URL(result.headers.location, url).href, current, redirects + 1);
+    return pullHttpsCalendar(new URL(result.headers.location, url).href, current, redirects + 1, deps);
   }
   const revision = {
     etag: result.headers.etag || null,

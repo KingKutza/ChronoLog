@@ -60,15 +60,18 @@ function groupFrames(document) {
 
 function layeredCalendarFrames(context, requestedFrame) {
   if (requestedFrame !== context.session.activeFrame) return [context.document.frames[requestedFrame]].filter(Boolean);
-  const base = context.document.frames[requestedFrame];
-  const contextual = (base?.display?.overlays || [])
+  // Multi-select means every selected frame overlays, from every surface —
+  // the 8.19 field report's item 1: only frames[leadingId].display.overlays
+  // used to reach here, so checking a companion in the toolbar's Frame drop
+  // or the frames panel wrote view state the renderer never consumed. The
+  // one selection (src/frame-selection.js, via session.js) is now the only
+  // source: it puts the primary first (it owns axis/labels/coordinate law),
+  // then every other selected frame that still exists. Companions are
+  // subordinate display companions only — their coordinates are never
+  // converted (AGENTS.md's frame model, point 4).
+  return context.session.selectedFrames()
     .map((id) => context.document.frames[id])
-    .filter((frame) => frame && frame.id !== requestedFrame);
-  // Companions are a workspace choice owned by the leading frame.  Do not
-  // fall back to global display.mode flags: that legacy heuristic made an
-  // unrelated calendar appear merely because no companion was selected.
-  return [...new Map([base, ...contextual]
-    .filter(Boolean).map((frame) => [frame.id, frame])).values()];
+    .filter(Boolean);
 }
 
 // Display-facing: uses the isDisplayGroup union so a group's per-lens display
@@ -845,7 +848,7 @@ function renderSimpleLines(target, context) {
   const height = 620;
   const primeY = height / 2;
   const xFor = (day) => 145 + lineProgress(day, window.start, window.end) * 995;
-  const plan = lineFramePlan(context.document, context.session.activeFrame);
+  const plan = lineFramePlan(context.document, context.session.activeFrame, context.session.companionFrames);
   if (plan.topology) {
     renderTopologyLines(target, context, plan.topology);
     return;
@@ -1572,6 +1575,7 @@ export function renderMinimap(target, context) {
 export {
   calendarFrames,
   groupFrames,
+  layeredCalendarFrames as layeredCalendarFramesForTest,
   queryFacts as queryFactsForTest,
   strategicPresentation as strategicPresentationForTest
 };

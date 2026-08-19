@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ChronologEngine } from "../src/engine.js";
 import { queryFactsForTest, strategicPresentationForTest } from "../src/projections.js";
-import { factImportance, resolveObjectColor, sigilForFact } from "../src/visual-language.js";
+import { factImportance, factImportanceWeight, resolveObjectColor, sigilForFact } from "../src/visual-language.js";
 import { minimapEventMagnitude } from "../src/minimap.js";
 import {
+  CommandHistory,
   addEvent,
   addFrame,
   addRelation,
@@ -12,6 +13,7 @@ import {
   createDocument,
   durationMagnitude
 } from "../src/model.js";
+import { createTransactions } from "../src/ui/transactions.js";
 import { coordinate } from "../src/exact.js";
 import { ViewSession } from "../src/session.js";
 import { createStructuralDocument } from "./helpers/sample-document.js";
@@ -36,6 +38,19 @@ function scene() {
     title: "Ordinary",
     traits: ["set", "group"],
     color: "#2e8b57"
+  };
+  // Item #5: a frame IS a group, so a plain calendar frame -- not an
+  // "importance" frame, no importance trait anywhere -- can promote its own
+  // events into Strategic wholesale purely through `display.weight`. This is
+  // the owner's literal question ("How do I set a frame to auto promote all
+  // events belonging to it in Strategic view?") made concrete: an imported
+  // "US holidays" calendar given a weight promotes every one of its events.
+  document.frames["frame:us-holidays"] = {
+    id: "frame:us-holidays",
+    title: "US holidays",
+    traits: ["set", "calendar"],
+    color: "#c9a227",
+    display: { weight: 4 }
   };
 
   const cases = {};
@@ -75,6 +90,8 @@ function scene() {
     group: "frame:importance-high"
   });
   place("ordinary-group-todo", { traits: ["todo"], group: "frame:group-plain" });
+  place("weighted-calendar-todo", { traits: ["todo"], group: "frame:us-holidays" });
+  place("weighted-calendar-event", { traits: ["event"], group: "frame:us-holidays" });
 
   const engine = new ChronologEngine(document);
   const session = new ViewSession({ activeFrame: calendar.id, projection: "calendar", scale: 2 });
@@ -261,4 +278,169 @@ test("a calendar's 'Include all' presence setting reaches an importance frame's 
     result.facts.some((fact) => fact.event.id === event.id),
     "the importance frame's 'Include all' presence setting must surface its members from other calendars"
   );
+});
+
+// Item #5, "strategic promotion via frames-are-groups": display weight is a
+// handling property of the group/frame (LEXICON.md's "importance is a group
+// affiliation, not a property"), composed through the one shared
+// `factImportanceWeight`/`factImportance` path -- no frame-specific one-off
+// field, no parallel gate. These tests exercise that composition against the
+// real `ChronologEngine`, the same object every renderer threads through.
+test("a frame's display weight alone promotes its member events into the Strategic gate, wholesale, with no importance trait involved", () => {
+  const scenario = scene();
+  const context = { document: scenario.document, engine: scenario.engine };
+  const verdict = factImportance(context, { event: scenario.document.events[scenario.cases["weighted-calendar-todo"]] });
+  // 1 (standard base, no legacy trait, no importance-frame membership) * 4
+  // ("frame:us-holidays"'s own display.weight) crosses the landmark threshold.
+  assert.equal(verdict, "landmark");
+  assert.equal(
+    presentationFor(scenario, "weighted-calendar-todo"),
+    "name",
+    "Strategic must promote a plain calendar's weighted member the same way an importance trait would"
+  );
+});
+
+// A weight of 1 -- the universal, authored-only default -- must be a true
+// no-op: this is the regression guard for every existing frame nobody has
+// touched the new knob on.
+test("a frame weight of 1 changes nothing about Strategic's presentation", () => {
+  const scenario = scene();
+  scenario.document.frames["frame:us-holidays"].display.weight = 1;
+  scenario.engine.refreshFrame("frame:us-holidays");
+  const context = { document: scenario.document, engine: scenario.engine };
+  assert.equal(
+    factImportance(context, { event: scenario.document.events[scenario.cases["weighted-calendar-todo"]] }),
+    "standard"
+  );
+  assert.equal(presentationFor(scenario, "weighted-calendar-todo"), "none");
+});
+
+// The composed, frame-weight-driven verdict must drive color, sigil, and
+// minimap magnitude exactly as consistently as a legacy trait or an
+// importance-frame membership already does (see the equivalent test above
+// for those two mechanisms) -- one verdict, every consumer agrees.
+test("a frame-weight-driven verdict drives color, sigil, and minimap magnitude consistently", () => {
+  const scenario = scene();
+  const factFor = (key) => ({
+    event: scenario.document.events[scenario.cases[key]],
+    day: "0",
+    relation: { frame: scenario.calendar.id }
+  });
+  const context = { document: scenario.document, engine: scenario.engine };
+  const verdict = factImportance(context, factFor("weighted-calendar-event"));
+  assert.equal(verdict, "landmark");
+
+  // Sigil: the same milestone mark a legacy landmark trait earns, comparing
+  // two plain Events so ToDo-ness's own precedence (proven elsewhere) never
+  // enters into it.
+  assert.equal(
+    sigilForFact(factFor("weighted-calendar-event"), 0, verdict),
+    sigilForFact({ event: { traits: ["event", "landmark"] } }),
+    "a frame-weight verdict earns the same sigil a legacy landmark trait would"
+  );
+
+  // Color: "frame:us-holidays" colors its own events through the ordinary
+  // cascade exactly as before -- the weight knob and the color cascade are
+  // independent properties of the same frame, and neither depends on the other.
+  assert.equal(resolveObjectColor({
+    document: scenario.document,
+    engine: scenario.engine,
+    object: scenario.document.events[scenario.cases["weighted-calendar-event"]],
+    activeFrame: scenario.calendar.id
+  }), "#c9a227");
+
+  // Minimap: the composed "landmark" verdict weighs exactly as much as any
+  // other landmark verdict, regardless of what produced it.
+  assert.equal(
+    minimapEventMagnitude({ importance: verdict }),
+    minimapEventMagnitude({ importance: "landmark" })
+  );
+});
+
+// Nested group membership must contribute an ancestor group's weight even
+// though the event is only ever directly attached to the descendant -- the
+// same union `eventDisplayGroupMemberships` already resolves for color and
+// sigil, reused rather than re-derived.
+test("nested group membership contributes its ancestor group's weight to the composed verdict", () => {
+  const document = createDocument();
+  addFrame(document, { id: "line:earth", title: "Earth", traits: ["line", "gregorian"], coordinate: { kind: "gregorian" } });
+  addFrame(document, { id: "calendar:active", title: "Active", traits: ["set", "calendar"], coordinateDefinition: "line:earth" });
+  addFrame(document, { id: "group:parent", title: "Parent group", traits: ["set", "group"], display: { weight: 3 } });
+  addFrame(document, { id: "group:child", title: "Child group", traits: ["set", "group"] });
+
+  const event = addEvent(document, {
+    traits: ["event"], magnitudes: { duration: durationMagnitude("0") }, payload: { title: "Nested member" }
+  });
+  const day = coordinate([{ level: "year", value: "2030" }, { level: "month", value: "6" }, { level: "day", value: "15" }]);
+  addRelation(document, { type: "attachment", event: event.id, frame: "calendar:active", role: "placed", coordinate: day });
+  addRelation(document, { type: "attachment", event: event.id, frame: "group:child", role: "member" });
+  addRelation(document, { id: "membership:child-in-parent", type: "membership", group: "group:parent", member: "group:child" });
+
+  const engine = new ChronologEngine(document);
+  const context = { document, engine };
+
+  const memberships = engine.eventDisplayGroupMemberships(event.id).map(({ group }) => group).sort();
+  assert.deepEqual(memberships, ["group:child", "group:parent"], "the engine's own nested-membership union must surface the ancestor");
+  assert.equal(
+    factImportanceWeight(context, { event }),
+    3,
+    "1 (standard base) * 3 (the ancestor's weight, reached only through nesting, not a direct attachment)"
+  );
+  assert.equal(factImportance(context, { event }), "important");
+});
+
+// The knob in the frame editor (src/ui/frames-panel.js's "Display weight"
+// field) writes through `app.executeRecordChange`, the same shared undoable
+// transaction helper every other frame edit uses -- never a direct mutation.
+// This proves that write path end to end: one journaled `put frames/<id>`
+// op, and an undo that is a real document change the composed verdict
+// reacts to, not merely a UI-visible one.
+test("the display-weight knob's write path journals one frame put and is fully undoable", () => {
+  const document = createDocument();
+  addFrame(document, { id: "line:earth", title: "Earth", traits: ["line", "gregorian"], coordinate: { kind: "gregorian" } });
+  addFrame(document, { id: "calendar:active", title: "Active", traits: ["set", "calendar"], coordinateDefinition: "line:earth" });
+  addFrame(document, { id: "frame:us-holidays", title: "US holidays", traits: ["set", "calendar"] });
+  const event = addEvent(document, {
+    traits: ["event"], magnitudes: { duration: durationMagnitude("0") }, payload: { title: "Independence Day" }
+  });
+  addRelation(document, { type: "attachment", event: event.id, frame: "frame:us-holidays", role: "member" });
+
+  const changes = [];
+  const app = { chronolog: document };
+  app.history = new CommandHistory(document, (change) => changes.push(change));
+  Object.assign(app, createTransactions(app));
+
+  const engine = new ChronologEngine(document);
+  const context = { document, engine };
+  assert.equal(factImportance(context, { event }), "standard", "no weight authored yet");
+
+  // This mirrors exactly what the frame form's submit handler does with the
+  // "Display weight" field's value -- mutate `display` inside
+  // `executeRecordChange`, never assign to the record directly.
+  app.executeRecordChange("Edit frame", "frames", "frame:us-holidays", (documentValue) => {
+    documentValue.frames["frame:us-holidays"].display = {
+      ...(documentValue.frames["frame:us-holidays"].display || {}), weight: 4
+    };
+  });
+
+  const applied = changes.at(-1);
+  assert.deepEqual(
+    new Set(applied.ops.map((op) => `${op.op} ${op.map}/${op.id}`)),
+    new Set(["put frames/frame:us-holidays", "put meta/modified"]),
+    "the weight edit journals as exactly one frame put, nothing else"
+  );
+  assert.equal(document.frames["frame:us-holidays"].display.weight, 4);
+  assert.equal(factImportance(context, { event }), "landmark", "the composed verdict reacts to the freshly-authored weight");
+
+  assert.equal(app.history.undo(), true);
+  assert.equal(
+    document.frames["frame:us-holidays"].display?.weight,
+    undefined,
+    "undo restores the pre-edit record, which never had a weight"
+  );
+  assert.equal(factImportance(context, { event }), "standard", "undo is a real document change -- the verdict reverts with it");
+
+  assert.equal(app.history.redo(), true);
+  assert.equal(document.frames["frame:us-holidays"].display.weight, 4, "redo re-applies the authored weight");
+  assert.equal(factImportance(context, { event }), "landmark");
 });

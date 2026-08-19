@@ -263,11 +263,14 @@ export function createToolbar(app, dom) {
   });
 
   // "Frame", not "Calendar" — the dropdown selects which frame(s) project,
-  // and a frame need not be a calendar. Multiple frames can be checked: the
-  // first (session.activeFrame) stays the leading frame that supplies
-  // primary coordinates, exactly as ROADMAP's frame model requires; the rest
-  // are companions. Selecting or checking a frame here never creates a
-  // mapping — it only ever writes session state.
+  // and a frame need not be a calendar. Multiple frames can be checked, and
+  // every one of them overlays (the 8.19 field report's item 1: this used to
+  // write session state the renderer never consumed — src/frame-selection.js
+  // is now the one class both this drop and the projection read). Each row
+  // also carries an explicit "Primary" marker: the checkbox controls
+  // membership, the marker controls which selected frame supplies primary
+  // coordinates. Selecting or checking a frame here never creates a mapping
+  // — it only ever writes session state.
   function updateFrameSelect() {
     const { chronolog, session } = app;
     const entry = dropdowns.get("frame-select");
@@ -297,7 +300,26 @@ export function createToolbar(app, dom) {
           if (session.activeFrame !== previousLeading) app.selectLeadingFrame(session.activeFrame);
           else app.scheduleRender();
         });
-        label.append(input, document.createTextNode(frame.title));
+        // The explicit primary marker (AGENTS.md's frame model, point 4:
+        // selecting/displaying a frame never creates a mapping — this only
+        // moves which selected frame supplies primary coordinates and
+        // labels). A native button is keyboard-reachable with no extra
+        // wiring; aria-pressed carries the radio-like "this one is primary"
+        // state within the checked set. Disabled while its own frame is not
+        // checked, or while it already is the primary.
+        const marker = document.createElement("button");
+        marker.type = "button";
+        marker.className = "frame-primary-marker";
+        marker.dataset.frameId = frame.id;
+        marker.textContent = "Primary";
+        marker.title = `Make ${frame.title} the primary frame`;
+        marker.setAttribute("aria-label", marker.title);
+        marker.addEventListener("click", (event) => {
+          event.preventDefault();
+          if (!session.frameSelection.isSelected(frame.id) || session.frameSelection.isPrimary(frame.id)) return;
+          app.selectLeadingFrame(frame.id);
+        });
+        label.append(input, document.createTextNode(frame.title), marker);
         panel.append(label);
       }
       if (!frames.length) {
@@ -310,6 +332,12 @@ export function createToolbar(app, dom) {
     const selected = new Set(session.selectedFrames());
     panel.querySelectorAll('input[type="checkbox"]').forEach((input) => {
       input.checked = selected.has(input.value);
+    });
+    panel.querySelectorAll(".frame-primary-marker").forEach((marker) => {
+      const isPrimary = session.frameSelection.isPrimary(marker.dataset.frameId);
+      marker.disabled = !selected.has(marker.dataset.frameId) || isPrimary;
+      marker.setAttribute("aria-pressed", String(isPrimary));
+      marker.classList.toggle("active", isPrimary);
     });
     const leading = frames.find((frame) => frame.id === session.activeFrame);
     const extra = session.companionFrames.length;
@@ -1019,6 +1047,14 @@ export function createToolbar(app, dom) {
       app.createEventAt(app.session.currentFocus(), app.session.currentFocus(), kind);
     });
   }
+  // "Frame" is the New menu's own entry point onto the Frames workspace's
+  // creation primitives (src/ui/frames-panel.js's createFrame) — not the
+  // "Frames" toggle beside it, which only opens the frames browser/dock and
+  // creates nothing by itself.
+  byId("create-frame").addEventListener("click", () => {
+    closeCreateMenu();
+    app.createFrame();
+  });
 
   // Mutual exclusion between create-menu and document-menu (opening one used
   // to close the other via a hand-paired pair of toggle listeners naming

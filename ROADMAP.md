@@ -17,10 +17,12 @@ the archive.
    period — the server endpoint is live). Parked from the 8.19 wave:
    ToDo-tailored editor fields (recurrence rows, location, and
    calendar-vs-list framing are still event-shaped); exposing
-   many-to-many event↔frame attachment in the editor (the session-level
-   multi-frame selector landed; the editor and companion-frame rendering
-   did not); transaction-aware Apply for undo-tracked surfaces (the
-   event editor and frame forms need more than a button).
+   many-to-many event↔frame attachment in the editor (frame selection is
+   one class with an explicit primary marker and every selected frame
+   overlays; the editor side did not land); transaction-aware Apply for
+   undo-tracked surfaces (the event editor and frame forms need more than
+   a button). Frame overlay selection is session view state — a document
+   authored before that change is bridged into the session once.
 2. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
    2026-08-17/18 rulings): floats live at their staples, project forward
    for a keep-range, lapse from present view without deletion. Importance
@@ -54,20 +56,26 @@ the archive.
    end, midpoint, or another named point of an event, paired with a
    magnitude; two or three staples derive the magnitude instead. Fuzzy
    staples ("about 5ish") make uncertainty per-staple data. Constraint
-   bounds ("can't go later than 7:30") are adjacent and unruled. Series
-   staple the same way — at the beginning, the end, or any arbitrary
-   reference point on the body: an end-staple ends a series, an
-   occurrence staple anchors the cycle's phase. A series is an identity
-   whose rules are segments partitioned by staples (the Rob-and-John
-   scenario in LEXICON.md is the acceptance case): a staple at an
-   inflection point ends the reigning rule, and a new rule may follow on
-   the same series or a new series may begin, on preference. Exclusions
-   are live references to another frame's events (skip holidays = events
-   on frame xyz), not baked lists. Rule extent (indefinite) is distinct
-   from projection horizon (bounded, default ~2 years, settable). The
-   authoring path must handle end-anchored work shifts and irregular
-   night-shift cycles; a clear way to define an event by an end staple
-   still does not exist. Needs design.
+   bounds ("can't go later than 7:30") are adjacent and unruled. A series
+   is an identity whose rules are segments partitioned by staples (the
+   Rob-and-John scenario in LEXICON.md is the acceptance case): a staple
+   at an inflection point ends the reigning rule, and a new rule may
+   follow on the same series or a new series may begin, on preference.
+   The series end-staple ships: a `staple` relation carrying
+   `series`/`kind: "end"`/`frame`/`coordinate`, one shared derivation of
+   the effective stop as the earlier of the rule's own extent and the
+   staple, removal restoring the projection, ICS deriving UNTIL at
+   serialization rather than storing it, and the whole thing composing
+   with the healing invariant. Still open: start, midpoint and other
+   named-point anchors; magnitudes derived from staples; fuzzy staples;
+   an occurrence staple anchoring the cycle's phase; a new rule defined
+   after the staple; an end-staple under a COUNT rule (RFC 5545 forbids
+   COUNT with UNTIL); and exclusions as live references to another
+   frame's events (skip holidays = events on frame xyz) rather than baked
+   lists. Rule extent (indefinite) is distinct from projection horizon
+   (bounded, default ~2 years, settable). The authoring path must handle
+   end-anchored work shifts and irregular night-shift cycles; defining an
+   event — as opposed to a series — by an end staple still has no path.
 5. **Pattern authoring beyond the RRULE dropdown** — the repeat control
    is a rigid list of common Gregorian periods. "Every odd day of every
    even month of every odd year, except where any of those numbers is
@@ -104,28 +112,24 @@ the archive.
    provider API. The journal's per-op conflict foundation exists;
    provider-side conflict semantics for recurring/edited events still
    need design.
-9. **Slim the retained ICS payload** — 93.8% of the owner's real document
-   is a per-event duplicate of its own parsed ICS node
-   (`events[*].foreign.ics.component`, ~154 MB of a 169 MB file). Keep
-   round-trip fidelity while storing the source once, not per event.
-10. **Control-bar aesthetics.**
-11. **New logo** — plain text until a better mark earns the spot.
-12. **More calendar subscriptions** — Google Calendar and other providers,
+9. **Control-bar aesthetics.**
+10. **New logo** — plain text until a better mark earns the spot.
+11. **More calendar subscriptions** — Google Calendar and other providers,
     each through its published ICS URL.
-13. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
+12. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
     web, built on the journal's per-op foundation.
-14. **Mobile version** — Android first. The dock becomes a full-screen
+13. **Mobile version** — Android first. The dock becomes a full-screen
     sheet under a width breakpoint; card paging becomes swipe gestures.
-15. **Super-strategic band** (naming candidate: the epoch view) — the
+14. **Super-strategic band** (naming candidate: the epoch view) — the
     lens beyond Strategic, which caps at 18 months where this band would
     take over: decades to centuries to millennia or longer. Needs design;
     pairs with #6's epochs/ages.
-16. **Field-level merge** — real merging on top of per-op sequencing. Needs
+15. **Field-level merge** — real merging on top of per-op sequencing. Needs
     design.
-17. **Compiled native binaries** — the distribution end-state; the portable
+16. **Compiled native binaries** — the distribution end-state; the portable
     Node bundles are interim. Native shells may pop dock cards out into
     real second OS windows on desktop platforms.
-18. **The document's own timeline** — a lens over the journal itself:
+17. **The document's own timeline** — a lens over the journal itself:
     scroll back through what the document was, watch a deleted series
     vanish and return. The journal already records every op; this is the
     view it makes possible. The very far bottom, on purpose.

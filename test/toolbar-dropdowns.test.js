@@ -178,7 +178,7 @@ function createStubDom() {
   // Anything not a dropdown is a bare stub — createToolbar only needs it to
   // exist and accept addEventListener/property writes without throwing.
   for (const id of [
-    "shared-focus", "undo", "redo", "new-event", "new-todo", "new-note",
+    "shared-focus", "undo", "redo", "new-event", "new-todo", "new-note", "create-frame",
     "theme-settings", "lens-settings", "dock-side", "settings",
     "open-todos", "open-notes", "open-document", "document-file",
     "save-document", "save-as-document", "lens-bar"
@@ -419,6 +419,52 @@ test("the Frame drop is a bar dropdown like any other, and reflects multi-select
   }
 });
 
+// Owner item 1 (8.19 field report): every selected frame must overlay, from
+// every surface, with one explicit primary marker — not just the frames
+// dock's own checkboxes, which used to be the only place this worked. The
+// Frame drop had no way at all to say which checked frame leads; this is
+// that control.
+test("the Frame drop carries an explicit primary marker per row, reassignable without losing the selection", () => {
+  const h = harness();
+  try {
+    h.app.chronolog.frames["calendar:work"] = { id: "calendar:work", title: "Work", traits: ["calendar"] };
+    // Stands in for the real app.selectLeadingFrame (src/ui/frames-panel.js),
+    // which the marker routes through exactly like the leading select does.
+    h.app.selectLeadingFrame = (frameId) => h.app.session.setLeadingFrame(frameId);
+    h.toolbar.updateCalendarSelect();
+    const entry = h.toolbar.barDropdowns.get("frame-select");
+    const labels = entry.panel.children.filter((child) => child.className === "check-chip");
+    const personalLabel = labels.find((label) => label.children[0].value === "calendar:personal");
+    const workLabel = labels.find((label) => label.children[0].value === "calendar:work");
+    const personalMarker = personalLabel.children[2];
+    const workMarker = workLabel.children[2];
+    const workCheckbox = workLabel.children[0];
+
+    assert.ok(personalMarker.classList.contains("frame-primary-marker"));
+    assert.equal(personalMarker.getAttribute("aria-pressed"), "true", "the leading frame starts as primary");
+    assert.equal(personalMarker.disabled, true, "the current primary's own marker is not actionable");
+    assert.equal(workMarker.getAttribute("aria-pressed"), "false");
+    assert.equal(workMarker.disabled, true, "an unselected frame's marker is disabled until it is checked");
+
+    workCheckbox.checked = true;
+    workCheckbox.dispatch("change");
+    h.toolbar.updateCalendarSelect();
+    assert.equal(workMarker.disabled, false, "now selected, its marker becomes actionable");
+
+    workMarker.dispatch("click");
+    assert.equal(h.app.session.activeFrame, "calendar:work", "clicking the marker reassigns the primary");
+    assert.deepEqual(h.app.session.companionFrames, ["calendar:personal"],
+      "reassigning the primary must not drop the previous one from the selection — the reported regression");
+
+    h.toolbar.updateCalendarSelect();
+    assert.equal(workMarker.getAttribute("aria-pressed"), "true");
+    assert.equal(personalMarker.getAttribute("aria-pressed"), "false");
+    assert.equal(personalMarker.disabled, false, "the demoted frame is still selected, so its marker is actionable again");
+  } finally {
+    h.restore();
+  }
+});
+
 // The widened contract, item by item — see the 8.19 field report's Stage A
 // item 1. Every one of these used to be either absent, or a hand patch on
 // one dropdown (create-menu's own `pointerdown` check) rather than a
@@ -612,6 +658,31 @@ test("the lens workspace's Apply button commits the draft without closing the di
     apply.dispatch("click");
     assert.equal(dismissed, false, "Apply does not close the dialog");
     assert.ok(!h.app.session.enabledLenses.includes(originalFirstLens), "the unchecked lens is hidden immediately, before Save");
+  } finally {
+    h.restore();
+  }
+});
+
+// Owner item 3, "New Lacks a New Frame Option": the create-menu ("New") panel
+// gained a fourth entry alongside Event/ToDo/Note. It is wired the same way
+// those three are — close the menu, then hand off to the one place frame
+// creation actually happens (src/ui/frames-panel.js's `createFrame`, exposed
+// on `app` the same way `app.createEventAt` is). This only pins the menu
+// wiring; test/frame-creation.test.js drives `createFrame`'s own document
+// effect, since the frame it opens for editing is a real `innerHTML` form the
+// stub DOM cannot render (see that file's header comment).
+test("the New menu offers a Frame entry that closes the menu and hands off to createFrame", () => {
+  const h = harness();
+  try {
+    let created = 0;
+    h.app.createFrame = () => { created += 1; };
+    open(h.createMenu);
+    assert.equal(h.createMenu.open, true);
+    const frameButton = h.elementsById.get("create-frame");
+    assert.ok(frameButton, "a #create-frame control exists in the create menu");
+    frameButton.dispatch("click");
+    assert.equal(created, 1, "invoking the menu entry calls app.createFrame() exactly once");
+    assert.equal(h.createMenu.open, false, "picking an entry closes the New menu, like Event/ToDo/Note do");
   } finally {
     h.restore();
   }

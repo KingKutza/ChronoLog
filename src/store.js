@@ -1,3 +1,4 @@
+import { eventComponentKey, residualEventComponent } from "./ics.js";
 import { clone, migrateDocument, overridePatternId, validateDocument } from "./model.js";
 import { OpLog, applyOps } from "./ops.js";
 
@@ -74,11 +75,56 @@ function addRepair(report, entry) {
   else if (report && typeof report === "object") (report.repairs ||= []).push(entry);
 }
 
+// The early ICS import shape gave every event its own full copy of the ICS
+// node it came from, at `foreign.ics.component` -- which is what let one
+// owner's real work calendar make the document balloon to roughly double the
+// size of the .ics being imported. The current importer instead
+// keeps one shared, de-duplicated copy per source
+// (`document.foreign.ics.sources[id].components`, keyed by
+// `eventComponentKey`) and gives each event only a `{source, key}`
+// reference. This sweep converts a legacy inline copy into the shared form
+// wherever a home for it still exists, exactly the same way the other
+// recoveries above convert an old shape into the current one. It is a repair,
+// not a relaxation: `validateDocument` never had an opinion about
+// `foreign.ics.component` either way, so there is nothing to keep strict here
+// -- only bytes to stop duplicating.
+function slimOneICSReference(document, container) {
+  const ics = container?.foreign?.ics;
+  if (!ics || !ics.component || !ics.source) return false;
+  const source = document?.foreign?.ics?.sources?.[ics.source];
+  if (!source) return false; // No shared home to dedupe into; leave the copy rather than lose it.
+  source.components ||= {};
+  const key = ics.key || eventComponentKey(ics.component);
+  source.components[key] ||= residualEventComponent(ics.component);
+  container.foreign.ics = { source: ics.source, key };
+  return true;
+}
+
+function slimRetainedICSPayload(document, report) {
+  let slimmed = 0;
+  for (const event of Object.values(document?.events || {})) {
+    if (!event || typeof event !== "object") continue;
+    if (slimOneICSReference(document, event)) slimmed += 1;
+    for (const staple of event.foreign?.stapled || []) {
+      if (slimOneICSReference(document, staple)) slimmed += 1;
+    }
+  }
+  if (slimmed) {
+    addRepair(report, {
+      kind: "slimmed-ics-payload",
+      count: slimmed,
+      message: `Deduplicated ${slimmed} retained ICS event cop${slimmed === 1 ? "y" : "ies"} into shared per-source storage.`
+    });
+  }
+  return document;
+}
+
 export function compactDocument(document, report = null) {
   migrateDocument(document);
   recoverLegacyRecurrenceConstraints(document);
   recoverDanglingOverrideReplacements(document);
   recoverOrphanedVirtualOverrides(document, report);
+  slimRetainedICSPayload(document, report);
   for (const source of Object.values(document?.foreign?.ics?.sources || {})) {
     const calendar = source?.component;
     if (!Array.isArray(calendar?.components)) continue;

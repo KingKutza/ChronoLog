@@ -70,6 +70,48 @@ test("refreshing a stapled remote event updates its source copy without replacin
   assert.equal(validation.valid, true, validation.errors.join("\n"));
 });
 
+test("repeated pulls of an unchanged feed do not accumulate duplicate shared ICS sources or components", () => {
+  const document = createSampleDocument({ includeEvents: false });
+  const text = calendar(event("one", "First"), event("two", "Second"));
+  applyICSSnapshot(document, { connectionId: "feed:steady", text, revision: "v1" });
+  const sourceId = Object.keys(document.foreign.ics.sources)[0];
+  const componentsAfterFirst = Object.keys(document.foreign.ics.sources[sourceId].components).length;
+
+  // Ten repeats of the exact same feed content -- the reconciler's whole-record
+  // replace-or-delete invariant (src/calendar-sync.js) means each pull assigns
+  // a brand-new source object wholesale rather than merging into the old one,
+  // so nothing here should ever accumulate.
+  for (let i = 0; i < 10; i += 1) {
+    applyICSSnapshot(document, { connectionId: "feed:steady", text, revision: `v${i + 2}` });
+  }
+
+  assert.equal(Object.keys(document.foreign.ics.sources).length, 1, "still exactly one shared source");
+  // The reconciler keeps the source id stable across pulls (that stability is
+  // what lets frames/patterns survive a refresh) -- what must not happen is a
+  // second source id appearing alongside it, or its component bucket growing.
+  assert.ok(document.foreign.ics.sources[sourceId], "the same source id is reused, not replaced by a new one");
+  assert.equal(
+    Object.keys(document.foreign.ics.sources[sourceId].components).length,
+    componentsAfterFirst,
+    "the shared component bucket holds exactly one entry per event, not one per pull"
+  );
+  assert.equal(Object.keys(document.events).length, 2, "no duplicate events either");
+  const validation = validateDocument(document);
+  assert.equal(validation.valid, true, validation.errors.join("\n"));
+});
+
+test("a snapshot that fails to parse leaves the source revision and shared components untouched", () => {
+  const document = createSampleDocument({ includeEvents: false });
+  applyICSSnapshot(document, {
+    connectionId: "feed:flaky", text: calendar(event("one", "First")), revision: "v1"
+  });
+  const before = JSON.parse(JSON.stringify(document.foreign.ics));
+  assert.throws(() => applyICSSnapshot(document, {
+    connectionId: "feed:flaky", text: "not an ICS payload at all", revision: "v2"
+  }));
+  assert.deepEqual(document.foreign.ics, before, "a failed parse commits nothing -- revision only advances after a successful parse");
+});
+
 test("provider calendar IDs keep frames stable when a multi-calendar response changes order", () => {
   const document = createSampleDocument({ includeEvents: false });
   applyICSSnapshot(document, {

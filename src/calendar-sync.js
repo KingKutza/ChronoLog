@@ -19,11 +19,15 @@ function sourceFrame(document, sourceId) {
   return Object.values(document.frames || {}).find((frame) => frame?.foreign?.ics?.source === sourceId) || null;
 }
 
+// An event's `foreign.ics.key` already IS its stable identity within the
+// source (see `eventComponentKey` in ics.js, which built it) -- component
+// kind, UID, RECURRENCE-ID. Events only ever carry a reference now, never
+// their own component copy, so there is nothing left to derive this from
+// except that key.
 function sourceEventKey(event) {
-  const component = event?.foreign?.ics?.component;
-  const uid = event?.payload?.uid || (component ? property(component, "UID")?.value : "") || "";
-  const recurrence = component ? property(component, "RECURRENCE-ID")?.value || "" : "";
-  return `${component?.name || "VEVENT"}\u0000${uid}\u0000${recurrence}`;
+  const ics = event?.foreign?.ics;
+  if (ics?.key) return ics.key;
+  return `VEVENT\u0000${event?.payload?.uid || ""}\u0000`;
 }
 
 function sourcePatternKey(pattern) {

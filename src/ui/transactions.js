@@ -1,4 +1,4 @@
-import { clone, overridePatternId, removeOverridesForPatterns } from "../model.js";
+import { clone, overridePatternId, removeOverridesForPatterns, removeStaplesForPatterns } from "../model.js";
 import { bundleOps, recordOps } from "../ops.js";
 import { applySeriesHeal, healCandidateIds, planSeriesHeal } from "../series-heal.js";
 
@@ -17,6 +17,20 @@ export function createTransactions(app) {
     if (!patternIds.size) return tracked;
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (patternIds.has(overridePatternId(override))) tracked.add(id);
+    }
+    return tracked;
+  }
+
+  // A staple belongs to its series exactly the way an override belongs to its
+  // pattern (see `removeStaplesForPatterns` in model.js). Every bundle that
+  // tracks a scope's overrides tracks its staples the same way, so a series
+  // that is deleted, or a frame/event whose deletion cascades to its series,
+  // takes its end-staple with it -- and undo restores both together.
+  function trackPatternStaples(documentValue, patterns, tracked) {
+    const patternIds = new Set(Object.keys(patterns));
+    if (!patternIds.size) return tracked;
+    for (const [id, relation] of Object.entries(documentValue.relations)) {
+      if (relation.type === "staple" && patternIds.has(relation.series)) tracked.add(id);
     }
     return tracked;
   }
@@ -62,6 +76,7 @@ export function createTransactions(app) {
       if (!documentValue.patterns[patternId]) removed.add(patternId);
     }
     removeOverridesForPatterns(documentValue, removed);
+    removeStaplesForPatterns(documentValue, removed);
   }
 
   // `replacedEventIds` / the extra `events` entries exist for the same reason as in
@@ -80,6 +95,7 @@ export function createTransactions(app) {
       .filter(([, pattern]) => pattern.templateEvent === eventId)
       .map(([id, pattern]) => [id, clone(pattern)]));
     trackPatternOverrides(documentValue, patterns, tracked);
+    const trackedStaples = trackPatternStaples(documentValue, patterns, new Set());
     const overrides = Object.fromEntries(Object.entries(documentValue.overrides)
       .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]));
     const replaced = new Set(previous?.replacedEventIds || []);
@@ -89,9 +105,10 @@ export function createTransactions(app) {
     return {
       event: clone(documentValue.events[eventId]),
       relations: Object.fromEntries(Object.entries(documentValue.relations)
-        .filter(([, relation]) => relation.event === eventId
+        .filter(([id, relation]) => relation.event === eventId
           || replaced.has(relation.event)
-          || replaced.has(relation.member))
+          || replaced.has(relation.member)
+          || trackedStaples.has(id))
         .map(([id, relation]) => [id, relation.event === eventId
           ? clone(relation)
           : carryForward(previous?.relations, id, relation)])),
@@ -125,6 +142,9 @@ export function createTransactions(app) {
       if (tracked.has(id)
         || override.replacements?.includes(eventId)
         || bundlePatterns.has(overridePatternId(override))) delete documentValue.overrides[id];
+    }
+    for (const [id, relation] of Object.entries(documentValue.relations)) {
+      if (relation.type === "staple" && bundlePatterns.has(relation.series)) delete documentValue.relations[id];
     }
     if (bundle.event) documentValue.events[eventId] = clone(bundle.event);
     else delete documentValue.events[eventId];
@@ -166,6 +186,7 @@ export function createTransactions(app) {
     const patterns = Object.fromEntries(Object.entries(documentValue.patterns)
       .filter(([, pattern]) => ids.has(pattern.templateEvent)).map(([id, pattern]) => [id, clone(pattern)]));
     const tracked = trackPatternOverrides(documentValue, patterns, new Set());
+    const trackedStaples = trackPatternStaples(documentValue, patterns, new Set());
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (override.replacements?.some((eventId) => ids.has(eventId))) tracked.add(id);
     }
@@ -173,7 +194,8 @@ export function createTransactions(app) {
       events: Object.fromEntries(Object.entries(documentValue.events)
         .filter(([id]) => ids.has(id)).map(([id, event]) => [id, clone(event)])),
       relations: Object.fromEntries(Object.entries(documentValue.relations)
-        .filter(([, relation]) => ids.has(relation.event)).map(([id, relation]) => [id, clone(relation)])),
+        .filter(([id, relation]) => ids.has(relation.event) || trackedStaples.has(id))
+        .map(([id, relation]) => [id, clone(relation)])),
       patterns,
       overrides: Object.fromEntries(Object.entries(documentValue.overrides)
         .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]))
@@ -193,6 +215,9 @@ export function createTransactions(app) {
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (override.replacements?.some((eventId) => ids.has(eventId))
         || bundlePatterns.has(overridePatternId(override))) delete documentValue.overrides[id];
+    }
+    for (const [id, relation] of Object.entries(documentValue.relations)) {
+      if (relation.type === "staple" && bundlePatterns.has(relation.series)) delete documentValue.relations[id];
     }
     Object.assign(documentValue.events, clone(bundle.events));
     Object.assign(documentValue.relations, clone(bundle.relations));
@@ -240,10 +265,12 @@ export function createTransactions(app) {
       pattern.frame === frameId || pattern.appliesTo?.includes(frameId)
     ).map(([id, pattern]) => [id, clone(pattern)]));
     const tracked = trackPatternOverrides(documentValue, patterns, new Set());
+    const trackedStaples = trackPatternStaples(documentValue, patterns, new Set());
     return {
       frame: clone(documentValue.frames[frameId]),
-      relations: Object.fromEntries(Object.entries(documentValue.relations).filter(([, relation]) =>
+      relations: Object.fromEntries(Object.entries(documentValue.relations).filter(([id, relation]) =>
         relation.frame === frameId || relation.parent === frameId || relation.child === frameId
+        || trackedStaples.has(id)
       ).map(([id, relation]) => [id, clone(relation)])),
       patterns,
       // Removing a frame removes the patterns scoped to it, so their overrides
@@ -264,6 +291,9 @@ export function createTransactions(app) {
     const bundlePatterns = new Set(Object.keys(bundle.patterns || {}));
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (bundlePatterns.has(overridePatternId(override))) delete documentValue.overrides[id];
+    }
+    for (const [id, relation] of Object.entries(documentValue.relations)) {
+      if (relation.type === "staple" && bundlePatterns.has(relation.series)) delete documentValue.relations[id];
     }
     if (bundle.frame) documentValue.frames[frameId] = clone(bundle.frame);
     else delete documentValue.frames[frameId];
@@ -322,6 +352,7 @@ export function createTransactions(app) {
       ? { [patternId]: clone(documentValue.patterns[patternId]) }
       : {};
     const tracked = trackPatternOverrides(documentValue, { [patternId]: true }, new Set());
+    const trackedStaples = trackPatternStaples(documentValue, { [patternId]: true }, new Set());
     const overrides = Object.fromEntries(Object.entries(documentValue.overrides)
       .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]));
     const replaced = new Set(previous?.replacedEventIds || []);
@@ -335,8 +366,13 @@ export function createTransactions(app) {
       events: Object.fromEntries([...replaced]
         .filter((eventId) => documentValue.events[eventId])
         .map((eventId) => [eventId, carryForward(previous?.events, eventId, documentValue.events[eventId])])),
+      // The staple this series ends on travels in the same field as the events
+      // its overrides replaced -- both are "records this bundle can delete",
+      // and `restorePatternBundle` clears stale staples the same way it clears
+      // stale overrides before reassigning this map.
       relations: Object.fromEntries(Object.entries(documentValue.relations)
-        .filter(([, relation]) => replaced.has(relation.event) || replaced.has(relation.member))
+        .filter(([id, relation]) => replaced.has(relation.event) || replaced.has(relation.member)
+          || trackedStaples.has(id))
         .map(([id, relation]) => [id, carryForward(previous?.relations, id, relation)]))
     };
   }
@@ -345,6 +381,9 @@ export function createTransactions(app) {
     delete documentValue.patterns[patternId];
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (overridePatternId(override) === patternId) delete documentValue.overrides[id];
+    }
+    for (const [id, relation] of Object.entries(documentValue.relations)) {
+      if (relation.type === "staple" && relation.series === patternId) delete documentValue.relations[id];
     }
     // Clear the replaced events' current records before restoring, so this works
     // symmetrically whether the transaction being undone deleted them (a heal) or

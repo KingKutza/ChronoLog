@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ChronologEngine } from "../src/engine.js";
-import { daysFromCivil, daysToCivilCoordinate } from "../src/exact.js";
+import { Rational, daysFromCivil, daysToCivilCoordinate } from "../src/exact.js";
 import { importICS } from "../src/ics.js";
-import { createId, validateDocument } from "../src/model.js";
+import { clearSeriesEndStaple, createId, setSeriesEndStaple, validateDocument } from "../src/model.js";
 import { applyOps } from "../src/ops.js";
 import {
   applySeriesHeal,
@@ -339,6 +339,36 @@ test("a plain suppression with no replacement is never healed", () => {
   assert.equal(decisionFor(chronologDocument, override).healable, false);
   assert.equal(planFor(chronologDocument).healed, 0);
   assert.ok(chronologDocument.overrides[override.id], "the suppression survives");
+});
+
+// LEXICON's staple anchoring / Rob-and-John scenario, composed with the
+// healing invariant. Placing an end-staple is a second, independent bound on
+// the series (src/engine.js's `seriesEffectiveUntilDays`) -- the rule itself
+// (`pattern.rrule`) is never rewritten. So once a staple retires a slot, this
+// looks to the invariant exactly like the pattern-is-gone case just above:
+// `projectedOccurrence` finds nothing, and the module must refuse rather than
+// destroy the authored event the override replaced. That is the safe,
+// deliberately asymmetric direction the module is built around -- a false
+// heal destroys data, a missed heal only leaves an extra record.
+test("an end-staple placed before a materialized occurrence's slot leaves its override in place -- the invariant refuses rather than destroys it", () => {
+  const { document: chronologDocument, frame, pattern, fact, override, event } = materializedFixture();
+  assert.equal(decisionFor(chronologDocument, override).healable, true, "healable before the staple exists");
+
+  // Staple the series one day before this occurrence's own slot. The rule
+  // itself is untouched -- still FREQ=WEEKLY, still indefinite -- this is a
+  // second, independent bound intersected with it at projection time.
+  const stapleDay = Rational.parse(fact.day).sub(1);
+  setSeriesEndStaple(chronologDocument, pattern.id, frame.id, daysToCivilCoordinate(stapleDay));
+
+  const decision = decisionFor(chronologDocument, override);
+  assert.equal(decision.healable, false, "the staple retired this slot; healing now would destroy the authored event");
+  assert.match(decision.reason, /projects nothing/i);
+  assert.ok(chronologDocument.events[event.id], "the authored occurrence the override replaced is untouched");
+
+  // Removing the staple resumes the projection; the override, unchanged this
+  // whole time, is healable again purely because the state changed back.
+  clearSeriesEndStaple(chronologDocument, pattern.id);
+  assert.equal(decisionFor(chronologDocument, override).healable, true, "healable again once the staple is gone");
 });
 
 test("an override whose pattern is gone is left for the repair path, not healed", () => {

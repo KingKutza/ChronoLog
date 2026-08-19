@@ -715,11 +715,20 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 #app[data-dock-side="left"] #dock { flex-direction: row-reverse; }
 
 /* The resize grip lives on the dock's inner edge, whichever side the dock is on.
-   It is a real focusable separator so the width is reachable without a pointer. */
+   It is a real focusable separator so the width is reachable without a pointer.
+   Centering the grip with `display: flex` + `align-items: center` (rather than a
+   `margin-top: 50%` trick) matters here specifically: vertical margin percentages
+   always resolve against the containing block's *width*, never its height, so on
+   this 9px-wide handle that math produced a small negative offset instead of a
+   center — the grip rendered pinned near the top of the handle, above its actual
+   34px box, reading as a stray hairline in the dock/stage gutter. */
 #dock-resize {
   flex: none;
   width: 9px;
   margin: 0 -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 5px;
   cursor: col-resize;
   background: transparent;
@@ -731,7 +740,6 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
   display: block;
   width: 3px;
   height: 34px;
-  margin: calc(50% - 17px) auto 0;
   border-radius: 2px;
   background: color-mix(in srgb, var(--strong) 70%, transparent);
 }
@@ -1048,6 +1056,33 @@ svg [data-selected="true"] {
   padding: 0;
 }
 
+/* The explicit primary marker riding along in a check-chip: which selected
+   frame supplies primary coordinates, distinct from the checkbox's own
+   membership toggle. */
+.frame-primary-marker {
+  flex: none;
+  margin-left: 2px;
+  padding: 1px 6px;
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 700 9px/1.4 var(--data);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.frame-primary-marker.active {
+  border-color: var(--primary, var(--strong));
+  background: var(--primary, var(--strong));
+  color: var(--paper, #fff);
+  cursor: default;
+}
+.frame-primary-marker:disabled:not(.active) {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
 .inline-create {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -1140,6 +1175,19 @@ svg [data-selected="true"] {
   border-top: 1px solid var(--hair);
   background: color-mix(in srgb, var(--paper) 94%, transparent);
   backdrop-filter: blur(8px);
+}
+
+/* An inline mid-form button row — one with real sibling controls below it,
+   not a card's trailing action bar — must never inherit `.inspector-actions`'s
+   bottom-anchored `position: sticky`. That footer style floats a mid-form row
+   above the controls meant to sit below it instead of leaving it inline
+   (e.g. the observed boundary series' "Add boundary" / "Import timestamps"
+   row, which sits above the import textarea and preview). Anything that is
+   not the last thing in its card belongs here instead. */
+.inline-actions {
+  display: flex;
+  gap: 7px;
+  margin: 4px 0 10px;
 }
 
 #toast {

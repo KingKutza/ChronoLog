@@ -5,6 +5,7 @@ import {
   daysToCivilCoordinate,
   levelValue
 } from "./exact.js";
+import { seriesEffectiveUntilDays } from "./engine.js";
 import {
   addEvent,
   addFrame,
@@ -12,10 +13,12 @@ import {
   addRelation,
   createId,
   durationMagnitude,
+  seriesEndStaple,
   stableVirtualId,
   suppressVirtual,
   touch
 } from "./model.js";
+import { recurrenceEndMode, recurrenceUntilForCoordinate } from "./recurrence-end.js";
 
 function splitOutsideQuotes(value, separator) {
   const parts = [];
@@ -102,6 +105,40 @@ export function properties(component, name) {
 
 export function property(component, name) {
   return properties(component, name)[0] || null;
+}
+
+// A stable key for one imported VEVENT/VTODO within its source calendar --
+// component kind plus UID plus RECURRENCE-ID (empty for a series master or a
+// non-recurring event), which is exactly the identity RFC 5545 guarantees is
+// unique within a calendar. `document.foreign.ics.sources[id].components` is
+// keyed by this, and each event's `foreign.ics.key` names its own entry --
+// so the key must be derivable from the raw component alone (import time and
+// the legacy-migration repair both compute it before any event exists yet).
+export function eventComponentKey(component) {
+  const uid = property(component, "UID")?.value || "";
+  const recurrence = property(component, "RECURRENCE-ID")?.value || "";
+  return `${component?.name || "VEVENT"}\u0000${uid}\u0000${recurrence}`;
+}
+
+// The properties `eventComponent` (below) always regenerates from the model
+// regardless of what the original component held -- UID and SUMMARY
+// unconditionally, DESCRIPTION and LOCATION set-or-removed either way -- so
+// keeping them in retained storage is pure duplication of data that already
+// lives in `event.payload`. Stripping them here is what keeps the shared
+// source close to the size of the imported ICS text instead of ~2x it:
+// DESCRIPTION in particular can carry many kilobytes of HTML per event, and
+// every other property (ATTENDEE, VALARM, CLASS, X-*, RECURRENCE-ID, DTSTART
+// and friends, ...) is not reconstructible from the model and is kept
+// verbatim as the event's irreducible round-trip delta.
+const RECONSTRUCTED_PROPERTY_NAMES = new Set(["UID", "SUMMARY", "DESCRIPTION", "LOCATION"]);
+
+export function residualEventComponent(component) {
+  return {
+    ...component,
+    properties: (component.properties || []).filter(
+      (item) => !RECONSTRUCTED_PROPERTY_NAMES.has(item.name)
+    )
+  };
 }
 
 function parameter(propertyValue, name) {
@@ -261,7 +298,7 @@ function eventFromEntry(document, entry, warnings) {
     foreign: {
       ics: {
         source: entry.sourceId,
-        component: entry.component
+        key: eventComponentKey(entry.component)
       }
     }
   });
@@ -349,6 +386,13 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
 
     const entries = componentEntries(calendar).map((component) =>
       normalizedEntry(component, frame, sourceId)
+    );
+    // The shared, once-per-source home for every event's retained ICS data --
+    // keyed by `eventComponentKey` so `eventComponent` (export) and the sync
+    // reconciler's `sourceEventKey` can find an event's component without
+    // either of them holding their own copy of it.
+    document.foreign.ics.sources[sourceId].components = Object.fromEntries(
+      entries.map((entry) => [eventComponentKey(entry.component), residualEventComponent(entry.component)])
     );
     const uidOccurrences = new Map();
     for (const entry of entries) {
@@ -533,8 +577,17 @@ function icsTimestamp(date) {
     + `T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
 }
 
+// Looks up the retained round-trip delta for one event's ICS origin from the
+// shared per-source bucket `importICS` populated -- the event itself only
+// ever carries `{source, key}`, never its own copy of the component.
+function retainedComponent(document, event) {
+  const ics = event.foreign?.ics;
+  if (!ics?.source || !ics?.key) return null;
+  return document?.foreign?.ics?.sources?.[ics.source]?.components?.[ics.key] || null;
+}
+
 function eventComponent(document, event, relation, now, componentName = "VEVENT") {
-  const original = event.foreign?.ics?.component;
+  const original = retainedComponent(document, event);
   const component = original
     ? structuredClone(original)
     : { name: componentName, properties: [], components: [] };
@@ -651,8 +704,31 @@ export function exportICS(document, {
     const component = eventComponent(document, event, relation, now);
     const pattern = nativePatterns.find((item) => item.templateRelation === relation.id);
     if (pattern) {
-      const rule = pattern.rrule && Object.keys(pattern.rrule).length
-        ? Object.entries(pattern.rrule).map(([key, value]) => `${key}=${value}`).join(";")
+      // An end-staple is separate authored data, never written into
+      // `pattern.rrule.UNTIL` (LEXICON's staple anchoring / Rob-and-John
+      // scenario: the rule keeps saying what it says). So the effective stop
+      // is derived here, at export time, and never persisted back onto the
+      // pattern. COUNT and an end-staple both bound the series, but RFC 5545
+      // forbids exporting COUNT and UNTIL together -- deriving a combined
+      // UNTIL would silently drop the COUNT semantics on round-trip, so a
+      // staple on a COUNT-based rule is left as authored (a later wave's
+      // problem) rather than guessed at here.
+      let effectiveRrule = pattern.rrule;
+      if (engine && seriesEndStaple(document, pattern.id) && recurrenceEndMode(pattern.rrule) !== "count") {
+        const effectiveDays = seriesEffectiveUntilDays(engine, pattern);
+        if (effectiveDays) {
+          try {
+            effectiveRrule = {
+              ...(pattern.rrule || {}),
+              UNTIL: recurrenceUntilForCoordinate(engine.daysCoordinate(pattern.frame, effectiveDays))
+            };
+          } catch {
+            effectiveRrule = pattern.rrule;
+          }
+        }
+      }
+      const rule = effectiveRrule && Object.keys(effectiveRrule).length
+        ? Object.entries(effectiveRrule).map(([key, value]) => `${key}=${value}`).join(";")
         : pattern.rawRule?.value || "";
       setProperty(component, "RRULE", rule);
       const exdateIndex = component.properties.findIndex((item) => item.name === "EXDATE");

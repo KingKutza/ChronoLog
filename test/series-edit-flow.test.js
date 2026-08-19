@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ChronologEngine } from "../src/engine.js";
-import { daysFromCivil, daysToCivilCoordinate } from "../src/exact.js";
+import { Rational, daysFromCivil, daysToCivilCoordinate } from "../src/exact.js";
 import { importICS } from "../src/ics.js";
-import { CommandHistory, createId, validateDocument } from "../src/model.js";
+import { CommandHistory, createId, seriesEndStaple, setSeriesEndStaple, validateDocument } from "../src/model.js";
 import { createTransactions } from "../src/ui/transactions.js";
 import { createStructuralDocument } from "./helpers/sample-document.js";
 
@@ -224,6 +224,50 @@ test("moving the series onto an exception's own values retires that exception", 
     "the exception converged onto the series and was retired"
   );
   assert.equal(validateDocument(chronologDocument).valid, true);
+});
+
+// LEXICON's staple anchoring / Rob-and-John scenario, driven through the same
+// transaction the series editor card actually uses: src/ui/inspector.js
+// places/clears the staple inside the template event's own `executeEventChange`
+// call, alongside the rest of the series edit, so it journals and undoes as
+// one change -- not a second mechanism with its own bundle.
+test("placing an end-staple through the series' own edit transaction stops the projection, journals as one change, and undoes cleanly", () => {
+  const { document: chronologDocument, frame, pattern } = seriesDocument();
+  const app = appFor(chronologDocument);
+  const before = occurrenceFacts(app, frame).map((fact) => fact.day);
+  assert.ok(before.length > 3, "the series projects several occurrences before the staple");
+
+  const stapleDay = Rational.parse(before[2]);
+  app.changes.length = 0;
+  app.executeEventChange("Edit series", pattern.templateEvent, (documentValue) => {
+    setSeriesEndStaple(documentValue, pattern.id, frame.id, daysToCivilCoordinate(stapleDay));
+  });
+
+  const staple = seriesEndStaple(chronologDocument, pattern.id);
+  assert.ok(staple, "the staple exists");
+  assert.equal(app.changes.length, 1, "one journalled change, not a separate transaction");
+  // `captureEventBundle` always re-clones the template event and the series'
+  // own pattern on both sides of the diff, so an identity-based diff
+  // (`opsFromMaps`) re-puts them alongside whatever else changed -- that is
+  // pre-existing bundle behaviour, not something the staple introduces. What
+  // this pins is that the staple's own put rides along as an ordinary
+  // record-level relation op, inside this one transaction.
+  const puts = app.changes[0].ops.filter((op) => op.op === "put" && op.map !== "meta");
+  assert.ok(
+    puts.some((op) => op.map === "relations" && op.id === staple.id),
+    "the staple journals as a record-level put"
+  );
+
+  const after = occurrenceFacts(app, frame).map((fact) => fact.day);
+  assert.deepEqual(after, before.slice(0, 3), "the projection stops at the staple; earlier occurrences survive");
+
+  app.history.undo();
+  assert.equal(seriesEndStaple(chronologDocument, pattern.id), null, "undo removes the staple");
+  assert.deepEqual(occurrenceFacts(app, frame).map((fact) => fact.day), before, "and the full projection is back");
+
+  app.history.redo();
+  assert.ok(seriesEndStaple(chronologDocument, pattern.id), "redo restores the staple");
+  assert.deepEqual(occurrenceFacts(app, frame).map((fact) => fact.day), before.slice(0, 3));
 });
 
 test("an ordinary event edit is untouched by the convergence step", () => {
