@@ -58,6 +58,15 @@ applyTheme({ ...THEME_PRESETS.paper, ...storedTheme() });
 const app = {};
 app.chronolog = createEmptyWorkspaceDocument();
 app.engine = new ChronologEngine(app.chronolog);
+// Re-index the engine against a document mid-transaction. The series convergence
+// invariant (src/ui/transactions.js -> convergeSeries) has to compare a just-mutated
+// occurrence against what its series projects, and stale indices would answer for
+// the document as it was before the edit. Reuses the one engine rather than building
+// a throwaway, because the post-change render path calls setDocument again anyway.
+app.refreshEngine = (documentValue) => {
+  app.engine.setDocument(documentValue || app.chronolog);
+  return app.engine;
+};
 const initialFrame = calendarFrames(app.chronolog)[0]?.id || "";
 app.session = new ViewSession({
   activeFrame: initialFrame,

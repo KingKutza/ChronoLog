@@ -249,10 +249,10 @@ export function createCalendarSyncPanel(app) {
     const wrapper = document.createElement("section");
     wrapper.className = "calendar-sync-panel";
     wrapper.innerHTML = `
-    <p class="field-note">Subscribe to an HTTPS ICS address published by Outlook, Google Calendar, Apple Calendar, or another calendar service. Refresh is explicit and read-only: ChronoLog never writes back or stores the secret feed URL in your document.</p>
+    <p class="field-note">Subscribe to an HTTPS or webcal ICS address published by Outlook, Google Calendar, Apple Calendar, or another calendar service — a "webcal://" or "webcals://" link works too and is treated the same as HTTPS. Refresh is explicit and read-only: ChronoLog never writes back or stores the secret feed URL in your document.</p>
     <form class="calendar-feed-form">
       <label class="field"><span>Name</span><input name="label" placeholder="Work calendar" required></label>
-      <label class="field"><span>Secret HTTPS ICS address</span><input name="url" type="url" inputmode="url" autocomplete="off" placeholder="https://…/calendar.ics" required><small>Stored only by this local launcher with owner-only file permissions.</small></label>
+      <label class="field"><span>Secret ICS address</span><input name="url" type="url" inputmode="url" autocomplete="off" placeholder="https://…/calendar.ics or webcal://…/calendar.ics" required><small>Stored only by this local launcher with owner-only file permissions.</small></label>
       <button class="instrument-button primary" type="submit">Add and sync</button>
     </form>
     <p class="calendar-sync-status" role="status" aria-live="polite">Loading connections…</p>

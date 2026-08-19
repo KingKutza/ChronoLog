@@ -17,6 +17,63 @@
 export const PANEL_MARGIN = 8;
 export const PANEL_GAP = 6;
 
+// The registry every bar dropdown enrolls in — a hamburger, an overflow
+// "Options" drop, a document menu, whatever comes next. It holds no DOM
+// knowledge of its own (entries are opaque to it); it exists so placement and
+// z-level are driven by *enumerating what is registered*, not by a literal
+// list of container ids hand-maintained in the UI module. A dropdown that
+// never registers here gets neither edge-flip nor the shared z-level — that
+// is the one thing a caller must do, and it is the only thing.
+export function createDropdownRegistry() {
+  const entries = new Map();
+  return {
+    register(id, entry) { entries.set(id, entry); },
+    unregister(id) { entries.delete(id); },
+    has(id) { return entries.has(id); },
+    get(id) { return entries.get(id); },
+    ids() { return [...entries.keys()]; },
+    values() { return [...entries.values()]; }
+  };
+}
+
+// Mutual exclusion: a bar behaves like one instrument with a single open
+// dropdown, not a set of independent toggles — opening a new one puts away
+// whatever else was open, the way a radio group works. `openIds` is every
+// dropdown currently open (including the one that was just opened); this
+// returns the ones that must now close. Every registrant gets this the same
+// way, in place of the old create-menu/document-menu hand-paired toggle
+// listener that only ever covered that one pair.
+export function exclusiveOpenSet(openIds, justOpenedId) {
+  return openIds.filter((id) => id !== justOpenedId);
+}
+
+// Outside-interaction close: a portaled panel is no longer a DOM descendant
+// of its own container, so "did the interaction land outside this dropdown"
+// can only be answered with the union of container-or-panel containment —
+// not container containment alone, which is what the first pass's
+// create-menu-only pointerdown patch had to hand-add. `states` is one
+// `{ id, open, hit }` per registered dropdown, `hit` meaning the interaction
+// target was inside its container or its (possibly portaled) panel; this
+// returns the ids that are open and were not hit, i.e. every dropdown a
+// press outside it must close. Feeding every registrant through the same
+// function is what makes the rule a property of the class rather than a
+// patch some dropdowns happen to have and others don't.
+export function outsideInteractionCloses(states) {
+  return states.filter((state) => state.open && !state.hit).map((state) => state.id);
+}
+
+// Tab/Shift-Tab cycling inside a portaled panel. Once a panel lives in
+// #dropdown-layer it is no longer a DOM descendant of its anchor, so the
+// browser's native tab order no longer runs summary -> panel -> next
+// control; it runs summary -> ... -> wherever #dropdown-layer happens to
+// sit in the document. Trapping Tab inside the open panel (wrapping at both
+// ends) is the deliberate replacement for that broken order, rather than
+// leaving keyboard use to wherever the portal lands.
+export function wrapFocusIndex(current, delta, count) {
+  if (count <= 0) return -1;
+  return ((current + delta) % count + count) % count;
+}
+
 function clamp(value, low, high) {
   // A panel wider or taller than the window has no satisfying position; pinning
   // it to the low edge at least keeps its start visible and its scroll usable.

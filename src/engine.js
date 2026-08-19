@@ -12,6 +12,7 @@ import {
   coordinateToDays,
   daysToCoordinate,
   durationMagnitude,
+  durationMagnitudeDays,
   stableVirtualId,
   validateDocument
 } from "./model.js";
@@ -30,23 +31,14 @@ function attachmentDay(engine, relation) {
   return engine.coordinateDays(relation.frame, relation.coordinate);
 }
 
+// A reference to model.js's canonical durationMagnitudeDays, not a second
+// implementation: this used to duplicate that arithmetic here, unclamped and
+// throwing, under the same name as the unrelated model.js/drag.js/inspector.js
+// helper (src/model.js's `durationMagnitudeDays`) until the melt stage
+// reconciled both onto model.js's tolerant/clamped behavior. Kept as a
+// one-line event-shaped alias so the four call sites below stay unchanged.
 function eventDurationDays(event) {
-  const factors = {
-    week: rational(7),
-    day: rational(1),
-    hour: rational("1/24"),
-    minute: rational("1/1440"),
-    second: rational("1/86400")
-  };
-  let duration = rational(0);
-  try {
-    for (const part of event?.magnitudes?.duration?.value?.levels || []) {
-      if (factors[part.level]) duration = duration.add(rational(part.value).mul(factors[part.level]));
-    }
-  } catch {
-    return rational(0);
-  }
-  return duration.compare(0) > 0 ? duration : rational(0);
+  return durationMagnitudeDays(event?.magnitudes?.duration);
 }
 
 const WEEKDAYS = { SU: 0n, MO: 1n, TU: 2n, WE: 3n, TH: 4n, FR: 5n, SA: 6n };
@@ -267,6 +259,10 @@ export class ChronologEngine {
     this.groupFrameByEvent = new Map();
     this.groupMembershipsByMember = new Map();
     this.groupMembersByGroup = new Map();
+    // Display-only counterparts of the three maps above -- see `isDisplayGroup`.
+    this.displayGroupFrameByEvent = new Map();
+    this.displayGroupMembershipsByMember = new Map();
+    this.displayGroupMembersByGroup = new Map();
     this.framesByEvent = new Map();
     this.calendarFrameByEvent = new Map();
     this.explicitFactsByFrame = new Map();
@@ -312,7 +308,23 @@ export class ChronologEngine {
     return Boolean(frame?.traits?.includes("group") && !frame.traits?.includes("importance"));
   }
 
-  queryGroupMembers(group) {
+  // The display-side union of ordinary groups and importance frames. Persisted
+  // authoring, validation, and `isOrdinaryGroup` itself never consult this --
+  // an importance frame's own base traits already include "group" (see
+  // `frame-edit.js`'s TRAITS_BY_KIND, additive under kind-switching), so an
+  // importance frame is authored exactly like a group: same attachment/
+  // membership relation shape, same query shape. What was missing was display
+  // bookkeeping willing to look at it that way. This predicate exists so the
+  // color cascade, sigil selection, minimap weighting, and per-lens group
+  // presence can treat "group" and "importance frame" as one membership pool
+  // for rendering, without changing what "group" means anywhere the document
+  // itself is read or written.
+  isDisplayGroup(frameId) {
+    const frame = this.document.frames[frameId];
+    return Boolean(frame?.traits?.includes("group") || frame?.traits?.includes("importance"));
+  }
+
+  queryGroupMembers(group, isGroup = (frameId) => this.isOrdinaryGroup(frameId)) {
     const query = group.query;
     if (!query || typeof query !== "object") return [];
     if (query.excludeGroups?.length || query.notGroups?.length) return [];
@@ -330,15 +342,20 @@ export class ChronologEngine {
       matches.push({ member: id, provenance: { kind: "query", group: group.id, query: "selector" } });
     }
     for (const nested of groups) {
-      if (this.isOrdinaryGroup(nested)) {
+      if (isGroup(nested)) {
         matches.push({ member: nested, provenance: { kind: "query", group: group.id, query: "group" } });
       }
     }
     return matches;
   }
 
-  rebuildGroupMemberships() {
-    const groups = Object.values(this.document.frames).filter((frame) => this.isOrdinaryGroup(frame.id));
+  // Builds one membership index (members-by-group, memberships-by-member, and
+  // the single-frame-per-event shortcut) against whichever "is this a group"
+  // predicate is passed in. `rebuildGroupMemberships` runs this twice: once
+  // for `isOrdinaryGroup` (the persisted-facing index nothing here changes)
+  // and once for `isDisplayGroup` (the union display consumers read).
+  buildGroupIndex(isGroup) {
+    const groups = Object.values(this.document.frames).filter((frame) => isGroup(frame.id));
     const members = new Map(groups.map((group) => [group.id, new Map()]));
     const add = (groupId, memberId, provenance, mergeProvenance = true) => {
       const inGroup = members.get(groupId);
@@ -356,15 +373,15 @@ export class ChronologEngine {
     // Legacy group attachments are authored edges. New membership relations
     // additionally admit frames, including groups, without inventing a new root type.
     for (const relation of Object.values(this.document.relations)) {
-      if (relation.type === "attachment" && this.isOrdinaryGroup(relation.frame)) {
+      if (relation.type === "attachment" && isGroup(relation.frame)) {
         add(relation.frame, relation.event, { kind: "authored", relation: relation.id });
       }
-      if (relation.type === "membership" && this.isOrdinaryGroup(relation.group) && relation.include !== false && relation.mode !== "exclude") {
+      if (relation.type === "membership" && isGroup(relation.group) && relation.include !== false && relation.mode !== "exclude") {
         add(relation.group, relation.member, { kind: "authored", relation: relation.id });
       }
     }
     for (const group of groups) {
-      for (const match of this.queryGroupMembers(group)) add(group.id, match.member, match.provenance);
+      for (const match of this.queryGroupMembers(group, isGroup)) add(group.id, match.member, match.provenance);
     }
     // Positive nesting is monotonic, so repeatedly adding inherited members reaches
     // the finite graph's least fixed point. A self-edge therefore becomes a no-op.
@@ -373,7 +390,7 @@ export class ChronologEngine {
       changed = false;
       for (const group of groups) {
         for (const [memberId, provenance] of [...members.get(group.id)]) {
-          if (!this.isOrdinaryGroup(memberId)) continue;
+          if (!isGroup(memberId)) continue;
           for (const [nestedMember, nestedProvenance] of members.get(memberId) || []) {
             for (const source of nestedProvenance) {
               if (add(group.id, nestedMember, {
@@ -384,21 +401,33 @@ export class ChronologEngine {
         }
       }
     }
-    this.groupMembersByGroup = members;
-    this.groupMembershipsByMember = new Map();
+    const membershipsByMember = new Map();
     for (const [groupId, inGroup] of members) {
       for (const [memberId, provenance] of inGroup) {
-        const memberships = this.groupMembershipsByMember.get(memberId) || new Map();
+        const memberships = membershipsByMember.get(memberId) || new Map();
         memberships.set(groupId, provenance);
-        this.groupMembershipsByMember.set(memberId, memberships);
+        membershipsByMember.set(memberId, memberships);
       }
     }
-    this.groupFrameByEvent = new Map();
-    for (const [eventId, memberships] of this.groupMembershipsByMember) {
+    const frameByEvent = new Map();
+    for (const [eventId, memberships] of membershipsByMember) {
       if (!this.document.events[eventId]) continue;
       const first = [...memberships.keys()].sort()[0];
-      if (first) this.groupFrameByEvent.set(eventId, first);
+      if (first) frameByEvent.set(eventId, first);
     }
+    return { membersByGroup: members, membershipsByMember, frameByEvent };
+  }
+
+  rebuildGroupMemberships() {
+    const persisted = this.buildGroupIndex((frameId) => this.isOrdinaryGroup(frameId));
+    this.groupMembersByGroup = persisted.membersByGroup;
+    this.groupMembershipsByMember = persisted.membershipsByMember;
+    this.groupFrameByEvent = persisted.frameByEvent;
+
+    const display = this.buildGroupIndex((frameId) => this.isDisplayGroup(frameId));
+    this.displayGroupMembersByGroup = display.membersByGroup;
+    this.displayGroupMembershipsByMember = display.membershipsByMember;
+    this.displayGroupFrameByEvent = display.frameByEvent;
   }
 
   validate() {
@@ -432,6 +461,25 @@ export class ChronologEngine {
       .map(([member, provenance]) => ({ member, provenance }));
   }
 
+  // Display-facing counterparts: same shape, but the membership pool is
+  // `isDisplayGroup` (ordinary groups union importance frames) instead of
+  // `isOrdinaryGroup` alone. The color cascade, sigil selection, minimap
+  // weighting, and per-lens group presence read these; nothing that authors
+  // or validates the document does.
+  eventDisplayGroupFrame(eventId) {
+    return this.displayGroupFrameByEvent.get(eventId) || null;
+  }
+
+  eventDisplayGroupMemberships(eventId) {
+    return [...(this.displayGroupMembershipsByMember.get(eventId) || new Map())]
+      .map(([group, provenance]) => ({ group, provenance }));
+  }
+
+  displayGroupMembers(groupId) {
+    return [...(this.displayGroupMembersByGroup.get(groupId) || new Map())]
+      .map(([member, provenance]) => ({ member, provenance }));
+  }
+
   eventCalendarFrame(eventId) {
     return this.calendarFrameByEvent.get(eventId) || null;
   }
@@ -442,6 +490,12 @@ export class ChronologEngine {
 
   groupEventMembers(groupId) {
     return this.groupMembers(groupId)
+      .map(({ member }) => member)
+      .filter((member) => Boolean(this.document.events[member]));
+  }
+
+  displayGroupEventMembers(groupId) {
+    return this.displayGroupMembers(groupId)
       .map(({ member }) => member)
       .filter((member) => Boolean(this.document.events[member]));
   }
@@ -655,7 +709,18 @@ export class ChronologEngine {
     return { frame, coordinate, atDays: atDays.toJSON(), values, errors };
   }
 
-  queryFacts({ frame, start, end, selection = null, limit = Infinity, includeOverlaps = false }) {
+  // `applyOverrides: false` yields the projection as the patterns alone describe
+  // it, with suppressed occurrences still present. That is what the series heal
+  // (src/series-heal.js) compares a materialized occurrence against: an override
+  // hides the very slot the heal has to reconstruct, so it must be able to ask
+  // "what would this series project here if nothing had overridden it?".
+  //
+  // It deliberately reuses this generator rather than rebuilding the projection
+  // from the pattern's template. The heal's whole purpose is to decide when the
+  // projection may reassert, so the comparison has to run through the same code
+  // that will then do the reasserting — a second derivation could drift and the
+  // heal would either destroy authored edits or never fire.
+  queryFacts({ frame, start, end, selection = null, limit = Infinity, includeOverlaps = false, applyOverrides = true }) {
     const fromDays = this.coordinateDays(frame, start);
     const toDays = this.coordinateDays(frame, end);
     const ascending = fromDays.compare(toDays) <= 0;
@@ -787,7 +852,7 @@ export class ChronologEngine {
       }
     }
 
-    const visible = applyVirtualOverrides(this.document, facts)
+    const visible = (applyOverrides ? applyVirtualOverrides(this.document, facts) : facts)
       .sort((left, right) => rational(left.day || 0).compare(rational(right.day || 0)))
       .slice(0, maxFacts);
     return {

@@ -6,6 +6,7 @@ import {
   coordinate,
   daysFromCivil,
   daysToCivilCoordinate,
+  nowDays,
   sinExact,
   sqrtExact
 } from "../src/exact.js";
@@ -32,6 +33,26 @@ test("Gregorian conversion is reversible across the required horizon", () => {
     assert.equal(output.levels[1].value, "2");
     assert.equal(output.levels[2].value, "17");
   }
+});
+
+// nowDays is the single sanctioned "current moment as an exact day ordinal"
+// helper (formerly forked three ways across session.js/roster.js/projections.js
+// at minute and second precision). It accepts an injected clock so this is
+// pinned without mocking the global Date, and second precision is checked
+// explicitly since that is the canonical behavior the melt chose.
+test("nowDays converts an injected clock to a local-civil day ordinal at second precision", () => {
+  const clock = new Date(2026, 7, 19, 13, 45, 30); // 2026-08-19 13:45:30 local
+  const expected = new Rational(daysFromCivil(2026n, 8n, 19n))
+    .add(Rational.parse(13).div(24))
+    .add(Rational.parse(45).div(1440))
+    .add(Rational.parse(30).div(86400));
+  assert.equal(nowDays(clock).compare(expected), 0);
+
+  // A non-zero seconds component must survive: this is exactly the precision
+  // that distinguished the old finer helper (projections.js's currentDays)
+  // from the two coarser ones (session.js/roster.js) it was melted with.
+  const withoutSeconds = new Date(2026, 7, 19, 13, 45, 0);
+  assert.notEqual(nowDays(clock).compare(nowDays(withoutSeconds)), 0);
 });
 
 test("Rational decimal parsing and deterministic trig are stable", () => {

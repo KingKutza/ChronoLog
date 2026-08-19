@@ -81,7 +81,13 @@ export function resolveObjectColor({
   const memberships = [];
   const seenGroups = new Set();
   for (const sourceId of sourceIds) {
-    for (const membership of engine?.eventGroupMemberships?.(sourceId) || []) {
+    // Step 2's "group" is the display-side union of ordinary groups and
+    // importance frames (`engine.isDisplayGroup`): an importance frame is
+    // authored exactly like a group (same attachment/membership relation
+    // shape), so it must be eligible to color its events the same way. This
+    // does not change what "group" means anywhere the document is read or
+    // written -- only which memberships the cascade is willing to look at.
+    for (const membership of engine?.eventDisplayGroupMemberships?.(sourceId) || []) {
       if (!membership?.group || seenGroups.has(membership.group)) continue;
       seenGroups.add(membership.group);
       memberships.push({ id: membership.group, order: memberships.length });
@@ -91,7 +97,7 @@ export function resolveObjectColor({
   const activeGroupModes = document?.frames?.[activeFrame]?.display?.groupModes || {};
   const groupCandidates = memberships.map((membership) => {
     if (!groupSizes.has(membership.id)) {
-      groupSizes.set(membership.id, engine?.groupEventMembers?.(membership.id)?.length || 0);
+      groupSizes.set(membership.id, engine?.displayGroupEventMembers?.(membership.id)?.length || 0);
     }
     return {
       ...membership,
@@ -127,21 +133,60 @@ export function resolveObjectColor({
 /**
  * Select one primary mark.  Color remains authored grouping/context; this
  * answer conveys the event's structural role so it stays useful in grayscale.
+ *
+ * `importance` is the unified `factImportance` verdict ("standard",
+ * "important", or "landmark"), passed in by the caller rather than resolved
+ * here, so this function stays pure and DOM-free. It is optional and
+ * defaults to "standard" so a caller with no engine/document at hand (or an
+ * existing test) still gets the legacy-trait-only answer unchanged. Without
+ * this, an event made important by group/importance-frame affiliation rather
+ * than a legacy trait string would carry no sigil marking its role at all --
+ * the shape-carries-meaning contract in AGENTS.md would be broken exactly
+ * the way color alone breaking it would be.
  */
-export function sigilForFact(fact, durationMinutes = 0) {
+export function sigilForFact(fact, durationMinutes = 0, importance = "standard") {
   const event = fact?.event;
   if (durationMinutes >= 1440) return "span";
   if (hasTrait(event, "terminator")) return "terminator";
   if (hasTrait(event, "task", "todo", "float")) return "task";
   if (hasTrait(event, "note")) return "note";
   if (hasTrait(event, "celestial", "phase")) return "celestial";
-  if (hasTrait(event, "landmark", "milestone", "deadline", "important")) return "milestone";
+  if (hasTrait(event, "landmark", "milestone", "deadline", "important") || importance !== "standard") return "milestone";
   if (fact?.virtualId || event?.provenance?.kind === "pattern") return "repeat";
   return "point";
 }
 
-export function sigilDescription(fact, durationMinutes = 0) {
-  return SIGIL_VOCABULARY[sigilForFact(fact, durationMinutes)].label;
+export function sigilDescription(fact, durationMinutes = 0, importance = "standard") {
+  return SIGIL_VOCABULARY[sigilForFact(fact, durationMinutes, importance)].label;
+}
+
+/**
+ * The one shared importance verdict every display consumer reads: the color
+ * cascade (via group/importance-frame membership), sigil selection, minimap
+ * weighting, and the Strategic gate. Legacy trait strings ("landmark",
+ * "important" on the event itself) are checked first and still work
+ * unmodified -- this item unifies display, not persisted data, and legacy
+ * trait strings are ROADMAP #9's own wave, not this one. Group-based
+ * importance is read through `eventDisplayGroupMemberships`, the same
+ * display-side union step 2 of the color cascade reads, so an importance
+ * frame reached directly *or* through nested group membership is seen here
+ * too -- not just a direct attachment.
+ *
+ * `context` is duck-typed as `{ document, engine }`, matching the shape every
+ * lens renderer already threads through `src/projections.js`.
+ */
+export function factImportance(context, fact) {
+  const document = context?.document;
+  const engine = context?.engine;
+  const pattern = document?.patterns?.[fact?.event?.provenance?.pattern];
+  const sourceId = pattern?.templateEvent || fact?.event?.id;
+  const source = document?.events?.[sourceId] || fact?.event;
+  if (source?.traits?.includes("landmark")) return "landmark";
+  if (source?.traits?.includes("important")) return "important";
+  const importanceFrame = (engine?.eventDisplayGroupMemberships?.(sourceId) || [])
+    .map(({ group }) => document?.frames?.[group])
+    .find((candidate) => candidate?.traits?.includes("importance"));
+  return importanceFrame?.display?.importance || "standard";
 }
 
 export function normalizeTheme(theme, fallback = THEME_PRESETS.paper) {

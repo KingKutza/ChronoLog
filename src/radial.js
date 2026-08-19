@@ -146,3 +146,34 @@ export function radialRenderState(factCount, truncated) {
   if (truncated) return "dense";
   return factCount > 0 ? "ordinary" : "empty";
 }
+
+/**
+ * Convert a center, radius, and angle (radians, 0 = +x axis, increasing
+ * clockwise per the on-screen convention every radial-family lens uses) into
+ * a Cartesian point. Shared by the ring/spiral tick, label, and arc geometry
+ * in the renderer.
+ */
+export function polar(cx, cy, radius, angle) {
+  return [cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius];
+}
+
+/**
+ * The SVG path for one circular arc from startAngle to endAngle (the Radial
+ * ring lens). The two endpoints already sit exactly on the radial rays of
+ * startAngle/endAngle -- for a circle, the tangent at any point is exactly
+ * perpendicular to that point's radius, so a `stroke-linecap: butt` cap
+ * (perpendicular to the tangent) lands exactly along the radial ray, with no
+ * angular overshoot or shortfall past the arc's true start/stop date. `round`
+ * and `square` caps both bulge the rendered mark past this path's already-
+ * exact endpoint along the tangent direction, which is the rounded-edge bug:
+ * they make the arc visually extend past the date it actually ends on.
+ * Whether the stroke actually terminates flush is therefore a linecap choice
+ * the renderer makes, not something this path's geometry needs to change to
+ * accommodate.
+ */
+export function arcPath(cx, cy, radius, startAngle, endAngle) {
+  const [x1, y1] = polar(cx, cy, radius, startAngle);
+  const [x2, y2] = polar(cx, cy, radius, endAngle);
+  const large = endAngle - startAngle > Math.PI ? 1 : 0;
+  return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius.toFixed(2)} ${radius.toFixed(2)} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+}

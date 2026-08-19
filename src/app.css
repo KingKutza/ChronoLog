@@ -150,6 +150,27 @@ button {
 #lens-controls { grid-area: contextbar; }
 #minimap { grid-area: minimap; }
 
+/* The one layer every bar dropdown's panel portals into while open (see
+   toolbar.js's registerBarDropdown). It carries no grid area — a
+   `position: fixed` child of a grid container does not participate in grid
+   placement or sizing, so it never steals a track. It is a plain child of
+   #app rather than nested in any bar, which is the whole point: #hud,
+   #lens-bar and #lens-controls each establish their own stacking context
+   (they are all `position: relative` with a z-index), so a panel that stays
+   inside one of them can only ever outrank *that bar's own* subtree — which
+   is exactly how the lenses hamburger ended up under the context bar. One
+   shared z-index here, above every bar, is the entire contract: reach the
+   layer and you are above all of them, full stop. `pointer-events: none` on
+   the layer keeps it from eating clicks on the stage when no panel is open;
+   its children opt back in. */
+#dropdown-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+#dropdown-layer > * { pointer-events: auto; }
+
 #projection {
   position: relative;
   width: 100%;
@@ -182,10 +203,16 @@ button {
 }
 
 /* #app isolates one stacking context, so #hud competes directly with its grid
-   siblings: it must sit above the other bars (21) so the document/create dropdown
-   panels nested inside it are not covered, but below #toast (60). 30 would tie
-   .projection-error. The bars are grid items now, so they carry no coordinates —
-   only their own internals. */
+   siblings: it sits above the other bars (21) but below #toast (60). 30 would
+   tie .projection-error. The bars are grid items now, so they carry no
+   coordinates — only their own internals.
+   #hud being highest is *not* why its own dropdowns (create/document menu)
+   stay visible above the other bars — that used to be true, and it was luck:
+   any bar hosting a dropdown had to be the tallest stacking context, which
+   broke the moment two bars both needed one (#lens-bar's hamburger vs.
+   #lens-controls). Every bar dropdown's panel now portals into
+   #dropdown-layer instead, which sits above all of #hud/#lens-bar/
+   #lens-controls at once — see toolbar.js's registerBarDropdown. */
 #hud {
   position: relative;
   z-index: 35;
@@ -203,7 +230,61 @@ button {
 }
 
 #hud::-webkit-scrollbar { display: none; }
-#active-calendar { min-width: 0; flex: 1 1 80px; }
+
+/* The Frame dropdown: a bar dropdown like create/document menu, enrolled the
+   same way (`data-bar-dropdown` in the shell), so it inherits the whole bar-
+   dropdown contract for free — placement, edge-flip, z-level, outside-click
+   and Escape close, mutual exclusion, and focus — proof that a *new* static
+   dropdown needs no changes to toolbar.js at all, only this one attribute.
+   Multiple frames can be checked; the summary shows the leading frame plus a
+   count of companions. */
+#frame-select {
+  position: relative;
+  flex: 1 1 90px;
+  min-width: 0;
+}
+#frame-select > summary {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 0 9px;
+  border: 1px solid var(--strong);
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink);
+  background: var(--surface);
+  font: 600 11px/1.15 var(--data);
+  overflow: hidden;
+}
+#frame-select > summary::-webkit-details-marker { display: none; }
+#frame-select > summary::after { content: "▾"; margin-left: auto; flex: none; }
+#frame-select > summary:hover,
+#frame-select[open] > summary { border-color: var(--ink); background: var(--paper); }
+.frame-select-summary-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-weight: 500;
+}
+.frame-select-panel {
+  position: fixed;
+  width: min(260px, calc(100vw - 24px));
+  max-height: min(60vh, 420px);
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--strong);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.frame-select-panel .check-chip { width: 100%; }
 
 #brand {
   flex: none;
@@ -301,19 +382,33 @@ button {
 #save-status[data-state="error"],
 #save-status[data-state="conflict"] { color: var(--now); }
 
+/* Flex, not a grid of equal `1fr` implicit columns: a grid gave the hamburger
+   the same equal-width track as every lens button, and its own `max-width`
+   only shrank its content inside that track — leaving a dead gap between the
+   hamburger and the bar's true right edge instead of the lenses reclaiming
+   that room. Flex lets the lens/ToDo/Notes buttons (`flex: 1 1 0`, the "fill
+   the bar" half of the fix) share exactly the width the hamburger (`flex:
+   none`, the "pin right" half) does not need — and because it is last in the
+   bar's flex order with nothing to its right, it lands flush on the edge. */
 #lens-bar {
   position: relative;
   z-index: 21;
   min-width: 0;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
+  display: flex;
+  align-items: stretch;
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--strong);
   border-radius: 12px;
   background: color-mix(in srgb, var(--paper) 94%, transparent);
   box-shadow: 0 5px 18px rgba(45, 37, 27, .1);
+}
+
+/* Direct children only — the little "restore this lens" buttons inside the
+   hidden-lens panel are buttons too, but they are not bar-width columns. */
+#lens-bar > button {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 #lens-bar button {
@@ -344,11 +439,14 @@ button {
   color: var(--ink);
 }
 
-/* The hidden-lens drop sits at the bar's right end. It is sized to its glyph
-   rather than taking a full lens-width column, because it is chrome about the
-   bar rather than a destination on it. */
+/* The hidden-lens drop sits at the bar's right end (`flex: none`, on top of
+   #lens-bar's own flex rule above overriding the `1fr` every other bar button
+   gets). It is sized to its glyph rather than taking a full lens-width
+   column, because it is chrome about the bar rather than a destination on
+   it. */
 #hidden-lenses {
   position: relative;
+  flex: none;
   align-self: stretch;
   display: grid;
   max-width: 28px;
@@ -369,11 +467,12 @@ button {
 #hidden-lenses > summary:hover,
 #hidden-lenses[open] > summary { border-color: var(--ink); color: var(--ink); background: var(--surface); }
 
+/* No `position`/`top`/`right` pinning here any more — that pinning (fixed to
+   this bar's own corner) is what a stacking context away kept the panel
+   trapped under the context bar. toolbar.js's registerBarDropdown places it
+   from measurement and portals it into #dropdown-layer while open, the same
+   as every other bar dropdown. */
 .hidden-lens-panel {
-  position: absolute;
-  z-index: 72;
-  top: calc(100% + 6px);
-  right: 0;
   width: max-content;
   min-width: 140px;
   display: grid;
@@ -436,9 +535,11 @@ button {
 #create-menu > summary::after { content: "▾"; margin-left: 5px; }
 #create-menu > summary:hover,
 #create-menu[open] > summary { background: color-mix(in srgb, var(--ink) 84%, var(--paper)); }
+/* Positioned by toolbar.js's registerBarDropdown and portaled into
+   #dropdown-layer while open — the layer's z-index is the whole contract, so
+   this panel needs no z-index of its own to outrank the other bars. */
 .create-menu-panel {
   position: fixed;
-  z-index: 82;
   width: 220px;
   display: grid;
   gap: 6px;
@@ -473,9 +574,10 @@ button {
 #document-menu > summary::after { content: "▾"; margin-left: 5px; }
 #document-menu > summary:hover,
 #document-menu[open] > summary { border-color: var(--ink); background: var(--paper); }
+/* See .create-menu-panel above: placed by registerBarDropdown, portaled into
+   #dropdown-layer, no z-index of its own needed. */
 .document-menu-panel {
   position: fixed;
-  z-index: 80;
   width: min(310px, calc(100vw - 24px));
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -551,10 +653,11 @@ button.lens-control:hover { border-color: var(--ink); background: var(--paper); 
 .lens-control-overflow > summary:hover { border-color: var(--ink); background: var(--paper); }
 
 /* Coordinates come from toolbar.js's measured placement, not from a pinned edge
-   here — that pinning is what pushed this panel off the window. */
+   here — that pinning is what pushed this panel off the window. Portaled into
+   #dropdown-layer while open, same as every other bar dropdown, so it needs
+   no z-index of its own either. */
 .lens-control-overflow-panel {
   position: fixed;
-  z-index: 70;
   width: min(300px, calc(100vw - 24px));
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
@@ -791,7 +894,29 @@ svg [data-selected="true"] {
   gap: 5px;
 }
 
+/* A row is a checkbox (ToDo rosters only) beside the button that opens the
+   editor, so ticking the box is a separate click target from opening the card.
+   A Notes row has no checkbox, so its list gets a single-column row instead --
+   scoped through the list's own kind rather than a per-row check. */
 .roster-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+.roster-list[data-roster-kind="todo"] .roster-row {
+  grid-template-columns: auto 1fr;
+}
+
+.roster-check {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.roster-open {
   display: grid;
   gap: 2px;
   padding: 7px 9px;
@@ -800,11 +925,23 @@ svg [data-selected="true"] {
   cursor: pointer;
   background: var(--surface);
   text-align: left;
+  width: 100%;
 }
 
-.roster-row:hover { border-color: var(--ink); background: var(--paper); }
-.roster-row strong { font: 600 12px/1.25 var(--ui); }
-.roster-row small { color: var(--faint); font: 500 10px/1.2 var(--data); }
+.roster-open:hover { border-color: var(--ink); background: var(--paper); }
+.roster-open strong { font: 600 12px/1.25 var(--ui); }
+.roster-open small { color: var(--faint); font: 500 10px/1.2 var(--data); }
+
+/* Completion is a visible fact, not a removal -- the row stays in the list
+   (ROADMAP #9's staple/decay model is unsettled, so this invents no lifecycle
+   rule), just muted and struck through. */
+.roster-row[data-roster-completed="true"] .roster-open {
+  opacity: .55;
+}
+
+.roster-row[data-roster-completed="true"] .roster-open strong {
+  text-decoration: line-through;
+}
 
 .dock-empty {
   display: grid;
@@ -887,6 +1024,11 @@ svg [data-selected="true"] {
   gap: 7px;
 }
 
+/* The color field's own state carries "set vs. inherited" now (no separate
+   override checkbox); "Inherit color" sits beside it as a plain action, not
+   stretched to the field's own column width. */
+.event-color-row #inherit-event-color { justify-self: start; align-self: end; }
+
 .check-chip {
   display: inline-flex;
   align-items: center;
@@ -956,6 +1098,20 @@ svg [data-selected="true"] {
 .calendar-root-note { grid-column: 2 / span 2; color: var(--faint); }
 .calendar-period-preview { color: var(--muted); font: 11px/1.4 var(--data); }
 .event-form:not(.has-recurrence) .recurrence-options { display: none; }
+
+/* What this edit changes: the whole series, or one occurrence. It sits at the very
+   top because it reframes every field below it, and the two options are equal-width
+   so neither reads as the safe one — series is the default, but occurrence is not a
+   warning. */
+.series-mode-toggle {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin-bottom: 2px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--hair);
+}
 
 .calendar-feed-form {
   margin: 14px 0;
@@ -1497,7 +1653,13 @@ body.calendar-panning * { cursor: grabbing !important; user-select: none !import
 .lines-state-error { fill: var(--now); }
 .lines-state-unsupported { fill: #a46b12; }
 
-.radial-event-arc { cursor: pointer; fill: none; stroke-linecap: round; stroke-dasharray: 1; animation: radial-slide 220ms ease-out both; }
+/* A flush `butt` cap is load-bearing, not cosmetic: an arc's endpoints already sit
+   exactly on the radial ray of its start/stop date, and a round cap bulges the
+   rendered stroke past that exact point along the path's tangent, so the mark
+   reads as overshooting the date it terminates on. Keep this `butt` — the arc
+   renderer deliberately sets no linecap of its own, so this rule is the single
+   place the cap is decided. See src/radial.js's arcPath/polar tests. */
+.radial-event-arc { cursor: pointer; fill: none; stroke-linecap: butt; stroke-dasharray: 1; animation: radial-slide 220ms ease-out both; }
 .radial-event-arc.sigil-repeat { stroke-dasharray: 3 2; }
 .radial-event-arc.sigil-task { stroke-dasharray: 1 3; stroke-linecap: butt; }
 .radial-event-arc.sigil-milestone { filter: drop-shadow(0 0 1px currentColor); }
@@ -1581,6 +1743,51 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 .theme-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
 .frame-lens-checks { gap: 5px; }
 .frame-lens-checks .check-chip { text-transform: capitalize; }
+
+/* Named user themes sit alongside the built-in presets, visually distinct
+   (a select rather than preset chips) since they are the user's own saved
+   work, not shipped defaults. */
+.theme-saved-themes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 10px; }
+.theme-saved-themes select { min-height: 32px; min-width: 0; flex: 1 1 160px; border: 1px solid var(--strong); border-radius: 7px; background: white; font: 10px var(--data); }
+
+/* The lens workspace list: name + checkbox + reorder share one line so the
+   list fits without scrolling; tags and the lens description sit beneath in
+   one small meta line rather than costing the row its own height. */
+.lens-workspace-list { display: grid; gap: 6px; margin-top: 7px; }
+.lens-workspace-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas: "check up down" "meta meta meta";
+  column-gap: 6px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 5px 7px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  background: white;
+}
+.lens-workspace-row .check-chip { grid-area: check; min-width: 0; }
+.lens-workspace-meta {
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font: 500 9px/1.3 var(--data);
+}
+.lens-reorder {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  line-height: 1;
+}
+.lens-reorder-up { grid-area: up; }
+.lens-reorder-down { grid-area: down; }
 @media (max-width: 1400px) {
   #brand { gap: 0; margin-right: 0; }
 }

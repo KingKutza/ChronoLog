@@ -263,6 +263,34 @@ export function daysInMonth(yearValue, monthValue) {
   return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
 
+// The single sanctioned boundary where host wall-clock time enters domain
+// math: this is the one place `new Date()` is read to mean "now" anywhere in
+// ChronoLog. It converts that one read into an exact local-civil day ordinal
+// (day + hour/minute/second fraction) and never touches `Date` again. AGENTS.md's
+// "no Date arithmetic in domain code" rule only holds if every caller shares
+// this conversion instead of rebuilding it inline — three call sites once
+// duplicated this exact arithmetic (two at minute precision, one at second
+// precision); melting them here is what makes the rule enforceable rather
+// than aspirational. Do not "fix" this back into per-call-site Date reads.
+// Second precision is the canonical one: it is the finer of the two
+// precisions that existed, and nothing was found to depend on minute
+// truncation (see roster.js/session.js callers). A caller that genuinely
+// needs a coarser ordinal should truncate this result explicitly at its own
+// call site, not fork a second helper.
+// `clock` is an optional injected `Date` (or Date-constructible value) so
+// this stays testable without mocking the global `Date`.
+export function nowDays(clock = new Date()) {
+  const date = clock instanceof Date ? clock : new Date(clock);
+  return new Rational(daysFromCivil(
+    BigInt(date.getFullYear()),
+    BigInt(date.getMonth() + 1),
+    BigInt(date.getDate())
+  ))
+    .add(Rational.parse(date.getHours()).div(24))
+    .add(Rational.parse(date.getMinutes()).div(1440))
+    .add(Rational.parse(date.getSeconds()).div(86400));
+}
+
 // --- Nested-coordinate helpers ----------------------------------------------
 
 export function coordinate(levels) {

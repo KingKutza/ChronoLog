@@ -1,5 +1,6 @@
 import { clone, overridePatternId, removeOverridesForPatterns } from "../model.js";
 import { bundleOps, recordOps } from "../ops.js";
+import { applySeriesHeal, healCandidateIds, planSeriesHeal } from "../series-heal.js";
 
 // Document-mutation-with-undo helpers shared by the inspector and Frames
 // panel. `app` carries the live `chronolog`/`history` references (they are
@@ -20,6 +21,37 @@ export function createTransactions(app) {
     return tracked;
   }
 
+  // The series convergence invariant, run as a sibling of cascadeRemovedPatterns:
+  // a post-mutation settling step inside the same undoable transaction.
+  //
+  // Owner ruling (8.19): a fork is not the problem, an *unhealed* fork is. So this
+  // is not flow control and asks nothing about what the user did — it re-examines
+  // the state and, wherever a materialized occurrence now says exactly what its
+  // series already says, deletes the override and its event so the projection
+  // reasserts. See src/series-heal.js.
+  //
+  // Two reasons this belongs here rather than in the inspector. First, it then
+  // applies to every edit that routes through these helpers, not only to edits made
+  // through the editor — which is what makes it a law instead of a code path.
+  // Second, the surrounding bundle already tracks the override (via
+  // `replacements.includes(eventId)`) and the event itself, so the heal's removals
+  // fall out of `bundleOps` as ordinary del ops and `restoreEventBundle` brings
+  // the override and its event back together on undo. Undo stays bundle-clean for
+  // free rather than by a second mechanism.
+  //
+  // `healCandidateIds` is a cheap scan over overrides and is checked first, so an
+  // ordinary edit to an ordinary event never pays for an engine rebuild.
+  function convergeSeries(documentValue, scope) {
+    const candidates = healCandidateIds(documentValue, scope);
+    if (!candidates.length) return 0;
+    // The engine's indices are stale against the mutation just applied, so they
+    // have to be refreshed before the projection can be trusted.
+    const engine = app.refreshEngine?.(documentValue) || app.engine;
+    if (!engine) return 0;
+    const plan = planSeriesHeal(documentValue, engine, { overrideIds: candidates });
+    return applySeriesHeal(documentValue, plan);
+  }
+
   // Run after a mutation: whatever patterns this bundle captured and the mutation
   // removed take their overrides with them, inside the same undoable transaction.
   // Scoped to the bundle's own patterns on purpose — sweeping orphans that were
@@ -32,7 +64,14 @@ export function createTransactions(app) {
     removeOverridesForPatterns(documentValue, removed);
   }
 
-  function captureEventBundle(documentValue, eventId, trackedOverrideIds = []) {
+  // `replacedEventIds` / the extra `events` entries exist for the same reason as in
+  // capturePatternBundle: editing a series' template event can converge one of that
+  // series' exceptions, and the heal then deletes an event that is NOT `eventId`. The
+  // tracked overrides already travel with the bundle (via trackPatternOverrides), so
+  // without their replaced events undo would restore an override whose event stayed
+  // deleted. `previous` keeps the captured set stable across the before/after pair and
+  // supplies the identities `carryForward` reuses.
+  function captureEventBundle(documentValue, eventId, trackedOverrideIds = [], previous = null) {
     const tracked = new Set(trackedOverrideIds);
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (override.replacements?.includes(eventId)) tracked.add(id);
@@ -41,23 +80,43 @@ export function createTransactions(app) {
       .filter(([, pattern]) => pattern.templateEvent === eventId)
       .map(([id, pattern]) => [id, clone(pattern)]));
     trackPatternOverrides(documentValue, patterns, tracked);
+    const overrides = Object.fromEntries(Object.entries(documentValue.overrides)
+      .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]));
+    const replaced = new Set(previous?.replacedEventIds || []);
+    for (const override of Object.values(overrides)) {
+      for (const id of override.replacements || []) if (id !== eventId) replaced.add(id);
+    }
     return {
       event: clone(documentValue.events[eventId]),
       relations: Object.fromEntries(Object.entries(documentValue.relations)
-        .filter(([, relation]) => relation.event === eventId)
-        .map(([id, relation]) => [id, clone(relation)])),
+        .filter(([, relation]) => relation.event === eventId
+          || replaced.has(relation.event)
+          || replaced.has(relation.member))
+        .map(([id, relation]) => [id, relation.event === eventId
+          ? clone(relation)
+          : carryForward(previous?.relations, id, relation)])),
       patterns,
       trackedOverrideIds: [...tracked],
-      overrides: Object.fromEntries(Object.entries(documentValue.overrides)
-        .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]))
+      overrides,
+      replacedEventIds: [...replaced],
+      events: Object.fromEntries([...replaced]
+        .filter((id) => documentValue.events[id])
+        .map((id) => [id, carryForward(previous?.events, id, documentValue.events[id])]))
     };
   }
 
   function restoreEventBundle(documentValue, eventId, bundle) {
     const tracked = new Set(bundle.trackedOverrideIds || Object.keys(bundle.overrides));
+    // Driven by the stable id list, not by `bundle.events`, so redo re-deletes an
+    // occurrence the heal retired (that bundle's events map is empty precisely then).
+    const replaced = new Set(bundle.replacedEventIds || []);
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.event === eventId) delete documentValue.relations[id];
+      if (relation.event === eventId
+        || replaced.has(relation.event)
+        || replaced.has(relation.member)) delete documentValue.relations[id];
     }
+    for (const id of replaced) delete documentValue.events[id];
+    Object.assign(documentValue.events, clone(bundle.events || {}));
     for (const [id, pattern] of Object.entries(documentValue.patterns)) {
       if (pattern.templateEvent === eventId) delete documentValue.patterns[id];
     }
@@ -88,7 +147,15 @@ export function createTransactions(app) {
       else {
         mutate(documentValue);
         cascadeRemovedPatterns(documentValue, before.patterns);
-        after = captureEventBundle(documentValue, eventId, before.trackedOverrideIds);
+        // Scoped by the event AND by any pattern this event is the template of: the
+        // inspector edits a series by editing its template event, and the occurrences
+        // such an edit can converge are reachable only through the pattern.
+        // `before.patterns` is exactly the patterns whose templateEvent is this event.
+        convergeSeries(documentValue, {
+          eventIds: [eventId],
+          patternIds: Object.keys(before.patterns || {})
+        });
+        after = captureEventBundle(documentValue, eventId, before.trackedOverrideIds, before);
       }
       Object.assign(metadata, bundleOps(before, after, { eventId }));
     }, (documentValue) => restoreEventBundle(documentValue, eventId, before), metadata);
@@ -143,6 +210,7 @@ export function createTransactions(app) {
       else {
         mutate(documentValue);
         cascadeRemovedPatterns(documentValue, before.patterns);
+        convergeSeries(documentValue, { eventIds });
         after = captureEventSetBundle(documentValue, eventIds);
       }
       Object.assign(metadata, bundleOps(before, after));
@@ -220,15 +288,56 @@ export function createTransactions(app) {
     }, (documentValue) => restoreFrameBundle(documentValue, frameId, before), metadata);
   }
 
-  function capturePatternBundle(documentValue, patternId) {
+  // AGENTS.md's rule is that an override belongs to its pattern the way a relation
+  // belongs to an event. The series convergence invariant extends that one link
+  // further: the materialized event an override *replaces* belongs to the override.
+  // Editing a series can converge one of its exceptions (move the series onto the
+  // date an exception was dragged to and the exception now says exactly what the
+  // series says), and the heal then deletes that event — so this bundle has to
+  // carry it, or undo would restore the override while its event stayed deleted.
+  // `bundleMaps` already understands `events`/`relations`, so adding them here is
+  // enough for the journal ops to come out right.
+  // `opsFromMaps` treats a record as untouched only when the before and after bundles
+  // hold the SAME OBJECT, so a record this transaction did not change has to be
+  // carried by reference rather than cloned a second time — otherwise every capture
+  // manufactures a spurious put. Clone on first sight (so a later in-place mutation
+  // cannot corrupt the restore value), then reuse that clone while the record is
+  // unchanged.
+  function carryForward(previousMap, id, value) {
+    const previous = previousMap?.[id];
+    if (previous && JSON.stringify(previous) === JSON.stringify(value)) return previous;
+    return clone(value);
+  }
+
+  // `previous` (the before bundle) does two jobs. It keeps the captured event set
+  // STABLE across the before/after pair — exactly as `captureEventBundle`'s
+  // `trackedOverrideIds` does — because the set is otherwise derived from overrides
+  // this same transaction may delete: deleting a pattern removes its overrides, so
+  // `after` would stop tracking the replaced event, the diff would read that as a
+  // deletion, and journal replay would delete a real event nobody asked to remove.
+  // It also supplies the identities `carryForward` reuses. An existing test caught
+  // both failures.
+  function capturePatternBundle(documentValue, patternId, previous = null) {
     const patterns = documentValue.patterns[patternId]
       ? { [patternId]: clone(documentValue.patterns[patternId]) }
       : {};
     const tracked = trackPatternOverrides(documentValue, { [patternId]: true }, new Set());
+    const overrides = Object.fromEntries(Object.entries(documentValue.overrides)
+      .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]));
+    const replaced = new Set(previous?.replacedEventIds || []);
+    for (const override of Object.values(overrides)) {
+      for (const eventId of override.replacements || []) replaced.add(eventId);
+    }
     return {
       patterns,
-      overrides: Object.fromEntries(Object.entries(documentValue.overrides)
-        .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]))
+      overrides,
+      replacedEventIds: [...replaced],
+      events: Object.fromEntries([...replaced]
+        .filter((eventId) => documentValue.events[eventId])
+        .map((eventId) => [eventId, carryForward(previous?.events, eventId, documentValue.events[eventId])])),
+      relations: Object.fromEntries(Object.entries(documentValue.relations)
+        .filter(([, relation]) => replaced.has(relation.event) || replaced.has(relation.member))
+        .map(([id, relation]) => [id, carryForward(previous?.relations, id, relation)]))
     };
   }
 
@@ -237,8 +346,23 @@ export function createTransactions(app) {
     for (const [id, override] of Object.entries(documentValue.overrides)) {
       if (overridePatternId(override) === patternId) delete documentValue.overrides[id];
     }
+    // Clear the replaced events' current records before restoring, so this works
+    // symmetrically whether the transaction being undone deleted them (a heal) or
+    // left them in place. Driven by the STABLE id list rather than by `bundle.events`:
+    // on redo this runs with the after-bundle, whose events map is empty precisely
+    // when the heal removed one — keying off the map would leave the undone event in
+    // place and make redo a no-op for it.
+    const replaced = new Set(bundle.replacedEventIds || Object.keys(bundle.events || {}));
+    if (replaced.size) {
+      for (const [id, relation] of Object.entries(documentValue.relations)) {
+        if (replaced.has(relation.event) || replaced.has(relation.member)) delete documentValue.relations[id];
+      }
+      for (const eventId of replaced) delete documentValue.events[eventId];
+    }
     Object.assign(documentValue.patterns, clone(bundle.patterns));
     Object.assign(documentValue.overrides, clone(bundle.overrides));
+    Object.assign(documentValue.events, clone(bundle.events || {}));
+    Object.assign(documentValue.relations, clone(bundle.relations || {}));
   }
 
   // Editing or deleting one pattern together with the overrides that belong to
@@ -254,10 +378,36 @@ export function createTransactions(app) {
       else {
         mutate(documentValue);
         cascadeRemovedPatterns(documentValue, before.patterns);
-        after = capturePatternBundle(documentValue, patternId);
+        // Scoped by pattern, not by event: a series edit can converge an occurrence
+        // it never named.
+        convergeSeries(documentValue, { patternIds: [patternId] });
+        after = capturePatternBundle(documentValue, patternId, before);
       }
       Object.assign(metadata, bundleOps(before, after));
     }, (documentValue) => restorePatternBundle(documentValue, patternId, before), metadata);
+  }
+
+  // Ask the invariant about one occurrence right now, outside any edit.
+  //
+  // This is the "closing an occurrence you did not change must not leave a fork
+  // behind" case (ROADMAP #5). It is deliberately the SAME invariant rather than a
+  // second rule about closing: it commits nothing unless the occurrence genuinely
+  // matches its series, so a closed-but-edited occurrence is untouched. Planning
+  // first also keeps a no-op close from pushing an empty undo entry — the plan is
+  // pure, so asking twice costs nothing but an engine refresh.
+  function convergeSeriesOccurrence(eventId) {
+    const { chronolog } = app;
+    if (!eventId || !chronolog?.events?.[eventId]) return false;
+    const candidates = healCandidateIds(chronolog, { eventIds: [eventId] });
+    if (!candidates.length) return false;
+    const engine = app.refreshEngine?.(chronolog) || app.engine;
+    if (!engine) return false;
+    if (!planSeriesHeal(chronolog, engine, { overrideIds: candidates }).healed) return false;
+    // An empty mutation: executeEventChange's own convergence step does the work,
+    // so the removal arrives as one ordinary undoable, journaled bundle rather than
+    // through a second mechanism.
+    executeEventChange("Heal series occurrence", eventId, () => {});
+    return true;
   }
 
   return {
@@ -265,6 +415,7 @@ export function createTransactions(app) {
     executeEventSetChange,
     executeRecordChange,
     executeFrameChange,
-    executePatternChange
+    executePatternChange,
+    convergeSeriesOccurrence
   };
 }
