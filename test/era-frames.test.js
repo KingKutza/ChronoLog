@@ -3,7 +3,7 @@ import test from "node:test";
 import { Rational, coordinate } from "../src/exact.js";
 import { coordinateLaw, invalidateCoordinateLaws } from "../src/coordinate-law.js";
 import { eraChain, eraChainFrames, frameEraContext, isCountableEra } from "../src/era-chain.js";
-import { addEvent, addRelation, createDocument } from "../src/model.js";
+import { addEvent, addRelation, createDocument, validateDocument } from "../src/model.js";
 
 // Owner ruling: eras are FRAMES STAPLED TOGETHER. An era owns its year numbering
 // and extent, inherits its month/day ladder from a basis, and the boundary
@@ -366,8 +366,23 @@ test("the elder-scrolls dataset loads, validates, and queries across its era cha
   assert.equal(third.mapsToClock(), false, "clock: false -- no artificial Now on Tamriel");
   assert.equal(third.formatYear(coordinate([{ level: "year", value: "433" }])), "3E 433");
 
-  // Events land in their own eras, and era order is day order across the chain.
+  // THE SPANNING CALENDAR IS A GROUP FRAME OVER THE CHAIN, so querying it
+  // returns every era's events -- each resolved under its own era's law and
+  // unioned, with the group imposing no arithmetic of its own. Before the union
+  // this frame answered zero while every era beneath it answered its own share.
   const engine = new ChronologEngine(document);
+  const spanning = engine.queryFacts({
+    frame: "frame:tamriel-calendar",
+    start: coordinate([{ level: "year", value: "-4000" }, { level: "month", value: "1" }, { level: "day", value: "1" }]),
+    end: coordinate([{ level: "year", value: "6000" }, { level: "month", value: "1" }, { level: "day", value: "1" }]),
+    limit: 500
+  });
+  assert.ok(spanning.facts.length >= 40, `the group unions the chain (${spanning.facts.length} facts)`);
+  // Facts arrive from more than one era, which is the whole point of the union.
+  const eraFrames = new Set(spanning.facts.map((fact) => fact.relation?.frame).filter(Boolean));
+  assert.ok(eraFrames.size >= 4, `facts come from several eras (${[...eraFrames].join(", ")})`);
+
+  // Events land in their own eras, and era order is day order across the chain.
   const dayOf = (frameId) => engine.indexedExplicitFacts(frameId).map((entry) => entry.day);
   const merethic = dayOf("era:tamriel-merethic");
   const fourth = dayOf("era:tamriel-fourth");
@@ -422,4 +437,119 @@ test("a calendar with no now-mapping draws no Now line, and one with a clock sti
     document: tamriel, engine: new ChronologEngine(tamriel), session: eraSession
   });
   assert.equal(findByClass(eraTarget, "intimate-now").length, 0, "no artificial Now on Tamriel");
+});
+
+// Owner ruling: "For Tamriel, there is no staple between earth and Tamriel, thus
+// no way to project one to the other. The moment we place a staple, wherever it
+// is everything projects around that, we place 8 that is where lines shows us
+// the warp."
+//
+// Three separate claims, none implying another: a shared ATOM makes units
+// comparable in LENGTH; `mapsToClock` says a frame has a now; a STAPLE PATH says
+// two frames have positional correspondence. An authored origin is chain-internal
+// and makes no claim on any shared axis.
+test("with no staple between them, Tamriel and wall time do not project onto each other", async () => {
+  const { framesProject, projectableFrames } = await import("../src/frame-projection.js");
+  const document = tamrielDocument();
+  document.frames["frame:wall-time"] = {
+    id: "frame:wall-time", title: "Wall time", traits: ["line", "temporal", "gregorian", "calendar"],
+    coordinate: { kind: "gregorian" }
+  };
+
+  // The Tamriel origin resolves the chain internally -- era frames project onto
+  // one another because they share a coordinate space.
+  assert.equal(framesProject(document, "era:third", "era:first"), true);
+  assert.equal(framesProject(document, "era:third", "frame:tamriel-calendar"), true);
+
+  // And it says nothing at all about Earth.
+  assert.equal(framesProject(document, "era:third", "frame:wall-time"), false);
+  assert.equal(framesProject(document, "frame:wall-time", "era:third"), false);
+
+  // An overlay therefore renders nothing of Tamriel, and says why rather than
+  // looking like an empty calendar.
+  const refusedOnly = projectableFrames(document, ["frame:wall-time", "era:third"], "frame:wall-time");
+  assert.deepEqual(refusedOnly.projectable, ["frame:wall-time"]);
+  assert.equal(refusedOnly.refused.length, 1);
+  assert.match(refusedOnly.refused[0].message, /no authored correspondence/);
+  assert.match(refusedOnly.refused[0].message, /Staple a point between them/);
+});
+
+test("one correspondence staple is enough: everything projects around that point", async () => {
+  const { framesProject, projectableFrames } = await import("../src/frame-projection.js");
+  const document = tamrielDocument();
+  document.frames["frame:wall-time"] = {
+    id: "frame:wall-time", title: "Wall time", traits: ["line", "temporal", "gregorian", "calendar"],
+    coordinate: { kind: "gregorian" }
+  };
+  // "we place 8 that is where lines shows us the warp" -- ONE authored touch
+  // point between the two calendars.
+  addRelation(document, {
+    id: "relation:tamriel-earth", type: "staple", kind: "correspondence", role: "authored-touch",
+    ends: [
+      { frame: "era:third", coordinate: coordinate([{ level: "year", value: "433" }]) },
+      { frame: "frame:wall-time", coordinate: coordinate([
+        { level: "year", value: "2026" }, { level: "month", value: "8" }, { level: "day", value: "20" }
+      ]) }
+    ]
+  });
+
+  // Now they correspond -- and so does every era sharing that calendar's space,
+  // because the staple reaches the space and not merely the one frame.
+  assert.equal(framesProject(document, "era:third", "frame:wall-time"), true);
+  assert.equal(framesProject(document, "era:merethic", "frame:wall-time"), true);
+  assert.equal(framesProject(document, "frame:wall-time", "era:fourth"), true);
+  assert.deepEqual(
+    projectableFrames(document, ["frame:wall-time", "era:third"], "frame:wall-time").refused,
+    []
+  );
+
+  // The correspondence is exactly at the stapled point and is never averaged
+  // into a rigid offset: a second staple is a second exact point, and the
+  // stretch between them is authored meaning the Lines lens will draw.
+  addRelation(document, {
+    id: "relation:tamriel-earth-2", type: "staple", kind: "correspondence", role: "authored-touch",
+    ends: [
+      { frame: "era:fourth", coordinate: coordinate([{ level: "year", value: "201" }]) },
+      { frame: "frame:wall-time", coordinate: coordinate([
+        { level: "year", value: "2030" }, { level: "month", value: "1" }, { level: "day", value: "1" }
+      ]) }
+    ]
+  });
+  const staples = Object.values(document.relations).filter((relation) =>
+    relation.type === "staple" && relation.kind === "correspondence");
+  assert.equal(staples.length, 2, "two authored points remain two, never reconciled into one offset");
+});
+
+test("a forked or unpinned era chain refuses when the records are written, not first at render", () => {
+  const forked = tamrielDocument();
+  addRelation(forked, {
+    id: "succession:fork", type: "staple", kind: "succession",
+    ends: [{ frame: "era:first", role: "end" }, { frame: "era:fourth", role: "start" }]
+  });
+  const forkResult = validateDocument(forked);
+  assert.equal(forkResult.valid, false);
+  assert.equal(forkResult.errors.filter((message) => /cannot fork/.test(message)).length, 1,
+    "one reason for the chain, not one per era in it");
+
+  const unpinned = tamrielDocument();
+  delete unpinned.frames["era:first"].era.anchor;
+  const unpinnedResult = validateDocument(unpinned);
+  assert.equal(unpinnedResult.valid, false);
+  assert.match(unpinnedResult.errors.join(" · "), /states nowhere that it sits/);
+
+  // A well-formed chain is silent.
+  assert.equal(validateDocument(tamrielDocument()).valid, true);
+});
+
+test("an attachment whose coordinate its own frame cannot read refuses before store", () => {
+  const document = tamrielDocument();
+  const event = addEvent(document, { traits: ["event"], payload: { title: "Unreadable" } });
+  // A month/day coordinate on the Dawn Era, which has no ladder at all.
+  addRelation(document, {
+    type: "attachment", role: "placed", event: event.id, frame: "era:dawn",
+    coordinate: coordinate([{ level: "year", value: "1" }, { level: "month", value: "3" }])
+  });
+  const result = validateDocument(document);
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join(" · "), /has no year axis/);
 });

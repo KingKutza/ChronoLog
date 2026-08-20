@@ -7,6 +7,7 @@ import {
   nowDays
 } from "./exact.js";
 import { coordinateLaw, GREGORIAN_LAW, daysToCivilCoordinate, displayLaw } from "./coordinate-law.js";
+import { projectableFrames } from "./frame-projection.js";
 import { arcPath, polar, radialCycleWindow, radialGuideSettings, radialRenderState, spiralRibbonPath } from "./radial.js";
 import { objectKindForEvent } from "./object-kinds.js";
 import { factMatchesSelection } from "./session.js";
@@ -192,7 +193,20 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
   // reinterpreted under another frame's law (AGENTS.md's frame model), so each
   // source resolves the window under its OWN law rather than one shared
   // standard-civil coordinate applied to every frame alike.
-  const results = [...sources.values()].map((source) => {
+  // CROSS-FRAME PROJECTION EXISTS ONLY THROUGH STAPLES (src/frame-projection.js).
+  // A companion frame with no authored correspondence to the viewed frame is
+  // REFUSED rather than drawn: a shared atom makes two calendars' units
+  // comparable in length and says nothing about when, and an authored origin
+  // anchors a calendar's own eras to each other and makes no claim on this axis.
+  // Placing Tamriel's Third Era next to 1970 because both count days from an
+  // internal zero would be a correspondence nobody authored.
+  const projection = projectableFrames(
+    context.document,
+    [...sources.values()].map((source) => source.frame.id),
+    frame
+  );
+  const projectable = new Set(projection.projectable);
+  const results = [...sources.values()].filter((source) => projectable.has(source.frame.id)).map((source) => {
     const sourceLaw = coordinateLaw(context.document, source.frame.id);
     return {
       frame: source.frame,
@@ -206,6 +220,7 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
       })
     };
   });
+  const refusedProjection = projection.refused;
   const groupModes = context.document.frames[frame]?.display?.groupModes || {};
   const merged = results.flatMap(({ frame: frameValue, filterGroups, result }) => result.facts
     .filter((fact) => !filterGroups || filterGroups.has(factGroupFrame(context, fact)))
@@ -228,7 +243,13 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
     start: coordinateLaw(context.document, frame).fromDays(startDays),
     end: coordinateLaw(context.document, frame).fromDays(endDays),
     facts,
-    errors: results.flatMap(({ result }) => result.errors || []),
+    // A companion refused for want of an authored correspondence is reported in
+    // the same channel as any other per-source reason: rendering nothing and
+    // saying nothing would look identical to an empty calendar.
+    errors: [
+      ...results.flatMap(({ result }) => result.errors || []),
+      ...refusedProjection.map((entry) => ({ pattern: entry.frame, message: entry.message }))
+    ],
     truncated: facts.length >= limit || results.some(({ result }) => result.truncated)
   };
 }

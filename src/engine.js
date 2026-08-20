@@ -7,7 +7,7 @@ import {
   floorDiv,
   floorMod
 } from "./exact.js";
-import { coordinateDaysOrNull, coordinateLaw, coordinateValueError, lawForCalendar } from "./coordinate-law.js";
+import { GREGORIAN_LAW, coordinateDaysOrNull, coordinateLaw, coordinateValueError, lawForCalendar } from "./coordinate-law.js";
 import { coordinateEntryDepth } from "./coordinate-entry.js";
 import {
   applyVirtualOverrides,
@@ -572,6 +572,19 @@ export class ChronologEngine {
       }
     }
     this.rebuildGroupMemberships();
+  }
+
+  // Which frame's law should read a query window's own coordinates. Normally the
+  // queried frame itself; null for a group frame that owns no coordinate space,
+  // meaning "use the registered standard boundary". A group WITH a basis or its
+  // own ladder is a coordinate space like any other and keeps reading its own.
+  windowFrameFor(frameId) {
+    if (!this.isOrdinaryGroup(frameId)) return frameId;
+    try {
+      return coordinateLaw(this.document, frameId).positional ? frameId : null;
+    } catch {
+      return null;
+    }
   }
 
   isOrdinaryGroup(frameId) {
@@ -1245,8 +1258,21 @@ export class ChronologEngine {
   // that will then do the reasserting — a second derivation could drift and the
   // heal would either destroy authored edits or never fire.
   queryFacts({ frame, start, end, selection = null, limit = Infinity, includeOverlaps = false, applyOverrides = true }) {
-    const fromDays = this.coordinateDays(frame, start);
-    const toDays = this.coordinateDays(frame, end);
+    // A GROUP frame is not a coordinate space, so it cannot resolve a window
+    // expressed as a coordinate. Reading one through its own (empty) law is what
+    // silently collapsed a group query to a single day: a law with no declared
+    // levels permissively reads the bare `day` level, so a year/month/day window
+    // became [1, 1] and every group answered zero. The bounds are resolved
+    // through the registered standard boundary instead -- the same rule ICS and
+    // the host clock already follow when the outside world hands in a civil
+    // time and no frame law owns it.
+    const windowLaw = this.windowFrameFor(frame);
+    const fromDays = windowLaw === null
+      ? GREGORIAN_LAW.toDays(start)
+      : this.coordinateDays(windowLaw, start);
+    const toDays = windowLaw === null
+      ? GREGORIAN_LAW.toDays(end)
+      : this.coordinateDays(windowLaw, end);
     const ascending = fromDays.compare(toDays) <= 0;
     const lower = ascending ? fromDays : toDays;
     const upper = ascending ? toDays : fromDays;
