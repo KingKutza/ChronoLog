@@ -1,7 +1,17 @@
 import { Rational, coordinate } from "./exact.js";
 import { GREGORIAN_DECLARATION, coordinateLaw, durationMagnitudeDays } from "./coordinate-law.js";
 import { mapSnapshot, opsFromMaps, putOp } from "./ops.js";
-import { STAPLE_KINDS, stapleKind, stapleTarget } from "./staples.js";
+import {
+  DEFAULT_POINT,
+  STAPLE_KINDS,
+  endId,
+  endScope,
+  endScopePair,
+  stapleEnds,
+  stapleKind,
+  stapleReferencesId,
+  stapleTouchesAny
+} from "./staples.js";
 
 // Re-exported from coordinate-law.js, where the arithmetic now lives: a
 // duration's worth in days is a question about the magnitude frame's declared
@@ -376,16 +386,123 @@ function validateMagnitudeShape(document, value, label, errors) {
   if (!Array.isArray(value.value?.levels)) errors.push(`${label} lacks a nested value`);
 }
 
+// A frame end declares EXACTLY ONE position form (src/staples.js's
+// END_POSITION_FORMS): one coordinate, a selector into this frame's own declared
+// cycles or levels, a span, or an authored void. More than one is two claims
+// wearing one record, and none is an end that names a frame without saying where
+// on it.
+//
+// A selector's `cycle`/`level` is checked against the frame's OWN law, so a
+// selector naming something that frame never declared is refused rather than
+// silently matching nothing forever -- the same reasoning the coordinate law
+// applies to an unresolvable declaration.
+function validateEndPosition(document, end, label, errors) {
+  const declared = ["coordinate", "selector", "span", "void"].filter((form) =>
+    form === "void" ? end.void === true : end[form] !== undefined && end[form] !== null);
+  if (declared.length !== 1) {
+    errors.push(
+      declared.length === 0
+        ? `${label} needs a position: a coordinate, a selector, a span, or an authored void`
+        : `${label} declares ${declared.join(" and ")}; an end has exactly one position`
+    );
+    return;
+  }
+  const [form] = declared;
+  if (form === "void") return;
+  if (form === "coordinate") {
+    if (!isCoordinate(end.coordinate)) errors.push(`${label} coordinate must use nested levels`);
+    return;
+  }
+  if (form === "span") {
+    if (!isCoordinate(end.span?.from) || !isCoordinate(end.span?.to)) {
+      errors.push(`${label} span needs a from and a to coordinate, both using nested levels`);
+    }
+    return;
+  }
+  const selector = end.selector;
+  if (!selector || typeof selector !== "object" || (!selector.cycle && !selector.level)) {
+    errors.push(`${label} selector must name a cycle or a level`);
+    return;
+  }
+  if (selector.cycle && selector.level) {
+    errors.push(`${label} selector names both a cycle and a level; it names one`);
+    return;
+  }
+  if (selector.value === undefined || selector.value === null || String(selector.value).trim() === "") {
+    errors.push(`${label} selector needs a value`);
+    return;
+  }
+  let law = null;
+  try {
+    law = coordinateLaw(document, end.frame);
+  } catch {
+    // An unresolvable declaration is already reported against the frame itself;
+    // reporting it a second time here would name the wrong record as the fault.
+    return;
+  }
+  if (selector.cycle && !law.cycle(selector.cycle)) {
+    errors.push(`${label} selector names the cycle "${selector.cycle}", which this frame does not declare`);
+  }
+  if (selector.level && !law.has(selector.level)) {
+    errors.push(`${label} selector names the level "${selector.level}", which this frame does not declare`);
+  }
+}
+
+// One end of a connection, validated for the map it points into and for the
+// touch point it claims. A frame end must carry the coordinate its frame's law
+// gives meaning to; an object end must carry a point name, because "which point"
+// is the whole content of the connection at that end.
+function validateStapleEnd(document, relation, end, index, errors) {
+  const label = `Staple ${relation.id} end ${index + 1}`;
+  const scope = endScope(end);
+  if (!scope) {
+    errors.push(`${label} must name a frame, an object, or a series`);
+    return;
+  }
+  const named = [end.frame, end.object, end.series].filter(Boolean);
+  if (named.length > 1) {
+    errors.push(`${label} names more than one thing; an end connects to exactly one`);
+    return;
+  }
+  if (scope === "frame") {
+    if (!document.frames?.[end.frame]) errors.push(`${label} references a missing frame`);
+    validateEndPosition(document, end, label, errors);
+    return;
+  }
+  if (scope === "series") {
+    if (!document.patterns?.[end.series]) errors.push(`${label} references a missing series`);
+    return;
+  }
+  if (!document.events?.[end.object]) errors.push(`${label} references a missing object`);
+  if (end.point !== undefined && (typeof end.point !== "string" || !end.point.trim())) {
+    errors.push(`${label} point must be a non-empty name`);
+  }
+  validateMagnitudeShape(document, end.offset, `${label} offset`, errors);
+}
+
 function validateStaple(document, relation, errors) {
-  const target = stapleTarget(relation);
-  if (!target.scope) {
-    errors.push(`Staple ${relation.id} must staple either a series or an object`);
-  } else if (relation.series && relation.object) {
-    errors.push(`Staple ${relation.id} staples both a series and an object; exactly one is allowed`);
-  } else if (target.scope === "series" && !document.patterns?.[target.id]) {
-    errors.push(`Staple ${relation.id} references a missing series`);
-  } else if (target.scope === "object" && !document.events?.[target.id]) {
-    errors.push(`Staple ${relation.id} references a missing object`);
+  // Exactly two ends: a staple connects TWO things at a point. One end is an
+  // attribute pretending to be an edge and three is a relation nobody has
+  // defined, so both are refused rather than resolved by dropping one.
+  const ends = stapleEnds(relation);
+  if (!Array.isArray(relation.ends) || relation.ends.length !== 2 || ends.length !== 2) {
+    errors.push(`Staple ${relation.id} must connect exactly two things`);
+  }
+  for (const [index, end] of ends.entries()) validateStapleEnd(document, relation, end, index, errors);
+  // A frame may be stapled to ITSELF at two different coordinates: that is a
+  // nonlinear line crossing its own path, which the correspondence model exists
+  // to carry. Two ends at the same coordinate say nothing, and an object or
+  // series stapled to itself says nothing either -- an object's own start-to-end
+  // span is its duration magnitude, not a connection.
+  if (ends.length === 2 && endId(ends[0]) === endId(ends[1])) {
+    if (endScope(ends[0]) !== "frame") {
+      errors.push(`Staple ${relation.id} connects one ${endScope(ends[0])} to itself`);
+    } else if (JSON.stringify(ends[0].coordinate) === JSON.stringify(ends[1].coordinate)) {
+      errors.push(`Staple ${relation.id} connects one point to itself`);
+    }
+  }
+  if (ends.filter((end) => endScope(end) === "series").length > 1) {
+    errors.push(`Staple ${relation.id} connects two series, which is not defined`);
   }
 
   const definition = stapleKind(relation.kind);
@@ -393,15 +510,16 @@ function validateStaple(document, relation, errors) {
     errors.push(
       `Staple ${relation.id} kind must be one of ${Object.keys(STAPLE_KINDS).join(", ")}`
     );
-  } else if (target.scope && !definition.targets.includes(target.scope)) {
-    errors.push(`Staple ${relation.id} kind "${relation.kind}" cannot staple a ${target.scope}`);
-  }
-
-  if (!document.frames?.[relation.frame]) errors.push(`Staple ${relation.id} references a missing frame`);
-  if (!isCoordinate(relation.coordinate)) errors.push(`Staple ${relation.id} coordinate must use nested levels`);
-
-  if (relation.role !== undefined && (typeof relation.role !== "string" || !relation.role.trim())) {
-    errors.push(`Staple ${relation.id} role must be a non-empty name`);
+  } else if (ends.length === 2) {
+    // A kind is defined by the PAIR of scopes it may join, so the check is one
+    // canonical-key lookup rather than two half-checks that could disagree.
+    const pair = endScopePair(endScope(ends[0]), endScope(ends[1]));
+    if (!definition.connects.includes(pair)) {
+      errors.push(
+        `Staple ${relation.id} kind "${relation.kind}" cannot connect ${pair.replace("+", " to ")}`
+        + `; it connects ${definition.connects.join(" or ")}`
+      );
+    }
   }
 
   // Fuzziness is per-staple data, so it validates as data: two magnitudes,
@@ -444,9 +562,6 @@ function validateStaple(document, relation, errors) {
     }
   }
 
-  if (relation.payload?.offset !== undefined) {
-    validateMagnitudeShape(document, relation.payload.offset, `Staple ${relation.id} offset`, errors);
-  }
 }
 
 function validateDisplacement(document, relation, errors) {
@@ -612,11 +727,20 @@ export function removeOverridesForPatterns(document, patternIds) {
 // deletion in the same undoable transaction rather than surviving as a
 // pointer to nothing. Returns how many it removed so callers can report.
 export function removeStaplesForPatterns(document, patternIds) {
-  const removed = patternIds instanceof Set ? patternIds : new Set(patternIds);
+  return removeStaplesReferencing(document, patternIds);
+}
+
+// The one sweep both cascades share. A staple has two ends, so "does this
+// connection point at a record I am deleting" is a question about EITHER end --
+// deleting one event of a stapled pair has to take the connection with it, or
+// the surviving event keeps an anchor to nothing and one bad pointer takes the
+// whole file offline at its next load.
+function removeStaplesReferencing(document, ids) {
+  const removed = ids instanceof Set ? ids : new Set(ids);
   if (!removed.size) return 0;
   let count = 0;
   for (const [id, relation] of Object.entries(document?.relations || {})) {
-    if (relation?.type !== "staple" || !removed.has(relation.series)) continue;
+    if (relation?.type !== "staple" || !stapleTouchesAny(relation, removed)) continue;
     delete document.relations[id];
     count += 1;
   }
@@ -630,15 +754,50 @@ export function removeStaplesForPatterns(document, patternIds) {
 // pointing at nothing, and one bad pointer takes the whole file offline at its
 // next load.
 export function removeStaplesForObjects(document, objectIds) {
-  const removed = objectIds instanceof Set ? objectIds : new Set(objectIds);
-  if (!removed.size) return 0;
-  let count = 0;
-  for (const [id, relation] of Object.entries(document?.relations || {})) {
-    if (relation?.type !== "staple" || !removed.has(relation.object)) continue;
-    delete document.relations[id];
-    count += 1;
-  }
-  return count;
+  return removeStaplesReferencing(document, objectIds);
+}
+
+export { removeStaplesReferencing };
+
+// The three end builders. A staple's ends are data, not prose, and an authoring
+// surface that hand-wrote the object literal would be a second place the shape
+// is defined -- so these are the shape, and `putStaple` takes what they return.
+export function frameEnd(frame, coordinateValue, parameters = null) {
+  return {
+    frame,
+    coordinate: coordinateValue,
+    ...(parameters ? { parameters } : {})
+  };
+}
+
+export function objectEnd(object, point = DEFAULT_POINT, offset = null) {
+  return {
+    object,
+    point,
+    ...(offset ? { offset } : {})
+  };
+}
+
+export function seriesEnd(series) {
+  return { series };
+}
+
+// A position in one of the frame's own declared cycles or levels: "Tuesdays",
+// "July". Many-valued by construction, which is why it is a distinct form
+// rather than a coordinate with levels left off -- a partial coordinate is one
+// instant at coarse precision, a selector is every instant that satisfies it.
+export function selectorEnd(frame, selector) {
+  return { frame, selector };
+}
+
+export function spanEnd(frame, from, to) {
+  return { frame, span: { from, to } };
+}
+
+// "Sometimes never", authored. Distinct from the absence of a staple, which says
+// only that nobody has said yet.
+export function voidEnd(frame) {
+  return { frame, void: true };
 }
 
 // Placing and removing staples, generalized.
@@ -694,8 +853,8 @@ export function staplesFor(document, { series = null, object = null } = {}) {
   if (!series && !object) return [];
   return Object.values(document?.relations || {})
     .filter((relation) => relation?.type === "staple"
-      && (!series || relation.series === series)
-      && (!object || relation.object === object))
+      && (!series || stapleReferencesId(relation, series))
+      && (!object || stapleReferencesId(relation, object)))
     .sort((left, right) => String(left.id).localeCompare(String(right.id)));
 }
 
@@ -711,18 +870,15 @@ export function staplesFor(document, { series = null, object = null } = {}) {
 export function seriesEndStaple(document, patternId) {
   if (!patternId) return null;
   return Object.values(document?.relations || {}).find((relation) =>
-    relation?.type === "staple" && relation.series === patternId && relation.kind === "end") || null;
+    relation?.type === "staple" && relation.kind === "end" && stapleReferencesId(relation, patternId)) || null;
 }
 
 export function setSeriesEndStaple(document, patternId, frame, coordinateValue, parameters = null) {
   const existing = seriesEndStaple(document, patternId);
   return putStaple(document, {
     ...(existing ? { id: existing.id } : {}),
-    series: patternId,
     kind: "end",
-    frame,
-    coordinate: coordinateValue,
-    ...(parameters ? { parameters } : {})
+    ends: [seriesEnd(patternId), frameEnd(frame, coordinateValue, parameters)]
   });
 }
 

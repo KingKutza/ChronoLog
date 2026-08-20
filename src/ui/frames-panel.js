@@ -11,6 +11,7 @@ import {
 import { additiveFrameTraits, frameAuthoringCapabilities, preservedFrameSchema } from "../frame-edit.js";
 import { addFrame, addPattern, clone, createId } from "../model.js";
 import { mapSnapshot, opsFromMaps } from "../ops.js";
+import { stapleReferencesId, withRemappedEnds } from "../staples.js";
 import { calendarFrames, groupFrames } from "../projections.js";
 import { defaultWeightForNewFrame, resolveAuthoredWeight } from "../weight-formula.js";
 import { byId, escapeHTML } from "./dom-helpers.js";
@@ -55,9 +56,17 @@ export function createFramesPanel(app) {
     const relationMap = new Map();
     const relations = [];
     for (const relation of Object.values(chronolog.relations)) {
-      if (relation.frame !== frameId && relation.parent !== frameId && relation.child !== frameId) continue;
+      // A staple names its frames on its ENDS, so it is invisible to the three
+      // field checks below and has to be asked for directly -- otherwise the copy
+      // silently loses every connection into the frame it was copied from.
+      const isStaple = relation.type === "staple" && stapleReferencesId(relation, frameId);
+      if (!isStaple && relation.frame !== frameId && relation.parent !== frameId && relation.child !== frameId) continue;
       const id = createId("relation");
       relationMap.set(relation.id, id);
+      if (isStaple) {
+        relations.push({ ...clone(withRemappedEnds(relation, new Map([[frameId, nextId]]))), id });
+        continue;
+      }
       relations.push({
         ...clone(relation), id,
         frame: relation.frame === frameId ? nextId : relation.frame,
@@ -258,6 +267,11 @@ export function createFramesPanel(app) {
         <div class="structure-cycle-heading"><span>Cycle</span><span>Length</span><span>Phase</span><span>Names in order</span><span></span></div>
         <div class="structure-cycles" data-structure-cycles>${(structure?.cycles || []).map((cycle, index) => structureCycleRow(cycle, index)).join("")}</div>
         <div class="inline-actions"><button class="instrument-button" type="button" data-add-cycle>Add cycle</button></div>
+        <div class="form-row structure-uniform-fields">
+          <label class="field"><span>Base unit</span><select name="structureBaseLevel" data-structure-base-level><option value="">Infer automatically</option></select></label>
+          <label class="field"><span>Origin (exact day ordinal)</span><input name="structureOrigin" value="${escapeHTML(structure?.origin || "")}" placeholder="0"></label>
+        </div>
+        <p class="field-note">Only needed for a wholly invented, uniform ladder that no registered calendar family recognizes: <strong>base unit</strong> says which level above is one day, and <strong>origin</strong> says the exact day ordinal its first unit begins on. Leave both blank for an ordinary calendar built from a registered transition (Gregorian months/days, and the like).</p>
         <output class="calendar-period-preview" data-structure-preview></output>
       </div>
     </details>` : ""}
@@ -327,7 +341,9 @@ export function createFramesPanel(app) {
           length: "structureCycleLength",
           phase: "structureCyclePhase",
           names: "structureCycleNames"
-        })
+        }),
+        baseLevel: String(wrapper.elements.structureBaseLevel?.value || "").trim(),
+        origin: String(wrapper.elements.structureOrigin?.value || "").trim()
       };
     }
     // Authoring the structure is only in force when this frame owns it, so a
@@ -336,8 +352,28 @@ export function createFramesPanel(app) {
     function structureAuthored() {
       return Boolean(structureFields) && (ownsStructure || Boolean(ownStructureToggle?.checked));
     }
+    // The base-unit choices are the CURRENTLY TYPED level names, not the law's
+    // levels at open time: renaming or reordering a level while authoring must
+    // be reflected here immediately, or the select silently offers a name that
+    // no longer exists. The one exception is the value an author is mid-edit
+    // toward -- kept as a trailing option rather than dropped -- so picking a
+    // base level is never undone by a keystroke in an unrelated field.
+    function refreshBaseLevelOptions() {
+      const select = wrapper.elements.structureBaseLevel;
+      if (!select) return;
+      const current = select.options.length ? select.value : (structure?.baseLevel || "");
+      const names = [...structureLevels.querySelectorAll('[name="structureLevelName"]')]
+        .map((input) => String(input.value || "").trim())
+        .filter(Boolean);
+      select.innerHTML = `<option value="">Infer automatically</option>`
+        + names.map((name) => `<option value="${escapeHTML(name)}" ${name === current ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")
+        + (current && !names.includes(current)
+          ? `<option value="${escapeHTML(current)}" selected>${escapeHTML(current)} (not a current level)</option>`
+          : "");
+    }
     function refreshStructurePreview() {
       if (!structureFields || !structurePreview) return;
+      refreshBaseLevelOptions();
       const enabled = structureAuthored();
       for (const field of structureFields.querySelectorAll("input, select, button")) field.disabled = !enabled;
       if (!enabled) {
@@ -568,12 +604,20 @@ export function createFramesPanel(app) {
     });
     if (!isNew) {
       wrapper.querySelector("#duplicate-object").addEventListener("click", () => duplicateFrame(value.id));
+      // Removal acts immediately and is one undoable step, like every other
+      // change: undo is the safety net, and a modal that asks the same question
+      // twice is not one.
       wrapper.querySelector("#delete-object").addEventListener("click", () => {
-        if (!confirm(`Remove ${value.title}? Placements and frame-specific patterns will be detached.`)) return;
         app.executeFrameChange("Remove frame", value.id, (documentValue) => {
           delete documentValue.frames[value.id];
           for (const [id, relation] of Object.entries(documentValue.relations)) {
-            if (relation.frame === value.id || relation.parent === value.id || relation.child === value.id) delete documentValue.relations[id];
+            // Both a staple's ends count: a connection into this frame keeps a
+            // coordinate in a space that is about to stop existing, and one bad
+            // pointer takes the whole file offline at its next load.
+            if (relation.frame === value.id || relation.parent === value.id || relation.child === value.id
+              || (relation.type === "staple" && stapleReferencesId(relation, value.id))) {
+              delete documentValue.relations[id];
+            }
           }
           for (const [id, pattern] of Object.entries(documentValue.patterns)) {
             if (pattern.frame === value.id || pattern.appliesTo?.includes(value.id)) delete documentValue.patterns[id];

@@ -113,8 +113,18 @@ the archive.
    must be addable/removable; Strategic must adapt (full months per
    line, weeks per line, custom month labels) and Wall the same; no
    artificial Now line on a calendar with no now-mapping; jump-to-date
-   must exist. Epochs/ages need handling — BCE/CE, or first/second/third
-   ages — as part of the same model. Observed-boundary cycles need a
+   must exist. **Epochs shipped as true eras** (ruling: "Hard No. Epochs,
+   true epochs no faking"): an era is a level of the coordinate, not a
+   label over a linearized year, per-era numbering direction is
+   first-class so BCE and Merethic both count down, one authored anchor
+   derives every era's range, and a table that contradicts itself is
+   refused before it is stored — see AGENTS.md, "Coordinate law". Era
+   tables are opt-in per declaration, so a document without one is
+   unchanged. The uniform positional family landed with them, so a wholly
+   invented calendar converts through the registry. What remains of the
+   era work: the Now-line guard is written but not yet applied at the
+   three `src/projections.js` sites, and the era-qualified year has not
+   reached the event editor's own fields. Observed-boundary cycles need a
    computed sibling: a cycle derived from formula or ephemeris — the moon
    by Newton, not by a list of observations — with observation as the
    override, not the definition.

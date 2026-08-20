@@ -119,8 +119,65 @@ function slimRetainedICSPayload(document, report) {
   return document;
 }
 
+// A staple is an edge with two ends (src/staples.js). The flat shape that
+// preceded it -- one target plus a bare `frame`/`coordinate`/`role` -- said the
+// same thing with the connection left implicit, so the conversion is a
+// RESTATEMENT and not a reinterpretation: the target becomes the end whose point
+// the `role` named, and the frame plus its coordinate become the end that
+// supplied the coordinate space. Every authored value survives at exactly the
+// instant it named, including a named point's offset, which moves onto the end
+// it describes because both ends of a connection can now be named points and
+// each needs its own.
+//
+// A record already carrying `ends` is left untouched, so compaction is
+// idempotent and a document saved by this build round-trips unchanged.
+function migrateStapleConnections(document, report = null) {
+  let converted = 0;
+  for (const relation of Object.values(document?.relations || {})) {
+    if (relation?.type !== "staple" || Array.isArray(relation.ends)) continue;
+    const target = relation.series
+      ? { series: relation.series }
+      : relation.object
+        ? {
+          object: relation.object,
+          point: String(relation.role || "").trim() || "start",
+          ...(relation.payload?.offset ? { offset: relation.payload.offset } : {})
+        }
+        : null;
+    if (!target) continue;
+    const far = {
+      frame: relation.frame,
+      coordinate: relation.coordinate,
+      ...(relation.parameters ? { parameters: relation.parameters } : {})
+    };
+    relation.ends = [target, far];
+    delete relation.series;
+    delete relation.object;
+    delete relation.role;
+    delete relation.frame;
+    delete relation.coordinate;
+    delete relation.parameters;
+    if (relation.payload) {
+      const payload = { ...relation.payload };
+      delete payload.offset;
+      if (Object.keys(payload).length) relation.payload = payload;
+      else delete relation.payload;
+    }
+    converted += 1;
+  }
+  if (converted) {
+    addRepair(report, {
+      kind: "staple-connections",
+      count: converted,
+      message: `Restated ${converted} staple${converted === 1 ? "" : "s"} as a connection between two things.`
+    });
+  }
+  return document;
+}
+
 export function compactDocument(document, report = null) {
   migrateDocument(document);
+  migrateStapleConnections(document, report);
   recoverLegacyRecurrenceConstraints(document);
   recoverDanglingOverrideReplacements(document);
   recoverOrphanedVirtualOverrides(document, report);

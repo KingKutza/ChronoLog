@@ -18,9 +18,18 @@ character when you touch adjacent code or docs.
   registry, the registered CLDR calendar families, and the `CoordinateLaw` that
   answers every unit question from a frame's own declaration. See the
   "Coordinate law" contract.
+- `eras.js` — the era table: ordered named eras with per-era numbering direction,
+  converting an era-qualified year to the proper year the year ladder counts in,
+  and refusing a table it cannot resolve. Pure and document-free.
 - `calendar-structure.js` — the authoring side of that declaration: the regular
-  fixed-hierarchy builder, the editable level/cycle rows, and the one parser and
-  one count check for every authored name list.
+  fixed-hierarchy builder, the editable level/cycle/era rows, and the one parser
+  and one count check for every authored name list.
+- `coordinate-entry.js` — the variable-precision coordinate field's substrate:
+  one text entry parsed and formatted at whatever depth the author typed, plus
+  the zoomable picker's rung ladder. Every level name, order, radix and value
+  name comes from the governing frame's law, so a custom calendar's field parses
+  in its own units. Entry depth is **precision, never uncertainty** — fuzziness
+  is authored separately, on the staple.
 - `app.js` — the bootstrap: constructs the document/session/store/history,
   wires every `src/ui/` module onto the shared `app` object, and kicks the
   first render.
@@ -84,11 +93,14 @@ character when you touch adjacent code or docs.
 - `recurrence-end.js` — how an RRULE stops: COUNT/UNTIL mode detection, their
   mutual exclusion, and the UNTIL values for "ends on this date" (inclusive of
   the whole day) and "stop repeating here" (inclusive of that occurrence).
-- `staples.js` — the staple substrate: the open `STAPLE_KINDS` registry and
-  every derivation over an object's staple collection (anchoring and derived
-  magnitudes, series rule segments, per-staple fuzziness, occurrence phase,
-  live exclusion references). DOM-free and pure over `{document, engine}`, so
-  the whole substrate is a testable contract. See "Staples" below.
+- `staples.js` — the staple substrate: a staple is a two-ended **connection**,
+  and this holds the open `STAPLE_KINDS` registry, the end accessors every other
+  module reads structure through, and every derivation over the connections a
+  thing participates in (anchoring and derived magnitudes, event-to-event chains,
+  frame-to-frame correspondence, series rule segments, per-staple fuzziness,
+  occurrence phase, live exclusion references). DOM-free and pure over
+  `{document, engine}`, so the whole substrate is a testable contract. Nothing
+  else may hand-read a staple's fields. See "Staples" below.
 - `weight-formula.js` — a frame's display-weight handling as a formula over the
   incoming weight `w`, plus the canonical order contributing frames apply in.
   See "Display weight" below.
@@ -268,21 +280,182 @@ coordinate: {
 }
 ```
 
+**Authored depth is data, and it survives.** A coordinate whose `levels` stop
+early is a partial coordinate — the author said `1973` and nothing finer.
+`toDays` supplies the missing levels from the family's defaults, and `fromDays`
+returns every level filled in, at which point the result is indistinguishable
+from an authored January 1st midnight: the depth was supplied by the law, not by
+the author. So depth is never inferred back out of a resolved instant. It is read
+from the **source** coordinate — `coordinateEntryDepth` — and travels on the fact
+as `precision`, so display can honour what was actually said. Precision is
+**never** fuzziness: entry depth says how finely the author spoke, a spread says
+how uncertain they were, and only the second is a claim about the world.
+
 A level declares **exactly one** of `radix` (a constant count of children) or
 `transition` (a named rule for a count that varies); the root declares neither,
 and a trailing level may declare neither, which makes it its parent subdivided
-continuously (`subsecond`). Exactly one level is the **base level** — the level
-whose unit is one day of the base measure, the unit every `days` number counts.
-It is the deepest level reached by a transition, or the finest level of a `fixed`
-block scaled by `smallestUnitDays`, or the root when there is neither.
-Everything above the base is measured by transitions; everything below divides
-down by radix. `names` on a level names its children one apiece.
+continuously (`subsecond`). `names` on a level names its children one apiece.
+
+**Units are defined by composition from below.** Owner ruling: *"that is wrong, I
+did not change the lenght of an hour I changed the length of a day. Day is
+defined as a number of hours, which are themselves a number of minutes, ect."*
+The finest declared unit is the **atom**, and every level's length is the product
+of the radices beneath it. A radix says how many children fill one parent, which
+makes it a statement about the **parent's** length: editing hour-within-day to 23
+makes the *day* twenty-three standard hours long and leaves the hour untouched.
+An edit is an edit to exactly the unit whose definition it touches. A level's own
+edge therefore says nothing about its own length — only its child's edge does,
+which is why `day` (carrying `gregorian.days`, "how many days in a month") is a
+unit of fixed length while `month` is not.
+
+The atom's own absolute length is the one thing composition cannot supply: it
+comes from the registered standard for a unit of that name (a `second` is 1/86400
+of a standard day wherever it appears) or is authored as `atomDays`. **The atom is
+the shared denominator for absolute comparison** — two laws relate absolutely
+exactly insofar as they share an atom, directly or through basis inheritance. Two
+frames with no shared atom have **no automatic absolute relation**; that is what
+connection staples are for, and inventing one would be the same fabrication as an
+invented origin.
+
+The **base level** is the level the family's whole-unit arithmetic counts in — the
+"day" of this ladder. It is *not* "one standard day": its length is whatever its
+own radices make it. It is the deepest level reached by a transition, or a `fixed`
+block's finest level, or an explicitly authored `baseLevel` (which a uniform
+ladder must state, having no transition to infer from), or the root.
+
+**Midnight drift is the ruling, not a defect.** Because the day is the unit that
+was shortened, successive day boundaries under a 23-hour law fall 23 standard
+hours apart and the frame's day sequence slides against the standard calendar.
+A civil coordinate under such a law names a position in **that frame's own day
+sequence**, not the standard date of the same spelling. Durations follow the same
+rule from the other side: "1 day" is the shortened thing, while "180 minutes" is
+180 standard minutes whatever the day radix says. The running clock is absolute,
+so Now lands where the atom arithmetic puts it and drifts across the frame's days.
+ICS instants are standard-Gregorian absolutes and convert through the atom.
 
 A **cycle** repeats over the base unit without nesting in anything. Weekdays are
 a cycle, not a level: seven days run straight through month and year boundaries,
 so a seven-name list belongs to a cycle whose `radix` is 7 and whose `offset` is
 which name lands on day zero. Modelling a weekday as a level is what made a
 seven-name weekday list get measured against the number of days in a month.
+
+**Eras are true eras.** Owner ruling: *"Hard No. Epochs, true epochs no faking"* —
+rejecting any linearization of eras onto a continuous year axis. An era is a
+LEVEL OF THE COORDINATE, never a display label over a proleptic year. An
+era-qualified coordinate stores the era and the year **within** that era (`"3E"`,
+`433`) and never the linearized year (`4249`).
+
+Two things make that load-bearing rather than pedantic. **Storage:** a record
+holding `4249` plus a label would silently re-anchor every date the moment an
+era's span were corrected, because the label is derived and the number is not.
+**Direction:** an era may number its years DESCENDING — higher number is older —
+and no single continuous axis can hold both conventions at once, since 2500 BCE
+is older than 44 BCE while 44 CE is newer than 1 CE. Descending numbering is
+first-class in `src/eras.js`, not a rendering trick over negative numbers.
+
+An era table is **opt-in per frame declaration**. A declaration without `eras`
+behaves exactly as before — the plain proleptic year axis remains the default.
+
+```
+coordinate: {
+  levels: [ { name: "era" }, { name: "year", within: "era" }, … ],
+  eras: {
+    anchor:  { era: "First Era", year: "1", properYear: "1" },
+    entries: [
+      { name: "Merethic Era", abbrev: "ME", direction: "descending" },
+      { name: "First Era",    abbrev: "1E", direction: "ascending", years: "2920" },
+      { name: "Fourth Era",   abbrev: "4E", direction: "ascending" }
+    ]
+  },
+  baseLevel: "day",          // which level is one day — required on a uniform ladder
+  origin:    { days: "0" }   // which day the ladder's first unit begins on
+}
+```
+
+The era level is the declaration's root and the level beneath it is the one whose
+numbering restarts per era. The era level takes no `radix` and no `transition`:
+the table governs it. The table is deliberately **not** part of the family's
+ladder — it converts `(era, yearInEra)` to the PROPER YEAR the ladder already
+counts in, and the family takes it from there. That composition is what keeps
+eras first-class instead of cosmetic.
+
+**One anchor, everything else derived.** The author states one alignment they
+actually know — "this era's year N is proper year P" — and every era's range
+falls out of it plus the bounded spans, propagated forward and backward. A
+per-era offset table would be unverifiable by hand; this is not.
+
+An era with no `years` is OPEN, and only one end of the table may be open in each
+direction: a **descending** open era must be listed FIRST (its newest year abuts
+the era after it; its oldest is unbounded) and an **ascending** open era LAST. An
+ascending era open at the bottom would start at negative infinity and a
+descending era open at the top would count down from infinity; both are refused
+rather than clamped to something invented. Eras must meet exactly — no gap, no
+overlap — and a table that contradicts itself is refused before it is stored.
+
+A year outside every declared era has **no name**, and `fromProperYear` refuses
+rather than inventing one: a calendar closed at both ends genuinely has no year
+there. A coordinate on an era calendar must name its era; a bare year is
+ambiguous, and defaulting it to whichever era the anchor sits in would be exactly
+the invented meaning this model refuses.
+
+Era names and abbreviations are authored, and each era authors its own affix —
+`"3E 433"` versus `"44 BCE"`. Parsing accepts either on either side of the number
+and resolves by the authored names, not by shape: an abbreviation may itself
+contain digits, so `"3E433"` is only readable because `3E` is an era and `3E4` is
+not. A purely numeric name is refused — a number alone cannot be told apart from
+a year. Two eras matching the same text is refused, never resolved by precedence.
+
+`law.hasEras()`, `law.eras()`, `law.formatYear(value)`,
+`law.formatYearAtDays(days)` and `law.parseYear(text)` are how a surface asks.
+Wherever a year renders under a law with an era table, it renders era-qualified.
+
+**The uniform positional family.** A ladder whose levels above the base all count
+a CONSTANT number of children is executed by the registered `uniform` family — a
+wholly invented calendar converts through the same seam Gregorian does. It has no
+transition to infer a day from, so such a declaration states `baseLevel`
+outright, and it becomes positional only once `origin.days` says which day its
+first unit begins on. Without an origin nothing states where the calendar starts,
+and anchoring at day zero by default would place every date by an invented
+convention. `uniform` names no CLDR calendar scale, so `calendarScale()` reports
+null and a series counting in it is not ICS-expressible as a rule.
+
+**Positionality is a property of the ladder and the registry, never of a kind
+string or a trait.** A declaration is positional when a registered family can
+actually execute its ladder. `kind: "gregorian"` survives only as shorthand for
+"use the registered ladder when none is authored"; it is never the answer to
+whether coordinates are positions. Deciding by label placed 2026-08-20 at day
+ordinal 20 — off by fifty-six years, silently — for any declaration that spelled
+its kind differently. The one semantic marker that remains is `measure` (or
+`duration`), and it is not a label for arithmetic: it says what the frame IS. A
+measure frame's coordinate is a magnitude, so its levels are counts and no family
+may reinterpret them as a date.
+
+**A value naming levels a law does not declare is not a value in that law.** A
+`{year, month, day}` coordinate handed to a family-less law whose base level
+happened to be `day` placed 1973-03-15 at day 15. A magnitude of "15 days" and
+the fifteenth of March are not the same number, so the law refuses rather than
+reads. A law declaring no levels at all is a bare day axis and keeps the
+permissive read — there is nothing there to contradict.
+
+**Inheriting the standard is not the same as declaring none.** `monthNames()` and
+`weekdayNames()` return the registered names for a law that COUNTS in the
+registered calendar and merely left a level unnamed, and **null** for a law that
+has no such concept — a world with no week has no weekday names, and handing it
+seven Gregorian ones invents a fact. `hasMonths()` / `hasWeekdays()` ask
+directly; a surface that draws a month grid must handle null by not drawing one.
+
+**A broken frame must not blank the stage, and must not take down a query
+either.** `displayLaw` already catches for that reason; `coordinateDaysOrNull` is
+the query path's counterpart, returning null so a caller skips the record and
+collects the reason instead of aborting. `coordinateLawError` (per frame) and
+`coordinateValueError` (per coordinate) are how validation asks — the
+refuse-before-store discipline extends to `validateDocument`, because a document
+whose coordinates only fail at query time is not a valid document.
+
+**No artificial Now.** `law.mapsToClock()` is false for a law that places nothing
+on the running clock — a non-positional law, or one whose declaration says
+`clock: false`. A lens must not draw a Now line on a calendar with no
+now-mapping.
 
 **The transition registry.** A `transition` string resolves through
 `registerTransition`; a transition belongs to a **calendar family**, which is
@@ -387,28 +560,127 @@ level's value as a count of days, which is what a measure frame means.
 
 ### Staples
 
-A staple is a `relation` — `{type: "staple", series|object, kind, role?, frame,
-coordinate, spread?, payload?, parameters?}` — and staples are an **open
-collection** on any object: a series, an event, a todo, a note, or any future
-object carries arbitrarily many staples of arbitrary kind, arbitrarily placed.
-Nothing about ending a series is structural; `kind: "end"` is one registry
-entry whose interpretation happens to be "terminate, with no rule following".
+**A staple is an edge, not an attribute.** It connects exactly two things at one
+point: `{type: "staple", kind, ends: [endA, endB], spread?, payload?}`. An end
+names one thing plus where on that thing the touch point is, and is exactly one
+of:
 
-`series` names a pattern and `object` names an event; exactly one is present,
-and they never interchange — the same discipline that keeps a `termination`
-relation's `line` (a frame) distinct from a staple's `series`.
+- `{frame, <position>, parameters?}` — a **position in a coordinate space**. The
+  frame's own declared law is what makes the position mean anything, so the frame
+  travels with it rather than being looked up.
+- `{object, point, offset?}` — a named point of an object's extent: `start`,
+  `end`, `midpoint`, or a point the user named, which carries its own `offset`
+  magnitude from that object's start.
+- `{series}` — a whole pattern, positioned by the other end.
+
+A frame end declares **exactly one** of four position forms — more than one is
+two claims wearing one record, none is a frame named without saying where on it:
+
+| form | shape | means |
+| --- | --- | --- |
+| `coordinate` | a nested coordinate | one point |
+| `selector` | `{cycle, value}` or `{level, value}` | every instant satisfying it |
+| `span` | `{from, to}` coordinates | a region |
+| `void` | `void: true` | explicitly nothing |
+
+A **selector** reads the frame's *own* declared cycles and levels, so
+`{cycle: "weekday", value: "Tuesday"}` means whatever that frame's declaration
+says a weekday is — a frame that renamed its seven-name cycle matches its own
+names and not the registered ones, and a selector naming a cycle or level the
+frame never declared is refused rather than silently matching nothing forever.
+"Tuesdays" is not one coordinate, and writing it as one would pick an arbitrary
+Tuesday and call it the answer. Only a `coordinate` position is one instant:
+`frameEndDays` returns `null` for the other three, and `frameEndMatches` is the
+membership question they answer instead. A partial coordinate and a selector are
+different claims — a partial coordinate is one instant at coarse precision, a
+selector is every instant that satisfies it.
+
+An authored **void** is a positive claim and a different claim from an absent
+staple: it says the author looked and there is no correspondence here, while
+absence says only that nobody has said yet. Reading them as the same thing is how
+a gap becomes an invitation to interpolate. A void keeps the two-end shape — both
+things are still named — so it enumerates as a statement in the correspondence
+rather than a hole in it.
+
+**Set-level claims are derived, never stored.** Cardinality, monotonicity and
+coverage are properties of the correspondence between two frames, not of any one
+staple, so `describeCorrespondence` computes them from the enumerated staples.
+Storing them would put one claim in two places — an authored `monotonic: false`
+beside a provably monotone set is an editor accepting an edit and ignoring it,
+and denormalizing onto every staple means N copies that drift the moment one is
+added. `monotonic` is `null`, not `true`, when it cannot be decided: a set
+carrying any many-valued or void position has no single ordering to be monotone
+against, and a confident answer there is one the data does not support.
+
+The substrate does not care what the two things are, only that each end can
+answer "where is your touch point". That is what lets event ↔ event run on the
+same machinery as event ↔ frame, and what leaves todos and notes needing no new
+mechanism. Ends are in authored order and **no derivation treats index 0 as the
+source**: direction is not stored, because it is not authored — an instant known
+at one end propagates to the other, and which end is known is a fact about the
+document rather than about the staple. `A.end ↔ B.start` and `B.start ↔ A.end`
+are therefore the same connection.
+
+Staples remain an **open collection**: a series, an event, a todo, a note, or any
+future object participates in arbitrarily many connections of arbitrary kind,
+arbitrarily placed. Nothing about ending a series is structural; `kind: "end"` is
+one registry entry whose interpretation happens to be "terminate, with no rule
+following".
+
+A frame and a series never interchange — the same discipline that keeps a
+`termination` relation's `line` (a frame) distinct from a staple's series end. A
+staple reaches at most one series, because a series' rules are cut by instants
+rather than by another object's extent.
 
 `kind` is validated against `STAPLE_KINDS` in `src/staples.js`, not hardcoded.
 Adding a kind is one registry entry plus its interpretation. This is
 deliberately stricter than frame traits, which stay valid data when
 unfamiliar: a trait is a capability claim a renderer may ignore harmlessly,
 while a kind *selects a derivation*, and a kind nothing honours would silently
-move things on screen — or silently fail to. Registered kinds are `end` and
-`inflection` (both partition a series' rules; only `inflection` may carry a
-following rule), `phase`, and `anchor`. Constraint bounds ("can't go later
-than 7:30") are deliberately **not** registered — LEXICON.md marks them
-unruled, and registering a kind whose semantics nobody has decided would be
-inventing meaning.
+move things on screen — or silently fail to. A kind declares `connects`: the
+canonical sorted end-scope pairs it may join, which is the whole of what it is
+allowed to connect. Registered kinds are `end` and `inflection`
+(`frame+series`, both partition a series' rules; only `inflection` may carry a
+following rule), `phase` (`frame+series`), `anchor` (`frame+object`,
+`object+object`, `frame+series`), and `correspondence` (`frame+frame`).
+Constraint bounds ("can't go later than 7:30") are deliberately **not**
+registered — LEXICON.md marks them unruled, and registering a kind whose
+semantics nobody has decided would be inventing meaning.
+
+**Placement is not a property an object has.** It is derived from the
+connections the object participates in, and the start-time-plus-duration shape
+is that derivation's zero-connection degenerate case. An object's plain
+attachment relation IS an implicit start connection to the frame it is attached
+to, so a document authored before connections existed is governed by them with
+no record moving — `effectiveObjectStaples` exposes that same reading to an
+authoring surface, which is why "Start time" is one row in the staple list and
+not a control of its own. `src/store.js`'s `compactDocument` restates a legacy
+flat staple as a connection on load; the conversion preserves the instant, the
+point name, and a named point's offset exactly, and is idempotent.
+
+A coordinate-less attachment relation is bare **membership** — "this object
+belongs to this frame" — and membership alone has never placed anything. The
+engine places such a relation only when the object's own connections resolve an
+extent *in that same frame's coordinate space*; the frame identity check is
+load-bearing, not defensive, because group attachments are coordinate-less too
+and without it every anchored event would also draw itself on each of its groups.
+
+**Correspondence between two frames is many-valued, partial, and non-monotonic.**
+A `correspondence` staple joins two frame ends, each coordinate under its own
+frame's law, and a set of them is a correspondence between those frames. The
+substrate must not assume it is monotonic, total, or one-to-one: one point on
+frame A may correspond to many disjoint points on frame B, and a stretch of A may
+correspond to nothing at all. `frameCorrespondences` therefore **enumerates and
+resolves nothing else** — it does not sort by position, collapse duplicates, pick
+a nearest match, or report a range. Multiple correspondences project as multiple;
+an empty result is a fact about the correspondence, never licence to interpolate
+one from the neighbours. A frame may correspond to *itself* at two different
+coordinates, which is a nonlinear line crossing its own path. This is distinct
+from a `coordinate-mapping` relation and never a replacement for it: a mapping
+declares a relationship between positions or intervals with explicit continuity
+and direction, and may be read across its own span, while a correspondence staple
+declares one bare touch point and claims nothing about the space beside it. The
+four frame concepts must not collapse into each other, and this is the seam.
 
 `src/staples.js` holds every derivation, DOM-free and pure over
 `{document, engine}`:
@@ -418,7 +690,14 @@ inventing meaning.
    named. Zero anchors means the placement relation plus the object's own
    duration, bit-identical to a document authored before staples existed. One
    anchor plus a magnitude places the object, so an event can be *defined by
-   where it stops*. Two anchors fully determine the extent and the magnitude is
+   where it stops* — and that same case is the seamless pair, where the
+   downstream event's start IS the upstream event's end, so moving the upstream
+   event moves this one through the connection. Chains compose, and the
+   coordinate space propagates along them. A connection whose other end resolves
+   back through the object it places is **reported, never iterated to a fixed
+   point** (`cyclic`, plus the connection in `unresolved`): there is no instant to
+   report and guessing one would place an object nobody positioned. Two anchors
+   fully determine the extent and the magnitude is
    **derived**, with the object's own duration ignored rather than fought with;
    the extent is placed from the highest-precedence anchor, which is not always
    the earlier one (an `end`+`midpoint` pair starts at `2·mid − end`, earlier
@@ -431,7 +710,20 @@ inventing meaning.
    partitioned by staples (`seriesSegments`). A partitioning staple **closes
    its segment inclusively and opens the next exclusively** — inclusive close
    is the shipped end-staple's behavior, and given that, exclusive open is the
-   only choice that does not project the staple instant twice. A staple
+   only choice that does not project the staple instant twice. The close is
+   **precision-aware**: a partitioning staple closes at the end of the unit the
+   author *named*, so a bare date closes at that day's last instant, a bare month
+   at that month's, and a coordinate carrying clock levels closes exactly where it
+   says. This is the same ruling `recurrence-end.js` states for "ends on a date"
+   ("the last second of the date, not its midnight… the kind of off-by-one a user
+   reads as a bug"), applied one layer up, and it is generic rather than
+   kind-special: the line falls where `recurrenceUntilForCoordinate` already puts
+   it — at or above the base unit names a **period**, below it names an
+   **instant**. The end-of-unit boundary is computed by incrementing the authored
+   level and carrying through each level's own declared child count, so the day
+   after the 31st is the 1st and no calendar is hardcoded. The inclusive close and
+   the following segment's exclusive open are the **same** instant, or the
+   boundary day would project in both. A staple
    carrying `payload.rule` (a rule head: `{rrule, coordinate?, frame?,
    magnitude?, exdates?, exclude?}`) opens a following segment with its own
    base coordinate; a partitioning staple with no following rule terminates the
@@ -462,14 +754,24 @@ restore the full projection for free. Every comparison is exact `Rational`
 days through `coordinateDays` — never string equality, because ICS writes
 month `"01"` where the generator writes `"1"`.
 
-Staples cascade like overrides: `removeStaplesForPatterns` and
-`removeStaplesForObjects` run inside the same undoable transaction as the
-record they belong to, so undo restores a deleted event or pattern together
-with its staples and the journal carries every removal. Every bundle helper in
-`src/ui/transactions.js` that can delete an event or a pattern sweeps staples,
-and so do `calendar-sync.js`'s `removeDanglingEventReferences` and
-`removeSourceOwnedRecords` — the reconciler can delete records too, so it needs
-the same sweep rather than a loader-side repair.
+Staples cascade like overrides, and **both ends count**: `stapleTouchesAny` is
+the one predicate every sweep asks, because a connection between two events is as
+much the downstream event's record as the upstream one's, and a connection into a
+frame must not outlive that frame. `removeStaplesForPatterns` and
+`removeStaplesForObjects` (both `removeStaplesReferencing`) run inside the same
+undoable transaction as the record they belong to, so undo restores a deleted
+event, pattern or frame together with its staples and the journal carries every
+removal. Every bundle helper in `src/ui/transactions.js` that can delete an event,
+a pattern or a frame sweeps staples, and so do `calendar-sync.js`'s
+`removeDanglingEventReferences` and `removeSourceOwnedRecords` — the reconciler
+can delete records too, so it needs the same sweep rather than a loader-side
+repair.
+
+Overscale doctrine: `resolveObjectExtent` runs once per event during fact
+indexing and follows connection chains, so the engine builds
+`staplesByObject`/`staplesBySeries`/`staplesByFrame` in its own reindex — where
+every other index lives — and `src/staples.js` reads them when handed the engine,
+falling back to a document scan only for a law-free or direct-test caller.
 
 Staples cross the ICS boundary like this:
 

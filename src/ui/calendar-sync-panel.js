@@ -1,4 +1,4 @@
-import { daysToCivilCoordinate } from "../coordinate-law.js";
+import { coordinateLaw } from "../coordinate-law.js";
 import { applyICSSnapshot, calendarSyncConnections } from "../calendar-sync.js";
 import { exportICS, importICS } from "../ics.js";
 import { clone, stapleEvents } from "../model.js";
@@ -370,10 +370,16 @@ export function createCalendarSyncPanel(app) {
     const { chronolog, session, engine } = app;
     try {
       const window = session.window();
+      // The export window bounds are a document-side query over `frame`'s own
+      // relations (src/ics.js's `exportICS` resolves them via
+      // `coordinateLaw(document, frame).toDays`), not wire data -- ICS's wire
+      // format stays civil, but these bounds must be built under the SAME law
+      // `exportICS` will read them back through.
+      const frameLaw = coordinateLaw(chronolog, session.activeFrame);
       const text = exportICS(chronolog, {
         frame: session.activeFrame,
-        start: daysToCivilCoordinate(window.start),
-        end: daysToCivilCoordinate(window.end),
+        start: frameLaw.fromDays(window.start),
+        end: frameLaw.fromDays(window.end),
         engine
       });
       const title = chronolog.frames[session.activeFrame]?.title || "calendar";

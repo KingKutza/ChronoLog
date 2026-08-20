@@ -1,5 +1,5 @@
 import { Rational, formatCivil } from "../exact.js";
-import { daysToCivilCoordinate } from "../coordinate-law.js";
+import { coordinateLaw } from "../coordinate-law.js";
 import {
   INTIMATE_COLUMN_PIXELS_FALLBACK,
   intimatePanStep,
@@ -278,7 +278,10 @@ export function createDragController(app, dom) {
       if (dragPreview.parentElement !== document.body) document.body.append(dragPreview);
       dragPreview.classList.remove("cell-preview");
     }
-    dragPreview.textContent = `${title}\nâ†’ ${formatCivil(daysToCivilCoordinate(destination), true)}`;
+    // `destination` is a universal day ordinal; the preview reads it through
+    // the same display law (`session.law`) the geometry above was laid out
+    // under, not the standard boundary.
+    dragPreview.textContent = `${title}\nâ†’ ${formatCivil(app.session.law.fromDays(destination), true)}`;
     dragPreview.dataset.valid = "true";
   }
 
@@ -421,7 +424,6 @@ export function createDragController(app, dom) {
     event.preventDefault();
     if (!cell) return;
     const destination = destinationForDrop(cell, event.clientX, event.clientY, drag.sourceDay);
-    const nextCoordinate = daysToCivilCoordinate(destination);
     const timedDrop = cell.classList.contains("intimate-day-column");
     if (drag.virtualId) {
       const fact = app.findVisibleFact(drag.virtualId, drag.sourceDay);
@@ -429,6 +431,11 @@ export function createDragController(app, dom) {
         app.toast("That recurring occurrence could not be resolved for moving.", true);
         return;
       }
+      // The materialized relation inherits `fact.relation.frame` unchanged
+      // (`prepareMaterialization` clones it), so the new coordinate is built
+      // under THAT frame's own law, not the standard boundary -- a companion
+      // frame's coordinate is never reinterpreted under a different law.
+      const nextCoordinate = coordinateLaw(chronolog, fact.relation.frame).fromDays(destination);
       const prepared = app.prepareMaterialization(fact, nextCoordinate);
       if (timedDrop) {
         prepared.relation.parameters ||= {};
@@ -462,6 +469,10 @@ export function createDragController(app, dom) {
         return;
       }
     }
+    // The moved relation keeps its own frame -- a companion frame's coordinate
+    // is never reinterpreted under the primary's law (AGENTS.md's frame model)
+    // -- so the new coordinate is built under THAT frame's own law.
+    const nextCoordinate = coordinateLaw(chronolog, chronolog.relations[drag.relationId].frame).fromDays(destination);
     const previousCoordinate = clone(chronolog.relations[drag.relationId].coordinate);
     const previousParameters = clone(chronolog.relations[drag.relationId].parameters);
     const previousRelation = clone(chronolog.relations[drag.relationId]);
@@ -594,7 +605,7 @@ export function createDragController(app, dom) {
       const day = BigInt(rangeCell.dataset.createDay);
       rangeCell.classList.toggle("create-range", day >= firstDay && day <= lastDay);
     }
-    createPreview.textContent = `New event\n${formatCivil(daysToCivilCoordinate(createDrag.start), true)} · ${duration < 1 ? `${Math.round(duration * 60)} min` : `${duration.toFixed(1)} hr`}`;
+    createPreview.textContent = `New event\n${formatCivil(app.session.law.fromDays(createDrag.start), true)} · ${duration < 1 ? `${Math.round(duration * 60)} min` : `${duration.toFixed(1)} hr`}`;
   });
 
   projection.addEventListener("pointerup", (event) => {

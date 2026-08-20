@@ -58,12 +58,12 @@ export function validateNameList(names, required, subject, unit = subject) {
       + ` ${names.length} ${names.length === 1 ? "was" : "were"} given.`
     );
   }
-  const seen = new Set();
-  for (const name of names) {
-    const key = name.toLowerCase();
-    if (seen.has(key)) throw new TypeError(`${subject} repeats the name "${name}"; each must be distinct.`);
-    seen.add(key);
-  }
+  // A name is not required to be distinct: the letters of a word repeat, and a
+  // fictional calendar may legitimately give two months the same name. What
+  // distinctness actually protected was lookup-by-name ("March" resolving to
+  // month 3 and nothing else); this module has no such lookup path, so an
+  // ambiguous name is a question for whatever DOES look names up to refuse, not
+  // a reason to forbid authoring the name at all.
   return names;
 }
 
@@ -164,7 +164,15 @@ export function editableFixedCalendarStructure(frame = {}) {
 
 export const COUNT_VARIES = "varies";
 
-/** The rows a form should show for a law, whether authored here or inherited. */
+/**
+ * The rows a form should show for a law, whether authored here or inherited.
+ *
+ * There is deliberately no `eras` field here: an era is not a table on this
+ * declaration (that model was rejected -- "Hard No. Epochs, true epochs no
+ * faking" turned out to mean an era is its OWN FRAME, chained to its
+ * neighbours by a succession staple, not a level this law's declaration
+ * carries). Authoring that chain is a staple/frame concern for another wave.
+ */
 export function editableCoordinateStructure(law) {
   if (!(law instanceof CoordinateLaw)) return null;
   return {
@@ -181,7 +189,15 @@ export function editableCoordinateStructure(law) {
       length: cycle.radix.toJSON(),
       phase: String(cycle.offset),
       names: (cycle.names || []).join(", ")
-    }))
+    })),
+    // Only ever the AUTHORED value, never the law's inferred default: a plain
+    // Gregorian ladder infers its base level and origin from its transitions,
+    // and echoing that inference back as though it were authored would
+    // attach an origin to a declaration that never asked for one.
+    baseLevel: law.declaration?.baseLevel ? String(law.declaration.baseLevel) : "",
+    origin: law.declaration?.origin?.days !== undefined && law.declaration?.origin?.days !== null
+      ? String(law.declaration.origin.days)
+      : ""
   };
 }
 
@@ -218,7 +234,9 @@ function requiredNameCount(row) {
  * summary of a structure that no longer exists, and keeping it would make the
  * label projection disagree with the law.
  */
-export function buildCoordinateStructure({ levels = [], cycles = [], kind = "nested", previous = null } = {}) {
+export function buildCoordinateStructure({
+  levels = [], cycles = [], baseLevel = "", origin = "", kind = "nested", previous = null
+} = {}) {
   const rows = levels
     .map((row) => ({
       name: String(row?.name || "").trim(),
@@ -289,6 +307,17 @@ export function buildCoordinateStructure({ levels = [], cycles = [], kind = "nes
   const fixed = previous?.fixed;
   if (fixed && matchesFixedBlock(fixed, built)) declaration.fixed = fixed;
   else delete declaration.fixed;
+  // `baseLevel`/`origin` are what a wholly invented, uniform ladder (no
+  // registered transition anywhere in it) needs to become positional at all:
+  // baseLevel says which level is one day, origin says the exact day ordinal
+  // its first unit begins on. Omitted rather than stored blank, so a document
+  // that never authored either stays byte-identical to one that still doesn't.
+  const baseLevelValue = String(baseLevel || "").trim();
+  if (baseLevelValue) declaration.baseLevel = baseLevelValue;
+  else delete declaration.baseLevel;
+  const originValue = String(origin || "").trim();
+  if (originValue) declaration.origin = { days: originValue };
+  else delete declaration.origin;
   // The law is the arbiter: if it cannot be constructed, the declaration is not
   // authorable, and the author gets the law's own message rather than a render
   // that silently means something else.

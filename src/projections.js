@@ -6,7 +6,7 @@ import {
   formatCivil,
   nowDays
 } from "./exact.js";
-import { GREGORIAN_LAW, daysToCivilCoordinate, displayLaw } from "./coordinate-law.js";
+import { coordinateLaw, GREGORIAN_LAW, daysToCivilCoordinate, displayLaw } from "./coordinate-law.js";
 import { arcPath, polar, radialCycleWindow, radialGuideSettings, radialRenderState, spiralRibbonPath } from "./radial.js";
 import { objectKindForEvent } from "./object-kinds.js";
 import { factMatchesSelection } from "./session.js";
@@ -186,17 +186,26 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
     }
   }
   const perFrameLimit = Math.max(80, Math.ceil(limit / Math.max(1, sources.size)) + 24);
-  const results = [...sources.values()].map((source) => ({
-    frame: source.frame,
-    filterGroups: source.filterGroups,
-    result: engine.queryFacts({
-      frame: source.frame.id,
-      start: daysToCivilCoordinate(startDays),
-      end: daysToCivilCoordinate(endDays),
-      limit: perFrameLimit,
-      includeOverlaps: true
-    })
-  }));
+  // `startDays`/`endDays` are universal day ordinals, and `sources` can hold
+  // several calendar frames at once (the base frame plus every included
+  // companion) whose laws need not agree -- companion coordinates are never
+  // reinterpreted under another frame's law (AGENTS.md's frame model), so each
+  // source resolves the window under its OWN law rather than one shared
+  // standard-civil coordinate applied to every frame alike.
+  const results = [...sources.values()].map((source) => {
+    const sourceLaw = coordinateLaw(context.document, source.frame.id);
+    return {
+      frame: source.frame,
+      filterGroups: source.filterGroups,
+      result: engine.queryFacts({
+        frame: source.frame.id,
+        start: sourceLaw.fromDays(startDays),
+        end: sourceLaw.fromDays(endDays),
+        limit: perFrameLimit,
+        includeOverlaps: true
+      })
+    };
+  });
   const groupModes = context.document.frames[frame]?.display?.groupModes || {};
   const merged = results.flatMap(({ frame: frameValue, filterGroups, result }) => result.facts
     .filter((fact) => !filterGroups || filterGroups.has(factGroupFrame(context, fact)))
@@ -216,8 +225,8 @@ function queryFacts(context, frame, startDays, endDays, limit = 800) {
   }).slice(0, limit);
   return {
     frame,
-    start: daysToCivilCoordinate(startDays),
-    end: daysToCivilCoordinate(endDays),
+    start: coordinateLaw(context.document, frame).fromDays(startDays),
+    end: coordinateLaw(context.document, frame).fromDays(endDays),
     facts,
     errors: results.flatMap(({ result }) => result.errors || []),
     truncated: facts.length >= limit || results.some(({ result }) => result.truncated)
@@ -928,10 +937,14 @@ function renderSimpleLines(target, context) {
   }
   const prime = plan.leading;
   const secondaryFrames = plan.companions;
+  // `frame` varies per call (the prime frame, then each secondary), and a
+  // secondary's coordinates are never reinterpreted under another frame's law
+  // (AGENTS.md's frame model) -- so the window is resolved under THAT frame's
+  // own law, not one shared standard-civil coordinate.
   const directQuery = (frame, limit) => context.engine.queryFacts({
     frame: frame.id,
-    start: daysToCivilCoordinate(window.start),
-    end: daysToCivilCoordinate(window.end),
+    start: coordinateLaw(context.document, frame.id).fromDays(window.start),
+    end: coordinateLaw(context.document, frame.id).fromDays(window.end),
     includeOverlaps: true,
     limit
   });
@@ -1208,7 +1221,7 @@ function renderRadial(target, context) {
   const centerLabel = svgElement("text", {
     x: cx, y: cy + 4, "text-anchor": "middle", class: "radial-center"
   });
-  centerLabel.textContent = formatCivil(daysToCivilCoordinate(session.currentFocus()));
+  centerLabel.textContent = formatCivil(session.focusCoordinate());
   svg.append(centerLabel);
   if (unsupported) {
     const status = svgElement("text", {
