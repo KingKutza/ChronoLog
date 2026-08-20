@@ -1,0 +1,508 @@
+{
+  "schema": "chronolog-dataset/0",
+  "dataset": "back-to-the-future",
+  "title": "Back to the Future",
+  "notes": [
+    "Three character frames carry the events that character experiences, so one clock-tower night is stapled onto all three at the same coordinate. That collision is the point of the dataset.",
+    "Alternate 1985 occupies the same Gregorian coordinates as the 1985 it replaces. It is separated by a group frame, not by a second connectivity mechanism: fixtures/time-travel-taxonomy.chronolog.json owns the fork/terminator claim and this dataset does not restate it.",
+    "Events the films date only by year carry a year-only coordinate. The model records no precision, so those read as January 1 midnight; the missing level is the whole claim.",
+    "Times are given where the films state them and omitted otherwise. A day-precision coordinate is midnight, not an assertion about the hour.",
+    "Every frame here declares basis frame:wall-time, group frames included. A frame with attachments and no basis resolves to no calendar family, and its attachments' `day` level is then read as a raw count of days from the epoch rather than as a date."
+  ],
+  "requires": ["frame:wall-time"],
+  "frames": [
+    {
+      "id": "frame:bttf",
+      "title": "Back to the Future",
+      "traits": ["set", "group"],
+      "basis": "frame:wall-time",
+      "color": "#c8552b"
+    },
+    {
+      "id": "frame:bttf-marty",
+      "title": "Marty McFly",
+      "traits": ["set", "calendar", "group"],
+      "basis": "frame:wall-time",
+      "color": "#d94f2b"
+    },
+    {
+      "id": "frame:bttf-biff",
+      "title": "Biff Tannen",
+      "traits": ["set", "calendar", "group"],
+      "basis": "frame:wall-time",
+      "color": "#7a5c2e"
+    },
+    {
+      "id": "frame:bttf-doc",
+      "title": "Emmett Brown",
+      "traits": ["set", "calendar", "group"],
+      "basis": "frame:wall-time",
+      "color": "#2b6fa8"
+    },
+    {
+      "id": "frame:bttf-1985a",
+      "title": "1985A, Biffhorrific",
+      "traits": ["set", "group"],
+      "basis": "frame:wall-time",
+      "color": "#6b2b6b"
+    }
+  ],
+  "relations": [
+    { "id": "membership:bttf-marty@bttf", "type": "membership", "group": "frame:bttf", "member": "frame:bttf-marty" },
+    { "id": "membership:bttf-biff@bttf", "type": "membership", "group": "frame:bttf", "member": "frame:bttf-biff" },
+    { "id": "membership:bttf-doc@bttf", "type": "membership", "group": "frame:bttf", "member": "frame:bttf-doc" },
+    { "id": "membership:bttf-1985a@bttf", "type": "membership", "group": "frame:bttf", "member": "frame:bttf-1985a" }
+  ],
+  "events": [
+    {
+      "id": "event:bttf-pinheads-audition",
+      "title": "The Pinheads audition for the dance committee",
+      "body": "Rejected: too darn loud.",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "15" },
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "25" } }]
+    },
+    {
+      "id": "event:bttf-biff-wrecks-the-bmw",
+      "title": "Biff wrecks George's BMW and blames George",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-biff", "at": { "year": "1985", "month": "10", "day": "25" } }]
+    },
+    {
+      "id": "event:bttf-save-the-clock-tower",
+      "title": "Save the Clock Tower",
+      "body": "The flyer, and Jennifer's number on the back of it.",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "10" },
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "25" } }]
+    },
+    {
+      "id": "event:bttf-twin-pines-demonstration",
+      "title": "Doc unveils the DeLorean at Twin Pines Mall",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "5" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "15" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "15" } }
+      ]
+    },
+    {
+      "id": "event:bttf-einstein-first-jump",
+      "title": "Einstein becomes the world's first time traveller",
+      "body": "One minute forward, into 1:21 a.m.",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "1" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "20" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "20" } }
+      ]
+    },
+    {
+      "id": "event:bttf-libyans-shoot-doc",
+      "title": "The Libyans shoot Doc in the mall parking lot",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "4" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "31" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "31" } }
+      ]
+    },
+    {
+      "id": "event:bttf-marty-departs-for-1955",
+      "title": "Eighty-eight miles an hour",
+      "traits": ["event", "bttf", "departure"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "35" } }]
+    },
+    {
+      "id": "event:bttf-arrival-1955",
+      "title": "Marty arrives in 1955 and flattens the Peabody pines",
+      "traits": ["event", "bttf", "arrival"],
+      "duration": { "minute": "30" },
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "5", "hour": "6", "minute": "0" } }]
+    },
+    {
+      "id": "event:bttf-lous-cafe",
+      "title": "Lou's Cafe: Biff and his gang on George McFly",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "20" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "5" } },
+        { "frame": "frame:bttf-biff", "at": { "year": "1955", "month": "11", "day": "5" } }
+      ]
+    },
+    {
+      "id": "event:bttf-marty-hit-by-sam-baines",
+      "title": "Marty pushes George clear and is hit instead",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "5" } }]
+    },
+    {
+      "id": "event:bttf-flux-capacitor",
+      "title": "Doc slips hanging a clock and conceives the flux capacitor",
+      "body": "The one that makes time travel possible.",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-doc", "at": { "year": "1955", "month": "11", "day": "5" } }]
+    },
+    {
+      "id": "event:bttf-doc-meets-marty-1955",
+      "title": "Marty convinces the 1955 Doc that he is from the future",
+      "traits": ["event", "bttf"],
+      "duration": { "hour": "1" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "5" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1955", "month": "11", "day": "5" } }
+      ]
+    },
+    {
+      "id": "event:bttf-lightning-found",
+      "title": "Doc finds the lightning: 10:04 p.m., Saturday November 12",
+      "traits": ["event", "bttf"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "5" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1955", "month": "11", "day": "5" } }
+      ]
+    },
+    {
+      "id": "event:bttf-lorraine-asks-marty",
+      "title": "Lorraine asks Marty to the Enchantment Under the Sea dance",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "7" } }]
+    },
+    {
+      "id": "event:bttf-manure-first",
+      "title": "Biff's car ends in the manure truck",
+      "body": "First collision. The skateboard chase out of Lou's Cafe.",
+      "traits": ["event", "bttf", "manure"],
+      "on": [
+        { "frame": "frame:bttf-biff", "at": { "year": "1955", "month": "11", "day": "8" } },
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "8" } }
+      ]
+    },
+    {
+      "id": "event:bttf-biff-gang-trunk",
+      "title": "Biff's gang locks Marty in the Starlighters' car",
+      "traits": ["event", "bttf"],
+      "on": [
+        { "frame": "frame:bttf-biff", "at": { "year": "1955", "month": "11", "day": "12" } },
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12" } }
+      ]
+    },
+    {
+      "id": "event:bttf-enchantment-under-the-sea",
+      "title": "The Enchantment Under the Sea dance",
+      "traits": ["event", "bttf"],
+      "duration": { "hour": "3" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12", "hour": "20", "minute": "0" } },
+        { "frame": "frame:bttf-biff", "at": { "year": "1955", "month": "11", "day": "12", "hour": "20", "minute": "0" } }
+      ]
+    },
+    {
+      "id": "event:bttf-george-punches-biff",
+      "title": "George knocks Biff out in the school parking lot",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "2" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12", "hour": "20", "minute": "45" } },
+        { "frame": "frame:bttf-biff", "at": { "year": "1955", "month": "11", "day": "12", "hour": "20", "minute": "45" } }
+      ]
+    },
+    {
+      "id": "event:bttf-johnny-b-goode",
+      "title": "Marty plays Johnny B. Goode with the Starlighters",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "10" },
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12", "hour": "21", "minute": "15" } }]
+    },
+    {
+      "id": "event:bttf-clock-tower-lightning",
+      "title": "Lightning strikes the clock tower",
+      "body": "10:04 p.m. Doc makes the connection on the wire and the DeLorean takes the strike.",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "1" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12", "hour": "22", "minute": "4" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1955", "month": "11", "day": "12", "hour": "22", "minute": "4" } }
+      ]
+    },
+    {
+      "id": "event:bttf-return-lone-pine-mall",
+      "title": "Marty arrives back at Lone Pine Mall",
+      "traits": ["event", "bttf", "arrival"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "24" } }]
+    },
+    {
+      "id": "event:bttf-doc-survives",
+      "title": "Doc survives the Libyans",
+      "body": "The taped-together letter, and the bulletproof vest under the radiation suit.",
+      "traits": ["event", "bttf"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "35" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1985", "month": "10", "day": "26", "hour": "1", "minute": "35" } }
+      ]
+    },
+    {
+      "id": "event:bttf-improved-1985",
+      "title": "Marty wakes into the 1985 he made",
+      "body": "George McFly, published author of A Match Made in Space.",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "30" },
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "10", "minute": "0" } }]
+    },
+    {
+      "id": "event:bttf-biff-waxes-the-car",
+      "title": "Biff Tannen, auto detailing, two coats of wax",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-biff", "at": { "year": "1985", "month": "10", "day": "26", "hour": "10", "minute": "15" } }]
+    },
+    {
+      "id": "event:bttf-doc-returns-from-2015",
+      "title": "Doc returns from 2015",
+      "body": "Roads.",
+      "traits": ["event", "bttf"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26", "hour": "10", "minute": "28" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1985", "month": "10", "day": "26", "hour": "10", "minute": "28" } }
+      ]
+    },
+    {
+      "id": "event:bttf-arrive-2015",
+      "title": "Arrival in Hilldale, October 21 2015",
+      "traits": ["event", "bttf", "arrival"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "2015", "month": "10", "day": "21", "hour": "16", "minute": "29" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "2015", "month": "10", "day": "21", "hour": "16", "minute": "29" } }
+      ]
+    },
+    {
+      "id": "event:bttf-griff-courthouse",
+      "title": "Griff's gang hoverboards into the courthouse pond",
+      "traits": ["event", "bttf"],
+      "duration": { "minute": "6" },
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "2015", "month": "10", "day": "21" } }]
+    },
+    {
+      "id": "event:bttf-almanac-bought",
+      "title": "Marty buys the Grays Sports Almanac, 1950 to 2000",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "2015", "month": "10", "day": "21" } }]
+    },
+    {
+      "id": "event:bttf-old-biff-takes-the-delorean",
+      "title": "Old Biff takes the DeLorean and the almanac",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-biff", "at": { "year": "2015", "month": "10", "day": "21" } }]
+    },
+    {
+      "id": "event:bttf-old-biff-delivers-the-almanac",
+      "title": "Old Biff hands the almanac to his 1955 self",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-biff", "at": { "year": "1955", "month": "11", "day": "12" } }]
+    },
+    {
+      "id": "event:bttf-biff-co-founded",
+      "title": "Biff opens Biff Co. on his winnings",
+      "traits": ["event", "bttf", "alternate"],
+      "on": [
+        { "frame": "frame:bttf-biff", "at": { "year": "1958" } },
+        { "frame": "frame:bttf-1985a", "at": { "year": "1958" } }
+      ]
+    },
+    {
+      "id": "event:bttf-george-mcfly-murdered",
+      "title": "George McFly is murdered",
+      "traits": ["event", "bttf", "alternate"],
+      "on": [
+        { "frame": "frame:bttf-biff", "at": { "year": "1973", "month": "3", "day": "15" } },
+        { "frame": "frame:bttf-1985a", "at": { "year": "1973", "month": "3", "day": "15" } }
+      ]
+    },
+    {
+      "id": "event:bttf-biff-marries-lorraine",
+      "title": "Biff marries Lorraine",
+      "traits": ["event", "bttf", "alternate"],
+      "on": [
+        { "frame": "frame:bttf-biff", "at": { "year": "1973" } },
+        { "frame": "frame:bttf-1985a", "at": { "year": "1973" } }
+      ]
+    },
+    {
+      "id": "event:bttf-doc-committed",
+      "title": "Doc Brown is committed",
+      "traits": ["event", "bttf", "alternate"],
+      "on": [
+        { "frame": "frame:bttf-doc", "at": { "year": "1985" } },
+        { "frame": "frame:bttf-1985a", "at": { "year": "1985" } }
+      ]
+    },
+    {
+      "id": "event:bttf-biffhorrific-arrival",
+      "title": "Arrival in 1985A: Biff Tannen's Pleasure Paradise",
+      "traits": ["event", "bttf", "alternate", "arrival"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1985", "month": "10", "day": "26" } },
+        { "frame": "frame:bttf-1985a", "at": { "year": "1985", "month": "10", "day": "26" } }
+      ]
+    },
+    {
+      "id": "event:bttf-biff-confesses",
+      "title": "Biff tells Marty where the almanac came from",
+      "traits": ["event", "bttf", "alternate"],
+      "duration": { "minute": "10" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "26" } },
+        { "frame": "frame:bttf-biff", "at": { "year": "1985", "month": "10", "day": "26" } },
+        { "frame": "frame:bttf-1985a", "at": { "year": "1985", "month": "10", "day": "26" } }
+      ]
+    },
+    {
+      "id": "event:bttf-return-to-1955-again",
+      "title": "Back to November 12 1955 for the almanac",
+      "traits": ["event", "bttf", "arrival"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1955", "month": "11", "day": "12" } }
+      ]
+    },
+    {
+      "id": "event:bttf-manure-second",
+      "title": "Biff's car ends in the manure truck",
+      "body": "Second collision. The hoverboard chase, same truck, same driver.",
+      "traits": ["event", "bttf", "manure"],
+      "on": [
+        { "frame": "frame:bttf-biff", "at": { "year": "1955", "month": "11", "day": "12" } },
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12" } }
+      ]
+    },
+    {
+      "id": "event:bttf-almanac-burned",
+      "title": "Marty burns the Grays Sports Almanac",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12" } }]
+    },
+    {
+      "id": "event:bttf-doc-struck-to-1885",
+      "title": "Lightning takes the DeLorean, and Doc, to 1885",
+      "traits": ["event", "bttf", "departure"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1955", "month": "11", "day": "12" } }
+      ]
+    },
+    {
+      "id": "event:bttf-western-union",
+      "title": "Western Union delivers Doc's letter",
+      "body": "Seventy years, two months and twelve days late, as instructed.",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "12" } }]
+    },
+    {
+      "id": "event:bttf-doc-reads-his-headstone",
+      "title": "Doc reads his own headstone",
+      "traits": ["event", "bttf"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "15" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1955", "month": "11", "day": "15" } }
+      ]
+    },
+    {
+      "id": "event:bttf-marty-departs-for-1885",
+      "title": "Marty departs 1955 for 1885",
+      "traits": ["event", "bttf", "departure"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1955", "month": "11", "day": "16" } }]
+    },
+    {
+      "id": "event:bttf-doc-arrives-1885",
+      "title": "Doc arrives in 1885",
+      "traits": ["event", "bttf", "arrival"],
+      "on": [{ "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "1", "day": "1" } }]
+    },
+    {
+      "id": "event:bttf-doc-blacksmith",
+      "title": "Doc opens a blacksmith shop in Hill Valley",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-doc", "at": { "year": "1885" } }]
+    },
+    {
+      "id": "event:bttf-doc-writes-the-letter",
+      "title": "Doc writes to Marty and seals the DeLorean into the Delgado mine",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "9", "day": "1" } }]
+    },
+    {
+      "id": "event:bttf-marty-arrives-1885",
+      "title": "Marty arrives in 1885 and tears the fuel line",
+      "traits": ["event", "bttf", "arrival"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1885", "month": "9", "day": "2" } }]
+    },
+    {
+      "id": "event:bttf-clara-ravine",
+      "title": "Doc catches Clara Clayton's runaway wagon at the ravine",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "9", "day": "2" } }]
+    },
+    {
+      "id": "event:bttf-hill-valley-festival",
+      "title": "The Hill Valley festival and the clock's dedication",
+      "traits": ["event", "bttf"],
+      "duration": { "hour": "5" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1885", "month": "9", "day": "5" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "9", "day": "5" } }
+      ]
+    },
+    {
+      "id": "event:bttf-buford-calls-marty-out",
+      "title": "Buford Tannen calls Marty out for Monday at eight",
+      "traits": ["event", "bttf"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1885", "month": "9", "day": "5" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "9", "day": "5" } }
+      ]
+    },
+    {
+      "id": "event:bttf-showdown",
+      "title": "The showdown: Buford Tannen lands in the manure wagon",
+      "body": "Third collision, and the one that is not Biff's.",
+      "traits": ["event", "bttf", "manure"],
+      "duration": { "minute": "20" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1885", "month": "9", "day": "7", "hour": "8", "minute": "0" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "9", "day": "7", "hour": "8", "minute": "0" } }
+      ]
+    },
+    {
+      "id": "event:bttf-headstone-averted",
+      "title": "September 7 1885, the day Doc Brown does not die",
+      "body": "Shot in the back over a matter of eighty dollars, on the headstone that no longer happens.",
+      "traits": ["event", "bttf"],
+      "on": [{ "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "9", "day": "7" } }]
+    },
+    {
+      "id": "event:bttf-locomotive-131",
+      "title": "The number 131 pushes the DeLorean to eighty-eight",
+      "traits": ["event", "bttf", "departure"],
+      "duration": { "minute": "25" },
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1885", "month": "9", "day": "7", "hour": "8", "minute": "30" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1885", "month": "9", "day": "7", "hour": "8", "minute": "30" } }
+      ]
+    },
+    {
+      "id": "event:bttf-eastwood-ravine-crossing",
+      "title": "Marty arrives at the crossing and the DeLorean is destroyed",
+      "traits": ["event", "bttf", "arrival"],
+      "on": [{ "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "27", "hour": "8", "minute": "0" } }]
+    },
+    {
+      "id": "event:bttf-time-train",
+      "title": "Doc returns in the time train with Clara, Jules and Verne",
+      "traits": ["event", "bttf", "arrival"],
+      "on": [
+        { "frame": "frame:bttf-marty", "at": { "year": "1985", "month": "10", "day": "27" } },
+        { "frame": "frame:bttf-doc", "at": { "year": "1985", "month": "10", "day": "27" } }
+      ]
+    }
+  ]
+}

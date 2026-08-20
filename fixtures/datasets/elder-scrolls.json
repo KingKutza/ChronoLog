@@ -1,0 +1,406 @@
+{
+  "schema": "chronolog-dataset/0",
+  "dataset": "elder-scrolls",
+  "title": "The Elder Scrolls, Merethic Era to the Fourth Era",
+  "notes": [
+    "NOT LOADED. This is the acceptance fixture for era support. Every coordinate here is an era coordinate, and no year on this calendar is a year on any other one.",
+    "The era is a level, above year, and year numbering restarts inside each era. An era level value is its KEY (ME, 1E, 2E, 3E, 4E), not an integer; `coordinate.eras.entries` carries the ordinal that puts the keys in order.",
+    "Merethic years DESCEND: ME 2500 is older than ME 1000, and ME 1 is the year immediately before 1E 1. `direction` says which way a given era's numbers run.",
+    "An era's `years` is its length: 1E is 2920 years, 2E is 896, 3E is 433. Only an INTERIOR era needs a closed length, because that is the only thing anything has to count across. The first era in the table may be open below it and the last open above it, and both of these are.",
+    "The months are Gregorian-length and there are twelve of them, so the `tamriel` calendar family's month and day arithmetic is the Gregorian family's. The era level above year is the whole of what is new.",
+    "Morndas is aligned to the Gregorian Monday, which is a declared convention and not a lore claim: cycle `offset` is the cycle index of day zero.",
+    "Where the lore gives only a year, the coordinate stops at year. Where it gives a date, the date is there. Merethic entries carry the `approximate` trait because Merethic year numbers are not attested.",
+    "The Dawn Era has no entry. It precedes the Merethic and has no year axis at all, time there being the thing that had not started behaving yet. An era table of named, year-counted eras cannot hold it."
+  ],
+  "requires": [],
+  "frames": [
+    {
+      "id": "frame:tamriel-calendar",
+      "title": "Tamrielic calendar",
+      "traits": ["line", "temporal", "calendar"],
+      "coordinate": {
+        "kind": "tamriel",
+        "levels": [
+          { "name": "era" },
+          { "name": "year", "within": "era", "transition": "tamriel.yearsInEra" },
+          {
+            "name": "month",
+            "within": "year",
+            "transition": "tamriel.monthsInYear",
+            "names": [
+              "Morning Star", "Sun's Dawn", "First Seed", "Rain's Hand",
+              "Second Seed", "Midyear", "Sun's Height", "Last Seed",
+              "Hearthfire", "Frostfall", "Sun's Dusk", "Evening Star"
+            ]
+          },
+          { "name": "day", "within": "month", "transition": "tamriel.daysInMonth" },
+          { "name": "hour", "within": "day", "radix": "24" },
+          { "name": "minute", "within": "hour", "radix": "60" },
+          { "name": "second", "within": "minute", "radix": "60" }
+        ],
+        "cycles": [
+          {
+            "name": "weekday",
+            "radix": "7",
+            "offset": "3",
+            "names": ["Morndas", "Tirdas", "Middas", "Turdas", "Fredas", "Loredas", "Sundas"]
+          }
+        ],
+        "eras": {
+          "level": "era",
+          "entries": [
+            { "key": "ME", "ordinal": "0", "name": "Merethic Era", "direction": "descending", "firstYear": "1", "years": "open" },
+            { "key": "1E", "ordinal": "1", "name": "First Era", "direction": "ascending", "firstYear": "1", "years": "2920" },
+            { "key": "2E", "ordinal": "2", "name": "Second Era", "direction": "ascending", "firstYear": "1", "years": "896" },
+            { "key": "3E", "ordinal": "3", "name": "Third Era", "direction": "ascending", "firstYear": "1", "years": "433" },
+            { "key": "4E", "ordinal": "4", "name": "Fourth Era", "direction": "ascending", "firstYear": "1", "years": "open" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "frame:tes",
+      "title": "The Elder Scrolls",
+      "traits": ["set", "group"],
+      "coordinateDefinition": "frame:tamriel-calendar",
+      "color": "#6b6f4a"
+    },
+    {
+      "id": "frame:tes-empires",
+      "title": "The Empires of Men",
+      "traits": ["set", "calendar", "group"],
+      "coordinateDefinition": "frame:tamriel-calendar",
+      "color": "#a8842b"
+    },
+    {
+      "id": "frame:tes-arcane",
+      "title": "The Psijic Order and the Mages Guild",
+      "traits": ["set", "calendar", "group"],
+      "coordinateDefinition": "frame:tamriel-calendar",
+      "color": "#3f6ba8"
+    },
+    {
+      "id": "frame:tes-daedric",
+      "title": "Daedric incursions and Dragon Breaks",
+      "traits": ["set", "calendar", "group"],
+      "coordinateDefinition": "frame:tamriel-calendar",
+      "color": "#8a2f3f"
+    }
+  ],
+  "relations": [
+    { "id": "membership:tes-empires@tes", "type": "membership", "group": "frame:tes", "member": "frame:tes-empires" },
+    { "id": "membership:tes-arcane@tes", "type": "membership", "group": "frame:tes", "member": "frame:tes-arcane" },
+    { "id": "membership:tes-daedric@tes", "type": "membership", "group": "frame:tes", "member": "frame:tes-daedric" }
+  ],
+  "events": [
+    {
+      "id": "event:tes-aldmer-landfall",
+      "title": "The Aldmer make landfall on Tamriel",
+      "traits": ["event", "tes", "approximate"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "ME", "year": "2500" } }]
+    },
+    {
+      "id": "event:tes-five-hundred-companions",
+      "title": "Ysgramor and the Return of the Five Hundred Companions",
+      "traits": ["event", "tes", "approximate"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "ME", "year": "1000" } }]
+    },
+    {
+      "id": "event:tes-camoran-dynasty",
+      "title": "The First Era opens; the Camoran Dynasty is founded in Valenwood",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "1E", "year": "1" } }]
+    },
+    {
+      "id": "event:tes-alessian-revolt",
+      "title": "Alessia's slaves rise against the Ayleids of the Heartland",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "1E", "year": "242" } }]
+    },
+    {
+      "id": "event:tes-first-empire",
+      "title": "Alessia is crowned at the White-Gold Tower; the First Empire of Men",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "1E", "year": "243" } }]
+    },
+    {
+      "id": "event:tes-war-of-righteousness-begins",
+      "title": "The War of Righteousness begins",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "1E", "year": "2321" } }]
+    },
+    {
+      "id": "event:tes-war-of-righteousness-ends",
+      "title": "The War of Righteousness ends and the Alessian Order is broken",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "1E", "year": "2331" } }]
+    },
+    {
+      "id": "event:tes-reman-second-empire",
+      "title": "Reman Cyrodiil founds the Second Empire after Pale Pass",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "1E", "year": "2703" } }]
+    },
+    {
+      "id": "event:tes-last-year-of-the-first-era",
+      "title": "The Last Year: Reman III falls to the Morag Tong and the First Era ends",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "1E", "year": "2920" } }]
+    },
+    {
+      "id": "event:tes-akaviri-potentate",
+      "title": "Versidue-Shaie rules Tamriel as Potentate",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "2E", "year": "1" } }]
+    },
+    {
+      "id": "event:tes-interregnum",
+      "title": "Versidue-Shaie is assassinated and the Interregnum begins",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "2E", "year": "430" } }]
+    },
+    {
+      "id": "event:tes-three-banners-war",
+      "title": "The Three Banners War for the empty Ruby Throne",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "2E", "year": "582" } }]
+    },
+    {
+      "id": "event:tes-tiber-septim-crowned",
+      "title": "Tiber Septim is crowned and the Third Empire begins",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "2E", "year": "854" } }]
+    },
+    {
+      "id": "event:tes-armistice",
+      "title": "The Armistice brings Morrowind into the Empire; the Second Era ends",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "2E", "year": "896" } }]
+    },
+    {
+      "id": "event:tes-third-era-declared",
+      "title": "The Third Era is declared",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "3E", "year": "1" } }]
+    },
+    {
+      "id": "event:tes-tiber-septim-dies",
+      "title": "Tiber Septim dies",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "3E", "year": "38" } }]
+    },
+    {
+      "id": "event:tes-septim-line-ends",
+      "title": "Uriel Septim VII is assassinated and the Septim line ends",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "3E", "year": "433", "month": "8", "day": "27" } }]
+    },
+    {
+      "id": "event:tes-mede-throne",
+      "title": "Titus Mede I takes the Ruby Throne",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "4E", "year": "16" } }]
+    },
+    {
+      "id": "event:tes-great-war-begins",
+      "title": "The Great War begins; the Aldmeri Dominion invades Cyrodiil",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "4E", "year": "171" } }]
+    },
+    {
+      "id": "event:tes-white-gold-concordat",
+      "title": "The White-Gold Concordat is signed",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "4E", "year": "175" } }]
+    },
+    {
+      "id": "event:tes-skyrim-civil-war",
+      "title": "The Skyrim Civil War",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-empires", "at": { "era": "4E", "year": "201" } }]
+    },
+
+    {
+      "id": "event:tes-psijic-order-founded",
+      "title": "The Psijic Order is founded on the isle of Artaeum",
+      "traits": ["event", "tes", "approximate"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "ME", "year": "800" } }]
+    },
+    {
+      "id": "event:tes-sotha-sil-clockwork",
+      "title": "Sotha Sil withdraws into the Clockwork City",
+      "traits": ["event", "tes", "approximate"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "1E", "year": "2920" } }]
+    },
+    {
+      "id": "event:tes-mages-guild-chartered",
+      "title": "Vanus Galerion charters the Mages Guild at Firsthold",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "2E", "year": "230" } }]
+    },
+    {
+      "id": "event:tes-artaeum-vanishes",
+      "title": "Artaeum vanishes from Tamriel, and the Psijics with it",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "2E", "year": "230" } }]
+    },
+    {
+      "id": "event:tes-order-of-the-lamp",
+      "title": "The Order of the Lamp is raised to police the Guild's magic",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "2E", "year": "231" } }]
+    },
+    {
+      "id": "event:tes-guildhalls-open",
+      "title": "The guildhalls open to anyone who can pay",
+      "traits": ["event", "tes", "approximate"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "2E", "year": "321" } }]
+    },
+    {
+      "id": "event:tes-psijics-break-silence",
+      "title": "The Psijic Order breaks its silence over the Planemeld",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "2E", "year": "582" } }]
+    },
+    {
+      "id": "event:tes-artaeum-returns",
+      "title": "Artaeum returns off the coast of Summerset",
+      "traits": ["event", "tes", "approximate"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "3E", "year": "400" } }]
+    },
+    {
+      "id": "event:tes-trebonius-archmage",
+      "title": "Trebonius Artorius is made Archmage of Vvardenfell",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "3E", "year": "417" } }]
+    },
+    {
+      "id": "event:tes-necromancy-banned",
+      "title": "Hannibal Traven is elected Arch-Mage and bans necromancy",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "3E", "year": "431" } }]
+    },
+    {
+      "id": "event:tes-mannimarco",
+      "title": "Mannimarco takes the Necromancer's Moon; Traven spends his life to end him",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "3E", "year": "433" } }]
+    },
+    {
+      "id": "event:tes-mages-guild-dissolved",
+      "title": "The Mages Guild dissolves",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "4E", "year": "1" } }]
+    },
+    {
+      "id": "event:tes-synod-and-whispers",
+      "title": "The Synod and the College of Whispers rise out of the wreckage",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "4E", "year": "1" } }]
+    },
+    {
+      "id": "event:tes-eye-of-magnus",
+      "title": "The Eye of Magnus at the College of Winterhold",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-arcane", "at": { "era": "4E", "year": "201" } }]
+    },
+
+    {
+      "id": "event:tes-convention",
+      "title": "Convention: the et'Ada bind themselves at the Adamantine Tower",
+      "body": "After Lorkhan's heart is torn out and thrown into the world.",
+      "traits": ["event", "tes", "approximate"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "ME", "year": "2500" } }]
+    },
+    {
+      "id": "event:tes-middle-dawn-begins",
+      "title": "The Marukhati Selective dance on the Tower and the Middle Dawn begins",
+      "traits": ["event", "tes", "dragon-break"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "1E", "year": "668" } }]
+    },
+    {
+      "id": "event:tes-battle-of-red-mountain",
+      "title": "The Battle of Red Mountain; the Tribunal, Dagoth Ur, and the missing Dwemer",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "1E", "year": "700" } }]
+    },
+    {
+      "id": "event:tes-middle-dawn-ends",
+      "title": "The Middle Dawn ends, one thousand and eight years later",
+      "traits": ["event", "tes", "dragon-break"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "1E", "year": "1200" } }]
+    },
+    {
+      "id": "event:tes-mournhold-razed",
+      "title": "Mehrunes Dagon razes Mournhold",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "1E", "year": "2920" } }]
+    },
+    {
+      "id": "event:tes-soulburst",
+      "title": "The Soulburst: the Amulet of Kings shatters",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "2E", "year": "578" } }]
+    },
+    {
+      "id": "event:tes-planemeld",
+      "title": "The Planemeld: Molag Bal hauls Nirn toward Coldharbour",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "2E", "year": "582" } }]
+    },
+    {
+      "id": "event:tes-numidium-walks",
+      "title": "Tiber Septim walks the Numidium, and a Dragon Break follows",
+      "traits": ["event", "tes", "dragon-break"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "2E", "year": "896" } }]
+    },
+    {
+      "id": "event:tes-warp-in-the-west",
+      "title": "The Warp in the West ends six days of Iliac Bay history at once",
+      "traits": ["event", "tes", "dragon-break"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "3E", "year": "405" } }]
+    },
+    {
+      "id": "event:tes-sixth-house",
+      "title": "Dagoth Ur and the Sixth House rise under Red Mountain",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "3E", "year": "427" } }]
+    },
+    {
+      "id": "event:tes-bloodmoon",
+      "title": "Hircine's Bloodmoon hunt on Solstheim",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "3E", "year": "427" } }]
+    },
+    {
+      "id": "event:tes-oblivion-crisis",
+      "title": "The Oblivion Crisis: Mehrunes Dagon's gates open across Tamriel",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "3E", "year": "433", "month": "8", "day": "27" } }]
+    },
+    {
+      "id": "event:tes-dragonfires-go-out",
+      "title": "The Dragonfires go out and Martin Septim becomes the Avatar of Akatosh",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "3E", "year": "433" } }]
+    },
+    {
+      "id": "event:tes-red-year",
+      "title": "The Red Year: Baar Dau falls and Red Mountain erupts",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "4E", "year": "5" } }]
+    },
+    {
+      "id": "event:tes-alduin-returns",
+      "title": "Alduin returns and the Dragon Crisis begins",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "4E", "year": "201", "month": "8", "day": "17" } }]
+    },
+    {
+      "id": "event:tes-miraak",
+      "title": "Miraak stirs on Solstheim under Hermaeus Mora's eye",
+      "traits": ["event", "tes"],
+      "on": [{ "frame": "frame:tes-daedric", "at": { "era": "4E", "year": "201" } }]
+    }
+  ]
+}
