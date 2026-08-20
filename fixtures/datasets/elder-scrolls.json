@@ -13,7 +13,8 @@
     "`origin` and `clock: false` together: the origin is an arbitrary but STATED anchor, so the chain resolves to exact ordinals, and `clock: false` says this calendar claims no relation to the running clock -- so no artificial Now line is drawn on it. Whether that arbitrary anchor is the right one is a decision for the owner.",
     "Morndas is aligned to the Gregorian Monday, which is a declared convention and not a lore claim: cycle `offset` is the cycle index of day zero.",
     "Where the lore gives only a year, the coordinate stops at year. Merethic entries carry the `approximate` trait because Merethic year numbers are not attested.",
-    "The Dawn Era is a frame with NO metric ladder: no basis, `countable: false`. It is ordered and connected -- it is in the succession chain -- and never acquires day ordinals, time there being the thing that had not started behaving yet. Its events hold their sequence and answer no question about when."
+    "The Dawn Era is a frame with NO metric ladder: no basis, `countable: false`. It is ordered and connected -- it is in the succession chain -- and never acquires day ordinals, time there being the thing that had not started behaving yet. Its events hold their sequence and answer no question about when.",
+    "A Dawn Era placement therefore carries no coordinate at all. Its events are ordered by the era's place in the chain and by nothing else: the whole Dawn set precedes the whole Merethic set, and within the Dawn there is no order, which for this era happens to be the truth rather than a limitation."
   ],
   "requires": [],
   "frames": [
@@ -1049,6 +1050,76 @@
         },
         {
           "frame": "frame:tes-arcane"
+        }
+      ]
+    },
+    {
+      "id": "event:tes-dawn-mundus",
+      "title": "The et'Ada shape Mundus out of the Aurbis",
+      "traits": [
+        "event",
+        "tes",
+        "dawn"
+      ],
+      "on": [
+        {
+          "frame": "era:tamriel-dawn"
+        },
+        {
+          "frame": "frame:tes-daedric"
+        }
+      ]
+    },
+    {
+      "id": "event:tes-dawn-lorkhan-heart",
+      "title": "Lorkhan's heart is torn out and cast into the world",
+      "traits": [
+        "event",
+        "tes",
+        "dawn"
+      ],
+      "on": [
+        {
+          "frame": "era:tamriel-dawn"
+        },
+        {
+          "frame": "frame:tes-daedric"
+        }
+      ]
+    },
+    {
+      "id": "event:tes-dawn-ehlnofey-wars",
+      "title": "The Ehlnofey wars break the surface of Nirn",
+      "traits": [
+        "event",
+        "tes",
+        "dawn"
+      ],
+      "on": [
+        {
+          "frame": "era:tamriel-dawn"
+        },
+        {
+          "frame": "frame:tes-daedric"
+        }
+      ]
+    },
+    {
+      "id": "event:tes-dawn-is-a-dragon-break",
+      "title": "Time does not yet run one way; the Dawn is its own Dragon Break",
+      "body": "Nothing here is before or after anything else here. The era holds these events and dates none of them.",
+      "traits": [
+        "event",
+        "tes",
+        "dawn",
+        "dragon-break"
+      ],
+      "on": [
+        {
+          "frame": "era:tamriel-dawn"
+        },
+        {
+          "frame": "frame:tes-daedric"
         }
       ]
     },

@@ -3,13 +3,13 @@
   "dataset": "jeremy-bearimy",
   "title": "One Jeremy Bearimy",
   "notes": [
-    "NOT LOADED. This is the acceptance fixture for frame-to-frame correspondence staples.",
-    "The Bearimy frame's own coordinate is one-dimensional progress along the pen stroke: which Bearimy, which letter of the phrase, and how far into that letter's pen travel. `stroke` is the ladder's continuous tail, a fraction of one letter, so 0.5 is halfway through drawing it.",
-    "Nothing in this file converts a Bearimy coordinate into a day, a date, or a duration, because the curve is not a line and no such conversion exists. There is no epoch here and no `fixed` block on purpose: a smallest-unit-in-days would be exactly the linearization the shape is a refusal of.",
-    "The correspondence to wall time lives entirely in kind `correspondence` staples. Each has `ends`, and each end is a frame plus a position under THAT frame's own law. An end whose wall-time position is a set rather than a point carries `selector` in place of `coordinate`: `{cycle, value}` for a position in a repeating cycle, `{level, value}` for a level's value.",
-    "The dot over the i is the whole test. One Bearimy coordinate corresponds to every Tuesday, and to the whole of every July, and sometimes to nothing at all: many-to-many, non-monotonic, and partial, all three at once. `coverage: \"none\"` is the third one, a staple with a single end, which says the correspondence is authored and empty rather than absent.",
-    "The dot is not on the stroke. The pen leaves the paper to make it. Its coordinate here is the i it sits over, which is its position along the phrase and not its position, and a one-dimensional ladder has nowhere else to put it.",
-    "The claims `cardinality`, `monotonic` and `coverage` are properties of the whole correspondence between the two frames, and they are repeated on every staple because a set of staples has nowhere to carry a shared claim.",
+    "The Bearimy frame's own coordinate is one-dimensional progress along the pen stroke: which Bearimy, which letter of the phrase, and how far into that letter's pen travel. `letter` is the base unit, stated outright because a uniform ladder has no transition to infer one from. `stroke` is the continuous tail below it, a fraction of one letter, so 0.5 is halfway through drawing it.",
+    "The ladder is uniform, so it computes positionally from its own radices and every event here sits at its own distinct position on this frame's axis. That is a statement about this frame's axis and nothing else.",
+    "`clock: false` and no origin: this calendar shares no atom with standard days and claims no relation to the running clock, so no Now line is drawn on it and no position here converts to a date. There is no `fixed` block on purpose -- a smallest-unit-in-days would be exactly the linearization the shape is a refusal of.",
+    "Every relation to wall time is an authored `correspondence` staple and there is no other. Two ends, each a frame plus a position under THAT frame's own law. Where the wall-time side is a set rather than a point the end carries `selector`: `{cycle, value}` for a position in a repeating cycle, `{level, value}` for a level's value, read against wall time's own declared names.",
+    "The dot over the i is the whole test. One Bearimy coordinate corresponds to every Tuesday, and to the whole of every July, and sometimes to nothing at all. The third one is an authored VOID end: a positive claim that the author looked and there is no correspondence here, which is a different claim from no staple at all.",
+    "Cardinality, monotonicity and coverage are NOT stored. They are properties of the set, derived from it by `describeCorrespondence`, and writing them onto each staple would be N copies that drift the moment one is added.",
+    "The dot is not on the stroke. The pen leaves the paper to make it. Its coordinate in the staples is the i it sits over, which is its position along the phrase and not its position, and a one-dimensional ladder has nowhere else to put it. The dot's own event is attached with no coordinate at all -- bare membership -- so it is placed by its correspondences or by nothing.",
     "The 802 reboots are one event carrying their count, not a series. A series needs a pattern, patterns emit day numbers, and this frame has no days."
   ],
   "requires": ["frame:wall-time"],
@@ -20,6 +20,8 @@
       "traits": ["line", "temporal", "calendar", "group"],
       "coordinate": {
         "kind": "bearimy",
+        "baseLevel": "letter",
+        "clock": false,
         "levels": [
           { "name": "bearimy" },
           {
@@ -51,10 +53,10 @@
       "member": "frame:jeremy-bearimy"
     },
     {
-      "id": "relation:bearimy-dot-tuesdays",
+      "id": "correspondence:bearimy-dot-tuesdays",
       "type": "staple",
       "kind": "correspondence",
-      "role": "dot-over-the-i",
+      "title": "The dot over the i is Tuesdays",
       "ends": [
         {
           "frame": "frame:jeremy-bearimy",
@@ -64,17 +66,13 @@
           "frame": "frame:wall-time",
           "selector": { "cycle": "weekday", "value": "Tuesday" }
         }
-      ],
-      "continuity": "discontinuous",
-      "cardinality": "many-to-many",
-      "monotonic": false,
-      "coverage": "partial"
+      ]
     },
     {
-      "id": "relation:bearimy-dot-july",
+      "id": "correspondence:bearimy-dot-july",
       "type": "staple",
       "kind": "correspondence",
-      "role": "dot-over-the-i",
+      "title": "And also July",
       "ends": [
         {
           "frame": "frame:jeremy-bearimy",
@@ -84,27 +82,23 @@
           "frame": "frame:wall-time",
           "selector": { "level": "month", "value": "7" }
         }
-      ],
-      "continuity": "discontinuous",
-      "cardinality": "many-to-many",
-      "monotonic": false,
-      "coverage": "partial"
+      ]
     },
     {
-      "id": "relation:bearimy-dot-never",
+      "id": "correspondence:bearimy-dot-void",
       "type": "staple",
       "kind": "correspondence",
-      "role": "dot-over-the-i",
+      "title": "And sometimes never",
       "ends": [
         {
           "frame": "frame:jeremy-bearimy",
           "coordinate": { "levels": [{ "level": "bearimy", "value": "1" }, { "level": "letter", "value": "12" }, { "level": "stroke", "value": "0" }] }
+        },
+        {
+          "frame": "frame:wall-time",
+          "void": true
         }
-      ],
-      "continuity": "discontinuous",
-      "cardinality": "many-to-many",
-      "monotonic": false,
-      "coverage": "none"
+      ]
     }
   ],
   "events": [

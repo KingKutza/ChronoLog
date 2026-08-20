@@ -153,11 +153,17 @@ function sameRecord(left, right) {
 
 // Adds through the model helpers rather than assigning into the maps, so a
 // dataset record picks up the same defaults an authored one does.
+//
+// A staple is the exception, and deliberately: `addRelation`'s defaults are an
+// attachment's (`role: "member"`, an explicit provenance), and a staple has no
+// top-level role at all -- it is an edge whose roles live on its two ends.
+// Letting it inherit them writes a field that means nothing onto every
+// connection the loader creates.
 function put(document, map, record) {
   if (map === "events") return addEvent(document, record);
-  if (map === "overrides") {
-    document.overrides[record.id] = clone(record);
-    return document.overrides[record.id];
+  if (map === "overrides" || (map === "relations" && record.type === "staple")) {
+    document[map][record.id] = clone(record);
+    return document[map][record.id];
   }
   return VERBATIM_MAPS[map](document, record);
 }
