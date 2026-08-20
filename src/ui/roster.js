@@ -1,5 +1,5 @@
 import { formatCivil, nowDays } from "../exact.js";
-import { daysToCivilCoordinate } from "../coordinate-law.js";
+import { coordinateLaw, GREGORIAN_LAW } from "../coordinate-law.js";
 import { addRelation } from "../model.js";
 import { OBJECT_KINDS, rosterEntries } from "../object-kinds.js";
 import { escapeHTML } from "./dom-helpers.js";
@@ -43,12 +43,24 @@ export function toggleTodoCompletion(app, eventId) {
         && relation.role !== "completed"
         && relation.coordinate
     );
+    const frame = primary?.frame || app.session.activeFrame;
+    // The stored coordinate must be built under THIS frame's own law -- the
+    // standard boundary would silently mean the wrong instant under an edited
+    // law (src/coordinate-law.js). An unresolvable frame declaration must not
+    // make "mark done" fail, so this falls back to the registered standard the
+    // same way `displayLaw` does.
+    let law;
+    try {
+      law = coordinateLaw(documentValue, frame);
+    } catch {
+      law = GREGORIAN_LAW;
+    }
     addRelation(documentValue, {
       type: "attachment",
       event: eventId,
-      frame: primary?.frame || app.session.activeFrame,
+      frame,
       role: "completed",
-      coordinate: daysToCivilCoordinate(nowDays())
+      coordinate: law.fromDays(nowDays())
     });
   });
 }

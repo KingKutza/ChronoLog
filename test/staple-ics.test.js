@@ -12,12 +12,22 @@ import {
   addEvent,
   addRelation,
   durationMagnitude,
+  frameEnd,
+  objectEnd,
   putStaple,
+  seriesEnd,
   seriesEndStaple,
   setSeriesEndStaple,
   validateDocument
 } from "../src/model.js";
-import { seriesSegments, stapleSpreadDays, staplesForObject } from "../src/staples.js";
+import {
+  frameEndOf,
+  objectEndsOf,
+  resolveObjectExtent,
+  seriesSegments,
+  stapleSpreadDays,
+  staplesForObject
+} from "../src/staples.js";
 import { createSampleDocument, createStructuralDocument } from "./helpers/sample-document.js";
 
 // The lead's ruled ICS contract for the staple substrate (LEXICON's staple
@@ -162,10 +172,8 @@ test("a segmented series exports sibling VEVENTs with stable X-CHRONOLOG-SERIES 
   // Rob-and-John: Monday 09:00 meetings end 2026-01-19; a Thursday lunch rule
   // begins after it, at an independently authored time of its own.
   const inflection = putStaple(document, {
-    series: pattern.id,
     kind: "inflection",
-    frame: frame.id,
-    coordinate: civil(2026, 1, 19, 9, 0, 0),
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, civil(2026, 1, 19, 9, 0, 0))],
     payload: {
       rule: {
         rrule: { FREQ: "WEEKLY" },
@@ -244,11 +252,8 @@ test("ChronoLog to ICS to ChronoLog round-trip reproduces an anchor and its spre
     coordinate: civil(2026, 3, 2, 22, 0, 0)
   });
   putStaple(document, {
-    object: shift.id,
     kind: "anchor",
-    role: "end",
-    frame: "calendar:personal",
-    coordinate: civil(2026, 3, 3, 5, 0, 0),
+    ends: [objectEnd(shift.id, "end"), frameEnd("calendar:personal", civil(2026, 3, 3, 5, 0, 0))],
     spread: {
       before: { frame: "measure:human-time", value: { levels: [{ level: "hour", value: "1" }] } },
       after: { frame: "measure:human-time", value: { levels: [{ level: "minute", value: "30" }] } }
@@ -280,12 +285,14 @@ test("ChronoLog to ICS to ChronoLog round-trip reproduces an anchor and its spre
   assert.ok(reimportedEvent);
   const staples = staplesForObject(reimported, reimportedEvent.id);
   assert.equal(staples.length, 1, "exactly the one authored anchor comes back, nothing invented");
-  assert.equal(staples[0].role, "end");
+  const reimportedObjectEnd = objectEndsOf(staples[0]).find((end) => end.object === reimportedEvent.id);
+  assert.equal(reimportedObjectEnd?.point, "end");
   assert.ok(staples[0].spread, "the fuzziness comes back too");
 
   const reimportedEngine = new ChronologEngine(reimported);
   const originalDays = engine.coordinateDays("calendar:personal", civil(2026, 3, 3, 5, 0, 0));
-  const reimportedDays = reimportedEngine.coordinateDays(staples[0].frame, staples[0].coordinate);
+  const reimportedFar = frameEndOf(staples[0]);
+  const reimportedDays = reimportedEngine.coordinateDays(reimportedFar.frame, reimportedFar.coordinate);
   assert.equal(reimportedDays.compare(originalDays), 0, "the exact instant round-trips, not merely a similar one");
 
   const reimportedSpread = stapleSpreadDays(staples[0]);
@@ -319,4 +326,164 @@ test("a foreign ICS calendar (no X-CHRONOLOG properties) imports with no staples
   const staples = Object.values(document.relations).filter((relation) => relation.type === "staple");
   assert.deepEqual(staples, [], "meaning is authored, never inferred -- a plain import invents nothing");
   assert.equal(validateDocument(document).valid, true);
+});
+
+test("an object-to-object connection round-trips through export and reimport, and a foreign reader sees the correct resolved extent", () => {
+  const document = createSampleDocument({ includeEvents: false, includePattern: false });
+  const shift = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("7", "hour") },
+    payload: { title: "Shift" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: shift.id,
+    frame: "calendar:personal",
+    role: "placed",
+    coordinate: civil(2026, 3, 2, 22, 0, 0)
+  });
+  const handoff = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("30", "minute") },
+    payload: { title: "Handoff meeting" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: handoff.id,
+    frame: "calendar:personal",
+    role: "placed",
+    // A placeholder placement, chosen consistent with what the connection
+    // below implies -- exactly as the shift's own placement above is chosen
+    // consistent with its own end anchor. Both objects independently name a
+    // point (LEXICON's staple axiom), and a staple that connects two
+    // independently authored points to DIFFERENT instants would be a
+    // contradiction no different from two frame anchors disagreeing; this
+    // fixture is the connection actually holding, not a coincidence the
+    // substrate requires.
+    coordinate: civil(2026, 3, 3, 5, 0, 0)
+  });
+  putStaple(document, {
+    kind: "anchor",
+    // ICS has no property for "this event's start IS that event's end" --
+    // this is exactly that connection, expressed as two object ends.
+    ends: [objectEnd(handoff.id, "start"), objectEnd(shift.id, "end")]
+  });
+  const engine = new ChronologEngine(document);
+  const output = exportICS(document, { frame: "calendar:personal", engine, now: NOW });
+
+  const [shiftVevent, handoffVevent] = findVEVENTs(output);
+  // The derived extent exports as ordinary DTSTART/DTEND -- a foreign reader
+  // with no idea what X-CHRONOLOG-ANCHOR means still sees the correct times.
+  assert.match(property(shiftVevent, "DTEND").value, /^20260303T050000/);
+  assert.match(property(handoffVevent, "DTSTART").value, /^20260303T050000/);
+  assert.match(property(handoffVevent, "DTEND").value, /^20260303T053000/);
+
+  const anchorProp = property(handoffVevent, "X-CHRONOLOG-ANCHOR");
+  assert.ok(anchorProp, "the connection's intent rides along on the same property, not a second one");
+  assert.equal(paramValue(anchorProp, "ROLE"), "start");
+  assert.equal(paramValue(anchorProp, "TO-POINT"), "end");
+  assert.equal(paramValue(anchorProp, "TO-UID"), property(shiftVevent, "UID").value);
+  assert.match(
+    anchorProp.value,
+    /^20260303T050000/,
+    "the property VALUE is the connection's resolved instant, correct even if TO-UID/TO-POINT are ignored"
+  );
+
+  const reimported = createSampleDocument({ includeEvents: false, includePattern: false });
+  importICS(output, reimported, { label: "Reimport" });
+  assert.equal(validateDocument(reimported).valid, true);
+  const reimportedShift = Object.values(reimported.events).find((item) => item.payload.title === "Shift");
+  const reimportedHandoff = Object.values(reimported.events).find((item) => item.payload.title === "Handoff meeting");
+  assert.ok(reimportedShift && reimportedHandoff);
+
+  const reimportedStaples = staplesForObject(reimported, reimportedHandoff.id);
+  assert.equal(reimportedStaples.length, 1, "the connection reconstructs as one staple, not a frame fallback");
+  const ends = objectEndsOf(reimportedStaples[0]);
+  assert.equal(ends.length, 2, "both ends are object ends -- an object-to-object connection was rebuilt");
+  assert.equal(ends.find((end) => end.object === reimportedHandoff.id)?.point, "start");
+  assert.equal(ends.find((end) => end.object === reimportedShift.id)?.point, "end");
+
+  const reimportedEngine = new ChronologEngine(reimported);
+  const reimportedExtent = resolveObjectExtent(reimported, reimportedEngine, reimportedHandoff.id);
+  assert.equal(
+    reimportedExtent.startDays.compare(engine.coordinateDays("calendar:personal", civil(2026, 3, 3, 5, 0, 0))),
+    0,
+    "the reconstructed connection resolves to the same instant the original export computed"
+  );
+});
+
+test("an unresolved TO-UID falls back to a frame anchor at the exported instant, rather than dropping the staple or fabricating a dangling object end", () => {
+  const source = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Test//EN",
+    "BEGIN:VEVENT",
+    "UID:standalone@example.test",
+    "DTSTART:20260302T220000Z",
+    "DTEND:20260303T050000Z",
+    "SUMMARY:Standalone",
+    // TO-UID names an event that was never part of this calendar at all --
+    // an export window that dropped the other half, or a hand-edited file.
+    "X-CHRONOLOG-ANCHOR;ID=abc123;ROLE=end;TO-UID=missing@nowhere.test;TO-POINT=start:20260303T050000Z",
+    "END:VEVENT",
+    "END:VCALENDAR",
+    ""
+  ].join("\r\n");
+  const document = createStructuralDocument();
+  importICS(source, document, { label: "Reimport" });
+  assert.equal(validateDocument(document).valid, true, "no dangling object end is ever fabricated");
+
+  const event = Object.values(document.events).find((item) => item.payload.title === "Standalone");
+  assert.ok(event);
+  const staples = staplesForObject(document, event.id);
+  assert.equal(staples.length, 1, "the connection is not silently dropped");
+  const ends = objectEndsOf(staples[0]);
+  assert.equal(ends.length, 1, "the unresolvable far end became a frame, not a second object end");
+  assert.equal(ends[0].point, "end");
+
+  const far = frameEndOf(staples[0]);
+  assert.ok(far, "the fallback is a frame anchor -- correct in wall time, the connection itself is lost");
+  const engine = new ChronologEngine(document);
+  assert.equal(
+    engine.coordinateDays(far.frame, far.coordinate).compare(engine.coordinateDays(far.frame, civil(2026, 3, 3, 5, 0, 0))),
+    0,
+    "the exported instant is preserved exactly, even though TO-UID could not resolve"
+  );
+});
+
+test("a correspondence staple (frame-to-frame) never appears on any VEVENT, and export does not throw", () => {
+  const document = createSampleDocument({ includeEvents: false, includePattern: false });
+  const event = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("1", "hour") },
+    payload: { title: "Ordinary meeting" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: event.id,
+    frame: "calendar:personal",
+    role: "placed",
+    coordinate: civil(2026, 4, 1, 9, 0, 0)
+  });
+  // Frame-to-frame, no object or series end at all -- not an event property,
+  // and must not be written onto any VEVENT.
+  const correspondence = putStaple(document, {
+    kind: "correspondence",
+    ends: [
+      frameEnd("calendar:personal", civil(2026, 4, 1, 0, 0, 0)),
+      frameEnd("frame:wall-time", civil(2026, 4, 1, 0, 0, 0))
+    ]
+  });
+  assert.equal(validateDocument(document).valid, true);
+  const engine = new ChronologEngine(document);
+  let output;
+  assert.doesNotThrow(() => {
+    output = exportICS(document, { frame: "calendar:personal", engine, now: NOW });
+  });
+  assert.doesNotMatch(
+    output,
+    new RegExp(correspondence.id),
+    "the correspondence staple's own record id never appears on any VEVENT"
+  );
+  assert.doesNotMatch(output, /X-CHRONOLOG-ANCHOR/, "a correspondence is not an anchor and must not export as one");
 });

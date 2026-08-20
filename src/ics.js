@@ -21,13 +21,26 @@ import {
   addRelation,
   createId,
   durationMagnitude,
+  frameEnd,
+  objectEnd,
   putStaple,
+  seriesEnd,
   stableVirtualId,
   suppressVirtual,
   touch
 } from "./model.js";
 import { recurrenceEndMode, recurrenceUntilForCoordinate } from "./recurrence-end.js";
-import { resolveObjectExtent, seriesSegments, staplesForObject } from "./staples.js";
+import {
+  DEFAULT_POINT,
+  endScope,
+  extentPointDays,
+  frameEndOf,
+  resolveObjectExtent,
+  seriesSegments,
+  stapleEndFor,
+  stapleOtherEnd,
+  staplesForObject
+} from "./staples.js";
 
 function splitOutsideQuotes(value, separator) {
   const parts = [];
@@ -383,12 +396,12 @@ function dayFractionMagnitude(text) {
 // so this only ever reconstructs what an earlier ChronoLog export explicitly
 // wrote, never a guess from a title, a category, or a duration.
 //
-// Anchors are reconstructed against THIS import's own calendar frame, not
-// whatever frame id the export happened to carry -- a fresh import always
-// mints a fresh frame (see `addFrame` below), so a raw foreign frame id could
-// never resolve anyway. The exact wall-clock instant round-trips regardless,
-// because the encoding is an ICS timestamp, not a frame-relative value.
-function importAnchorStaples(document, component, objectId, calendarFrameId) {
+// This only COLLECTS specs -- it cannot build the staple yet, because an
+// object-to-object anchor's TO-UID may name an event that has not been
+// created yet (it can appear later in the same calendar, or in a calendar
+// processed later in the same import). `finalizeAnchorStaples` runs once the
+// whole import's uid -> event map is complete.
+function importAnchorStaples(component, objectId, calendarFrameId, pending) {
   const anchorProps = properties(component, "X-CHRONOLOG-ANCHOR");
   if (!anchorProps.length) return;
   const spreadById = new Map();
@@ -406,23 +419,83 @@ function importAnchorStaples(document, component, objectId, calendarFrameId) {
   for (const prop of anchorProps) {
     const parsed = parseICSDate(prop);
     if (!parsed) continue;
-    const role = parameter(prop, "ROLE") || "start";
-    const offset = parameter(prop, "OFFSET");
     const id = parameter(prop, "ID");
-    const spread = id ? spreadById.get(id) : null;
-    putStaple(document, {
-      object: objectId,
-      kind: "anchor",
-      role,
-      frame: calendarFrameId,
+    pending.push({
+      objectId,
+      calendarFrameId,
+      point: parameter(prop, "ROLE") || DEFAULT_POINT,
+      offset: parameter(prop, "OFFSET"),
+      spread: id ? spreadById.get(id) || null : null,
       coordinate: parsed.coordinate,
-      ...(offset ? { payload: { offset: dayFractionMagnitude(offset) } } : {}),
-      ...(spread ? { spread } : {})
+      toUid: parameter(prop, "TO-UID"),
+      toPoint: parameter(prop, "TO-POINT")
     });
   }
 }
 
-function eventFromEntry(document, entry, warnings) {
+// Builds the staples every `importAnchorStaples` call above deferred, now that
+// `importedByUid` (every event this import created, keyed by its own uid) is
+// complete. TO-UID only ever reconstructs an object-to-object connection when
+// it resolves WITHIN THIS IMPORT -- ICS has no property for "this event's
+// start IS that event's end", so an object-to-object staple only round-trips
+// when both halves came back together. When it does not resolve (the other
+// event was dropped, filtered by an export window, or never existed), a
+// dangling object end would fail `validateDocument` and take the whole file
+// offline, so this falls back to a frame anchor at the exported instant --
+// correct in wall time, the connection itself is a STATED LIMITATION of the
+// encoding, not silently dropped and not invented as a fake object end.
+function finalizeAnchorStaples(document, pending, importedByUid) {
+  const consumed = new Set();
+  for (let index = 0; index < pending.length; index += 1) {
+    if (consumed.has(index)) continue;
+    const spec = pending[index];
+    const offsetMagnitude = spec.offset ? dayFractionMagnitude(spec.offset) : null;
+    const targetId = spec.toUid ? importedByUid.get(spec.toUid) : null;
+    if (!targetId || targetId === spec.objectId) {
+      putStaple(document, {
+        kind: "anchor",
+        ends: [objectEnd(spec.objectId, spec.point, offsetMagnitude), frameEnd(spec.calendarFrameId, spec.coordinate)],
+        ...(spec.spread ? { spread: spec.spread } : {})
+      });
+      continue;
+    }
+    // `applyAnchorAnnotations` writes an X-CHRONOLOG-ANCHOR on BOTH objects'
+    // own VEVENTs for one object-to-object staple (each end annotates its
+    // own component). So the mirrored spec -- naming THIS spec's own object
+    // back, at THIS spec's own point -- is the OTHER HALF of the exact same
+    // connection, not a second one; reconstructing both halves separately
+    // would double the staple. Matched by identity, not id ordering, and
+    // consumed so it is skipped when its own turn comes.
+    const mirrorIndex = pending.findIndex((candidate, candidateIndex) =>
+      candidateIndex > index
+      && !consumed.has(candidateIndex)
+      && candidate.objectId === targetId
+      && importedByUid.get(candidate.toUid) === spec.objectId
+      && (candidate.toPoint || DEFAULT_POINT) === spec.point
+      && candidate.point === (spec.toPoint || DEFAULT_POINT));
+    let farOffsetMagnitude = null;
+    if (mirrorIndex >= 0) {
+      consumed.add(mirrorIndex);
+      const mirror = pending[mirrorIndex];
+      // The far end's own offset (a named point on the FAR object) only ever
+      // rides on that object's own half of the export; an asymmetric import
+      // (only one half survived -- e.g. an export window, or a hand-authored
+      // file) still reconstructs a valid connection, just without a named
+      // offset on the end nothing described.
+      farOffsetMagnitude = mirror.offset ? dayFractionMagnitude(mirror.offset) : null;
+    }
+    putStaple(document, {
+      kind: "anchor",
+      ends: [
+        objectEnd(spec.objectId, spec.point, offsetMagnitude),
+        objectEnd(targetId, spec.toPoint || DEFAULT_POINT, farOffsetMagnitude)
+      ],
+      ...(spec.spread ? { spread: spec.spread } : {})
+    });
+  }
+}
+
+function eventFromEntry(document, entry, warnings, pendingAnchors) {
   const duration = entryDurationSeconds(entry, warnings);
   const event = addEvent(document, {
     traits: ["event", ...(entry.task ? ["task"] : [])],
@@ -445,7 +518,7 @@ function eventFromEntry(document, entry, warnings) {
     }
   });
   entry.event = event;
-  importAnchorStaples(document, entry.component, event.id, entry.calendarFrame.id);
+  importAnchorStaples(entry.component, event.id, entry.calendarFrame.id, pendingAnchors);
   if (entry.start) {
     entry.relation = addRelation(document, {
       type: "attachment",
@@ -500,6 +573,12 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
     ids.push(event.id);
     existingByUid.set(uid, ids);
   }
+  // Collected across every calendar in this import so an X-CHRONOLOG-ANCHOR's
+  // TO-UID can resolve to an event that appears later in the same source, or
+  // in a calendar processed later in this same call -- see
+  // `importAnchorStaples`/`finalizeAnchorStaples`.
+  const pendingAnchors = [];
+  const importedByUid = new Map();
 
   for (const calendar of calendars) {
     const sourceId = createId("ics-source");
@@ -553,7 +632,8 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
     );
     const uidOccurrences = new Map();
     for (const entry of entries) {
-      eventFromEntry(document, entry, result.warnings);
+      eventFromEntry(document, entry, result.warnings, pendingAnchors);
+      importedByUid.set(entry.uid, entry.event.id);
       result.events.push(entry.event.id);
       if (entry.relation) result.relations.push(entry.relation.id);
       if (existingByUid.has(entry.uid)) {
@@ -639,6 +719,7 @@ export function importICS(text, document, { label = "Imported calendar" } = {}) 
       importFollowingSegmentStaple(document, segmentEntry, basePatternEntry.pattern, frame, result.warnings);
     }
   }
+  finalizeAnchorStaples(document, pendingAnchors, importedByUid);
   touch(document);
   return result;
 }
@@ -666,10 +747,8 @@ function importFollowingSegmentStaple(document, segmentEntry, pattern, frame, wa
   // regardless, because the encoding is an ICS timestamp, not a
   // frame-relative value.
   putStaple(document, {
-    series: pattern.id,
     kind: "inflection",
-    frame: frame.id,
-    coordinate: inflectionDate.coordinate,
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, inflectionDate.coordinate)],
     payload: {
       rule: {
         rrule: segmentEntry.rrule ? parseRRule(segmentEntry.rrule.value) : {},
@@ -918,16 +997,26 @@ function eventComponent(document, event, relation, now, componentName = "VEVENT"
 // X-CHRONOLOG-SPREAD pair per staple on the object, stale copies cleared
 // first so a changed staple set never leaves an orphaned property behind.
 //
-// Encoding: X-CHRONOLOG-ANCHOR;ID=<staple id>;ROLE=<role>[;OFFSET=<exact day
-// fraction>]:<ICS timestamp of the staple's own coordinate, always full
-// precision, never VALUE=DATE>. X-CHRONOLOG-SPREAD;ID=<staple id>
-// [;BEFORE=<exact day fraction>][;AFTER=<exact day fraction>]:<role, for a
-// human reading the file>. Every magnitude is an exact Rational day-fraction
-// TEXT (`Rational.toJSON`), never a float -- `dayFractionMagnitude` parses it
-// straight back with no rounding. ID correlates an ANCHOR/SPREAD pair (and
-// disambiguates the rare overdetermined case of two anchors sharing a role);
-// it is ChronoLog's own internal relation id, meaningless to any other
-// calendar, which is exactly what an X-property is for.
+// Encoding: X-CHRONOLOG-ANCHOR;ID=<staple id>;ROLE=<point>[;OFFSET=<exact day
+// fraction>]:<ICS timestamp, always full precision, never VALUE=DATE>. When
+// the staple's OTHER end is another object rather than a coordinate space --
+// ICS has no property for "this event's start IS that event's end" -- the
+// same property additionally carries TO-UID=<the other event's exported
+// UID>;TO-POINT=<the other end's point>, and its VALUE is the connection's
+// RESOLVED instant (never the far object's own placement text), so a reader
+// that ignores the params still sees a correct time. X-CHRONOLOG-SPREAD;
+// ID=<staple id>[;BEFORE=<exact day fraction>][;AFTER=<exact day fraction>]:
+// <point, for a human reading the file>. Every magnitude is an exact Rational
+// day-fraction TEXT (`Rational.toJSON`), never a float -- `dayFractionMagnitude`
+// parses it straight back with no rounding. ID correlates an ANCHOR/SPREAD
+// pair (and disambiguates the rare overdetermined case of two anchors sharing
+// a point); it is ChronoLog's own internal relation id, meaningless to any
+// other calendar, which is exactly what an X-property is for.
+//
+// A `correspondence` staple (frame<->frame, no object end at all) never
+// reaches this function: `staplesForObject` filters on an object end, so it
+// simply is not part of `staples` below -- nothing here has to recognize or
+// reject it specially.
 function applyAnchorAnnotations(component, document, engine, event) {
   if (!engine || !event?.id) return;
   const staples = staplesForObject(document, event.id);
@@ -942,7 +1031,10 @@ function applyAnchorAnnotations(component, document, engine, event) {
       // registered boundary rather than round-tripping through `extent.frame`'s
       // own law only to reformat as ICS text anyway (point 4 of the ICS
       // ruling: never emit a non-standard law's raw level values as if they
-      // were already Gregorian).
+      // were already Gregorian). This is also what makes an object-to-object
+      // connection export correctly with no other-calendar-specific work: the
+      // DERIVED extent lands here as ordinary DTSTART/DTEND regardless of
+      // which kind of far end produced it.
       setProperty(component, "DTSTART", coordinateToICS(daysToCivilCoordinate(extent.startDays), false, false));
       const durationDays = extent.endDays.sub(extent.startDays);
       if (durationDays.compare(0) > 0) {
@@ -956,23 +1048,47 @@ function applyAnchorAnnotations(component, document, engine, event) {
     }
   }
   for (const staple of staples) {
+    const near = stapleEndFor(staple, event.id);
+    const far = stapleOtherEnd(staple, near);
+    if (!near || !far) continue;
+    const point = near.point || DEFAULT_POINT;
+    let timestampCoordinate;
+    const farParams = [];
+    if (endScope(far) === "object") {
+      // The far object need not itself be exported in this window for its uid
+      // to be worth writing -- reimport only needs the uid text, not the
+      // sibling VEVENT -- so this reads its identity straight off the
+      // document rather than requiring it to already be in `calendar`.
+      const targetEvent = document.events?.[far.object];
+      const upstream = resolveObjectExtent(document, engine, far.object);
+      const instantDays = extentPointDays(upstream, far.point || DEFAULT_POINT, far, document);
+      if (instantDays === null) continue; // unresolvable connection: nothing correct to write
+      timestampCoordinate = daysToCivilCoordinate(instantDays);
+      farParams.push(
+        { name: "TO-UID", values: [targetEvent?.payload?.uid || far.object] },
+        { name: "TO-POINT", values: [far.point || DEFAULT_POINT] }
+      );
+    } else {
+      timestampCoordinate = icsBoundaryCoordinate(document, far.frame, far.coordinate);
+    }
     appendProperty(
       component,
       "X-CHRONOLOG-ANCHOR",
-      coordinateToICS(icsBoundaryCoordinate(document, staple.frame, staple.coordinate), false, false),
+      coordinateToICS(timestampCoordinate, false, false),
       [
         { name: "ID", values: [staple.id] },
-        { name: "ROLE", values: [staple.role || "start"] },
-        ...(staple.payload?.offset
-          ? [{ name: "OFFSET", values: [durationMagnitudeAsDays(staple.payload.offset, document)] }]
-          : [])
+        { name: "ROLE", values: [point] },
+        ...(near.offset
+          ? [{ name: "OFFSET", values: [durationMagnitudeAsDays(near.offset, document)] }]
+          : []),
+        ...farParams
       ]
     );
     if (staple.spread) {
       const before = staple.spread.before ? durationMagnitudeAsDays(staple.spread.before, document) : null;
       const after = staple.spread.after ? durationMagnitudeAsDays(staple.spread.after, document) : null;
       if (before || after) {
-        appendProperty(component, "X-CHRONOLOG-SPREAD", staple.role || "start", [
+        appendProperty(component, "X-CHRONOLOG-SPREAD", point, [
           { name: "ID", values: [staple.id] },
           ...(before ? [{ name: "BEFORE", values: [before] }] : []),
           ...(after ? [{ name: "AFTER", values: [after] }] : [])
@@ -1159,14 +1275,16 @@ function followingSegmentComponent(document, engine, pattern, segment, index, ba
   // The partitioning staple's OWN coordinate/frame -- the exact inflection
   // point, independent of this segment's own DTSTART (LEXICON's Rob-and-John
   // scenario: the inflection point and the new rule's first occurrence are
-  // two separately authored values, not the same instant in general).
-  const opener = segment.openedBy;
-  if (opener?.frame && opener?.coordinate) {
+  // two separately authored values, not the same instant in general). Read
+  // through the staple's own frame end, never a bare `.frame`/`.coordinate`
+  // field -- those moved onto the end when a staple became an edge.
+  const openerEnd = frameEndOf(segment.openedBy);
+  if (openerEnd?.frame && openerEnd?.coordinate) {
     setProperty(
       component,
       "X-CHRONOLOG-INFLECTION",
-      coordinateToICS(icsBoundaryCoordinate(document, opener.frame, opener.coordinate), false, false),
-      [{ name: "FRAME", values: [opener.frame] }]
+      coordinateToICS(icsBoundaryCoordinate(document, openerEnd.frame, openerEnd.coordinate), false, false),
+      [{ name: "FRAME", values: [openerEnd.frame] }]
     );
   }
   setProperty(component, "DTSTAMP", icsTimestamp(now || new Date()));

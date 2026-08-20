@@ -145,9 +145,27 @@ export function minimapColumnReach(dots, rows, baseline) {
 // A three-letter month name is always derived from the law's own authored
 // name (`monthNames()`), never a parallel table -- an authored month name
 // unlike "January" must still be able to show up abbreviated here.
+// `monthNames()` is null for a law with no month concept at all (see its own
+// comment in coordinate-law.js), which is also exactly the law a `month`
+// label rung must never be offered to (see `minimapLabelTicks`'s
+// `law.hasMonths()` filter) -- one condition governs both, so this never
+// actually indexes into null in practice, but stays defensive rather than
+// trusting a caller outside this module to have checked first.
 function monthAbbreviation(monthOneBased, law) {
-  const name = law.monthNames()[Number(monthOneBased) - 1];
+  const name = law.monthNames()?.[Number(monthOneBased) - 1];
   return name ? name.slice(0, 3) : "";
+}
+
+// The era-qualified year at a day ordinal, or null when that day falls
+// outside every era the law declares -- `formatYearAtDays` throws there
+// rather than inventing a year, and a render path must not crash for it, so
+// the caller (`minimapLabelText`) omits the label instead.
+function eraYearAtDays(days, law) {
+  try {
+    return law.formatYearAtDays(days);
+  } catch {
+    return null;
+  }
 }
 
 // The finest label level each lens may use. A lens never labels more finely
@@ -204,13 +222,20 @@ const LABEL_LADDERS = Object.freeze({
 // characters and "Aug 18 12:00" is twelve.
 const LABEL_BUDGET = Object.freeze({ hour: 12, day: 16, month: 14, quarter: 18 });
 
-// The real day-length of one stride unit, under a law -- an hour is that
-// law's own `unitDays` (exact 1/23 on a 23-hour frame, not a fixed 1/24), a
-// day is always the base unit's own length, and a month is `meanMonthDays()`
-// (an exact 146097/4800 by default, not the float literal 30.436875 this
-// used to carry). This feeds only the analytic "would this rung even fit"
-// estimate below, so a float result here is a UI heuristic, never a stored
-// coordinate.
+// The real day-length of one stride unit, under a law. Units compose
+// BOTTOM-UP (Don's ruling: "I did not change the length of an hour I changed
+// the length of a day"): an hour does not shrink to 1/23 on a 23-hour frame,
+// the DAY grows or shrinks around a fixed hour -- so `law.unitDays("hour")`
+// is the exact absolute length an hour always has, and is what this asks
+// for. A day is always the base unit's own length, and a month is
+// `meanMonthDays()` (an exact 146097/4800 by default, not the float literal
+// 30.436875 this used to carry). This feeds only the analytic "would this
+// rung even fit" estimate below, so a float result here is a UI heuristic,
+// never a stored coordinate. The `hoursPerDay()` fallback is reached only
+// when a law can compute neither an exact nor a mean hour length at all (no
+// declared or inferable hour level); it is a per-day COUNT, not the fraction
+// of a day one hour actually spans, so it is deliberately the last resort
+// here rather than the first.
 function strideUnitDays(unit, law) {
   if (unit === "hour") {
     const exact = law.unitDays("hour") ?? law.meanUnitDays("hour");
@@ -299,7 +324,19 @@ export function minimapLabelTicks(startDays, endDays, level, maxLabels = 0, law 
   const start = Rational.parse(startDays);
   const end = Rational.parse(endDays);
   if (end.compare(start) <= 0) return [];
-  const ladder = LABEL_LADDERS[level] || LABEL_LADDERS.day;
+  // A `month` rung means "walk Gregorian month boundaries" (`monthStarts`
+  // below) AND "the law has a month to name" (`monthAbbreviation`) -- both
+  // questions a law with no month concept answers the same way, so
+  // `law.hasMonths()` is the one condition that gates the rung. A law
+  // without it (a wholly custom ladder, or one with no month at all) is not
+  // guessed at with a generic walk -- out of scope this wave -- so its month
+  // rungs are dropped from the ladder entirely: a `day`-granularity lens
+  // degrades to the day/hour rungs it CAN compute, and a `month`/`quarter`
+  // granularity lens is left with no rung at all and reports no ticks,
+  // rather than emit a month label the law cannot place.
+  const ladder = (LABEL_LADDERS[level] || LABEL_LADDERS.day)
+    .filter(([unit]) => unit !== "month" || law.hasMonths());
+  if (!ladder.length) return [];
   const rangeDays = end.sub(start).toNumber();
   const override = Math.floor(Number(maxLabels) || 0);
   let chosen = null;
@@ -322,7 +359,12 @@ export function minimapLabelTicks(startDays, endDays, level, maxLabels = 0, law 
     const stride = Math.ceil(ticks.length / chosen.limit);
     ticks = ticks.filter((_, index) => index % stride === 0);
   }
-  return ticks.map((days) => ({ days, format: chosen.format, text: minimapLabelText(days, chosen.format, law) }));
+  // A tick whose text comes back empty is a day outside every era this law
+  // declares (see `minimapLabelText`'s era branch below) -- omitted rather
+  // than shown with an invented year.
+  return ticks
+    .map((days) => ({ days, format: chosen.format, text: minimapLabelText(days, chosen.format, law) }))
+    .filter((tick) => tick.text !== "");
 }
 
 export function minimapLabelText(days, granularity, law = GREGORIAN_LAW) {
@@ -332,8 +374,24 @@ export function minimapLabelText(days, granularity, law = GREGORIAN_LAW) {
   const month = Number(civil.month);
   const year = ((Number(civil.year) % 100) + 100) % 100;
   const shortYear = String(year).padStart(2, "0");
-  if (granularity === "quarter") return `Q${Math.floor((month - 1) / 3) + 1}-${shortYear}`;
-  if (granularity === "month") return `${monthAbbreviation(month, law)} '${shortYear}`;
+  // A law with an era table shows the era-qualified year ("3E 433", "44 BCE")
+  // in place of the two-digit civil year -- "Q1-26" asserts nothing true
+  // about a calendar whose year is "3E 433". A law with no era table takes
+  // the untouched branch below, byte-identical to before this existed.
+  if (granularity === "quarter") {
+    if (law.hasEras()) {
+      const eraYear = eraYearAtDays(whole, law);
+      return eraYear ? `Q${Math.floor((month - 1) / 3) + 1}-${eraYear}` : "";
+    }
+    return `Q${Math.floor((month - 1) / 3) + 1}-${shortYear}`;
+  }
+  if (granularity === "month") {
+    if (law.hasEras()) {
+      const eraYear = eraYearAtDays(whole, law);
+      return eraYear ? `${monthAbbreviation(month, law)} ${eraYear}` : "";
+    }
+    return `${monthAbbreviation(month, law)} '${shortYear}`;
+  }
   if (granularity === "hour") {
     const minutesPerHour = law.minutesPerHour().toNumber();
     const hoursPerDay = law.hoursPerDay().toNumber();

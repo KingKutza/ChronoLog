@@ -7,6 +7,7 @@ import {
   removeStaplesForPatterns,
   touch
 } from "./model.js";
+import { stapleReferencesId } from "./staples.js";
 
 // Invariant: the reconciler only ever ASSIGNS or DELETES whole records in
 // `document` (document.events[id] = ..., delete document.events[id], and the
@@ -167,7 +168,12 @@ function removeSource(document, sourceId) {
   }
   if (frame) {
     for (const [id, relation] of Object.entries(document.relations || {})) {
-      if (relation.frame === frame.id || relation.parent === frame.id || relation.child === frame.id) {
+      // A staple names its frames on its ENDS, so `relation.frame` never sees
+      // one: a connection into the frame being removed has to go with it, or its
+      // surviving end keeps a coordinate in a space that no longer exists and
+      // one bad pointer takes the whole file offline at its next load.
+      if (relation.frame === frame.id || relation.parent === frame.id || relation.child === frame.id
+        || (relation.type === "staple" && stapleReferencesId(relation, frame.id))) {
         delete document.relations[id];
       }
     }

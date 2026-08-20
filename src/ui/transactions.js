@@ -6,6 +6,7 @@ import {
   removeStaplesForPatterns
 } from "../model.js";
 import { bundleOps, recordOps } from "../ops.js";
+import { stapleReferencesId, stapleTouchesAny } from "../staples.js";
 import { applySeriesHeal, healCandidateIds, planSeriesHeal } from "../series-heal.js";
 
 // Document-mutation-with-undo helpers shared by the inspector and Frames
@@ -36,7 +37,7 @@ export function createTransactions(app) {
     const patternIds = new Set(Object.keys(patterns));
     if (!patternIds.size) return tracked;
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.type === "staple" && patternIds.has(relation.series)) tracked.add(id);
+      if (relation.type === "staple" && stapleTouchesAny(relation, patternIds)) tracked.add(id);
     }
     return tracked;
   }
@@ -55,7 +56,7 @@ export function createTransactions(app) {
     const ids = objectIds instanceof Set ? objectIds : new Set([...(objectIds || [])].filter(Boolean));
     if (!ids.size) return tracked;
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.type === "staple" && ids.has(relation.object)) tracked.add(id);
+      if (relation.type === "staple" && stapleTouchesAny(relation, ids)) tracked.add(id);
     }
     return tracked;
   }
@@ -189,9 +190,9 @@ export function createTransactions(app) {
     }
     for (const [id, relation] of Object.entries(documentValue.relations)) {
       if (relation.type !== "staple") continue;
-      if (bundlePatterns.has(relation.series)
-        || relation.object === eventId
-        || replaced.has(relation.object)) delete documentValue.relations[id];
+      if (stapleTouchesAny(relation, bundlePatterns)
+        || stapleReferencesId(relation, eventId)
+        || stapleTouchesAny(relation, replaced)) delete documentValue.relations[id];
     }
     if (bundle.event) documentValue.events[eventId] = clone(bundle.event);
     else delete documentValue.events[eventId];
@@ -261,7 +262,7 @@ export function createTransactions(app) {
     const ids = new Set(eventIds);
     for (const id of ids) delete documentValue.events[id];
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (ids.has(relation.event) || (relation.type === "staple" && ids.has(relation.object))) {
+      if (ids.has(relation.event) || (relation.type === "staple" && stapleTouchesAny(relation, ids))) {
         delete documentValue.relations[id];
       }
     }
@@ -274,7 +275,7 @@ export function createTransactions(app) {
         || bundlePatterns.has(overridePatternId(override))) delete documentValue.overrides[id];
     }
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.type === "staple" && bundlePatterns.has(relation.series)) delete documentValue.relations[id];
+      if (relation.type === "staple" && stapleTouchesAny(relation, bundlePatterns)) delete documentValue.relations[id];
     }
     Object.assign(documentValue.events, clone(bundle.events));
     Object.assign(documentValue.relations, clone(bundle.relations));
@@ -329,6 +330,11 @@ export function createTransactions(app) {
       relations: Object.fromEntries(Object.entries(documentValue.relations).filter(([id, relation]) =>
         relation.frame === frameId || relation.parent === frameId || relation.child === frameId
         || trackedStaples.has(id)
+        // A staple names its frames on its ENDS, so a connection into this frame
+        // is not caught by `relation.frame` at all. It has to travel with the
+        // frame's deletion, or the survivor keeps a coordinate in a space that no
+        // longer exists and one bad pointer takes the whole file offline at load.
+        || (relation.type === "staple" && stapleReferencesId(relation, frameId))
       ).map(([id, relation]) => [id, clone(relation)])),
       patterns,
       // Removing a frame removes the patterns scoped to it, so their overrides
@@ -341,7 +347,10 @@ export function createTransactions(app) {
 
   function restoreFrameBundle(documentValue, frameId, bundle) {
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.frame === frameId || relation.parent === frameId || relation.child === frameId) delete documentValue.relations[id];
+      if (relation.frame === frameId || relation.parent === frameId || relation.child === frameId
+        || (relation.type === "staple" && stapleReferencesId(relation, frameId))) {
+        delete documentValue.relations[id];
+      }
     }
     for (const [id, pattern] of Object.entries(documentValue.patterns)) {
       if (pattern.frame === frameId || pattern.appliesTo?.includes(frameId)) delete documentValue.patterns[id];
@@ -351,7 +360,7 @@ export function createTransactions(app) {
       if (bundlePatterns.has(overridePatternId(override))) delete documentValue.overrides[id];
     }
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.type === "staple" && bundlePatterns.has(relation.series)) delete documentValue.relations[id];
+      if (relation.type === "staple" && stapleTouchesAny(relation, bundlePatterns)) delete documentValue.relations[id];
     }
     if (bundle.frame) documentValue.frames[frameId] = clone(bundle.frame);
     else delete documentValue.frames[frameId];
@@ -452,7 +461,8 @@ export function createTransactions(app) {
     const replaced = new Set(bundle.replacedEventIds || Object.keys(bundle.events || {}));
     for (const [id, relation] of Object.entries(documentValue.relations)) {
       if (relation.type !== "staple") continue;
-      if (relation.series === patternId || replaced.has(relation.object)) delete documentValue.relations[id];
+      if (stapleReferencesId(relation, patternId)
+        || stapleTouchesAny(relation, replaced)) delete documentValue.relations[id];
     }
     // Clear the replaced events' current records before restoring, so this works
     // symmetrically whether the transaction being undone deleted them (a heal) or

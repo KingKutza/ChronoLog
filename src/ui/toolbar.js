@@ -829,6 +829,16 @@ export function createToolbar(app, dom) {
     optionPanel.append(...optionControls);
     options.append(summary, optionPanel);
     registerBarDropdown("lens-control-overflow", { container: options, panel: optionPanel, anchor: summary });
+    // "Today" asks where NOW sits on this frame's own axis -- a law that maps
+    // nothing onto the running clock (session.law.mapsToClock() false: a
+    // non-positional law, or one declared `clock: false`) has no such
+    // position, so the control is disabled with an honest reason rather than
+    // centering on a civil "today" the frame never claimed to have.
+    if (!session.law.mapsToClock()) {
+      todayControl.disabled = true;
+      todayControl.title = "This frame has no now-mapping, so there is no today to center on.";
+      todayControl.setAttribute("aria-label", todayControl.title);
+    }
     // One right-hand group: window movement, then today, then reset. The group's
     // `margin-left: auto` is the only thing holding the bar's middle open, which
     // is why nothing else on the bar may grow.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ChronologEngine } from "../src/engine.js";
+import { coordinateLaw } from "../src/coordinate-law.js";
 import { Rational, coordinate } from "../src/exact.js";
 import { importICS } from "../src/ics.js";
 import {
@@ -10,16 +11,19 @@ import {
   addPattern,
   addRelation,
   durationMagnitude,
+  frameEnd,
+  objectEnd,
   putStaple,
   removeStaple,
-  setSeriesEndStaple,
+  seriesEnd,
   validateDocument
 } from "../src/model.js";
 import {
-  ANCHOR_ROLE_ORDER,
   STAPLE_KINDS,
+  effectiveObjectStaples,
   isFuzzyStaple,
   resolveObjectExtent,
+  stapleKindScopes,
   stapleSpreadDays,
   staplesForSeries
 } from "../src/staples.js";
@@ -35,12 +39,17 @@ import {
 } from "../src/ui/inspector.js";
 import { createStructuralDocument } from "./helpers/sample-document.js";
 
-// Owner item 4 (8.19 field report): the shipped end-staple field
-// "presupposes that an end staple is special. I see no clear mechanism to add
-// an arbitrary number or type of staples." This file exercises the general
-// staples section that replaces it -- an open collection, authored the same
-// way regardless of kind -- plus items 5 (weight visibility) and 8 ("Visible
-// in" removal) which share the same object editor card.
+// Owner's 8.20 field report: the shipped card kept a separate Start
+// date/time GUI alongside the staples section, treating "start" as special --
+// "if I enter an anchor at point end, 17:00 and a durration of 180m No event
+// appears and I get an error that start time is null. This is bad because it
+// treats the Start time as special, when no staple should be special." This
+// file exercises the general replacement: the staple list IS the placement
+// interface, one row per connection (the implicit default-start staple first,
+// then every authored one), each with a single variable-precision coordinate
+// field, driven under `src/coordinate-entry.js`'s law-governed parser rather
+// than a date/time pair. Items 5 (weight visibility) and 8 ("Visible in"
+// removal) share the same card and are exercised alongside it.
 //
 // Where the DOM is too thin to drive `innerHTML`/`FormData` flows (this
 // codebase's own established limit -- see test/frame-creation.test.js and
@@ -49,8 +58,7 @@ import { createStructuralDocument } from "./helpers/sample-document.js";
 // small stub-DOM harness (copied from test/dock-card-refresh.test.js's
 // pattern, extended with just enough of `HTMLFormElement`/`FormData` to
 // submit a real form) covers the handful of things that only make sense as
-// rendered structure: the staples section's placement, and that "Visible in"
-// is truly gone from the rendered card rather than merely unused.
+// rendered structure and the owner's bug end to end.
 
 function civil(year, month, day, hour = 0, minute = 0, second = 0) {
   return coordinate([
@@ -71,7 +79,8 @@ function appFor(chronolog) {
 }
 
 // A plain, non-recurring event on a calendar frame -- the "object" scope's
-// minimal fixture.
+// minimal fixture. 30-minute duration, placed by the implicit attachment
+// relation (the migration: an attachment IS the default start staple).
 function documentWithEvent() {
   const document = createStructuralDocument();
   addFrame(document, { id: "calendar:test", title: "Test calendar", traits: ["set", "calendar"], basis: "frame:wall-time" });
@@ -113,9 +122,9 @@ function documentWithSeries() {
 // The registry-driven dropdown
 // ---------------------------------------------------------------------------
 
-test("stapleKindOptions is STAPLE_KINDS itself, filtered by scope -- never a hand-written list", () => {
-  const seriesKinds = Object.keys(STAPLE_KINDS).filter((kind) => STAPLE_KINDS[kind].targets.includes("series"));
-  const objectKinds = Object.keys(STAPLE_KINDS).filter((kind) => STAPLE_KINDS[kind].targets.includes("object"));
+test("stapleKindOptions is STAPLE_KINDS itself, filtered by scope -- never a hand-written list, and correspondence never appears on this card", () => {
+  const seriesKinds = Object.keys(STAPLE_KINDS).filter((kind) => kind !== "correspondence" && stapleKindScopes(kind).includes("series"));
+  const objectKinds = Object.keys(STAPLE_KINDS).filter((kind) => kind !== "correspondence" && stapleKindScopes(kind).includes("object"));
   assert.deepEqual(stapleKindOptions("series").map(([value]) => value).sort(), seriesKinds.sort());
   assert.deepEqual(stapleKindOptions("object").map(([value]) => value).sort(), objectKinds.sort());
   // Series-only kinds (partitioning/phase) must never be offered on a bare,
@@ -123,112 +132,152 @@ test("stapleKindOptions is STAPLE_KINDS itself, filtered by scope -- never a han
   assert.ok(!stapleKindOptions("object").some(([value]) => value === "end"));
   assert.ok(!stapleKindOptions("object").some(([value]) => value === "inflection"));
   assert.ok(!stapleKindOptions("object").some(([value]) => value === "phase"));
+  // `correspondence` (frame-to-frame) is not an object/series staple at all --
+  // excluded explicitly rather than relying on its own scope set happening
+  // to miss both.
+  assert.ok(!stapleKindOptions("object").some(([value]) => value === "correspondence"));
+  assert.ok(!stapleKindOptions("series").some(([value]) => value === "correspondence"));
   // Every option's label comes straight from the registry, not a restatement.
   for (const [value, label] of stapleKindOptions("series")) assert.equal(label, STAPLE_KINDS[value].label);
 });
 
 // ---------------------------------------------------------------------------
-// buildStapleInput -- the Add control's decision, pulled out of the DOM
+// buildStapleInput -- the staple row's own decision, pulled out of the DOM
 // ---------------------------------------------------------------------------
 
-test("buildStapleInput rejects a kind that cannot target the scope being authored", () => {
+test("buildStapleInput rejects a kind that cannot connect this scope to the chosen far end", () => {
   assert.throws(
-    () => buildStapleInput({ scope: "object", targetId: "event:x", kind: "end", dateText: "2026-01-01" }),
-    /cannot be placed on an event/
+    () => buildStapleInput({
+      scope: "object", targetId: "event:x", kind: "end",
+      farScope: "frame", farId: "calendar:test", coordinateText: "2026-01-01", law: coordinateLaw(createStructuralDocument(), "frame:wall-time")
+    }),
+    /cannot connect an event/
   );
 });
 
-test("buildStapleInput requires a date, and a role for an anchoring kind", () => {
-  assert.throws(() => buildStapleInput({ scope: "object", targetId: "event:x", kind: "anchor", role: "start" }), /needs a date/);
+test("buildStapleInput requires a coordinate for a frame connection, and a name for a custom point", () => {
+  const law = coordinateLaw(createStructuralDocument(), "frame:wall-time");
   assert.throws(
-    () => buildStapleInput({ scope: "object", targetId: "event:x", kind: "anchor", role: "__custom__", roleName: "", dateText: "2026-01-01" }),
-    /Name this anchor's role/
+    () => buildStapleInput({ scope: "object", targetId: "event:x", kind: "anchor", nearPoint: "start", farScope: "frame", farId: "frame:wall-time", law }),
+    /needs a coordinate/
+  );
+  assert.throws(
+    () => buildStapleInput({
+      scope: "object", targetId: "event:x", kind: "anchor", nearPoint: "__custom__", nearPointName: "",
+      farScope: "frame", farId: "frame:wall-time", coordinateText: "2026-01-01", law
+    }),
+    /Name this point/
   );
 });
 
-test("an end staple authored through buildStapleInput is byte-equivalent to setSeriesEndStaple's own shape", () => {
-  const { document, pattern } = documentWithSeries();
-  const engine = new ChronologEngine(document);
+// Owner's ruling made concrete: "Type month day year hour minute second
+// millisecond" -- precision typed IS coordinate depth, and depth is never
+// fuzziness. A bare date on ANY kind resolves to midnight of that day (the
+// law's own default-filling for levels below what was typed), never an
+// inferred end-of-day -- that would be a kind-specific business rule sitting
+// inside the one generic coordinate field, contradicting "every row is the
+// same shape".
+test("a bare-date coordinate resolves to midnight of that day -- precision typed is depth, never an inferred end-of-day", () => {
+  const law = coordinateLaw(createStructuralDocument(), "frame:wall-time");
   const input = buildStapleInput({
-    scope: "series",
-    targetId: pattern.id,
-    kind: "end",
-    dateText: "2026-01-19",
-    timeText: "",
-    frame: "calendar:test"
-  });
-  const reference = setSeriesEndStaple(
-    document, "pattern:reference-only", "calendar:test", civil(2026, 1, 19, 23, 59, 59), { dateOnly: true }
-  );
-  // Only `series` differs (the general control names the real pattern; the
-  // reference call above named a throwaway id to avoid touching it) -- every
-  // other field the substrate stores is identical.
-  assert.deepEqual(Object.keys(input).sort(), Object.keys(reference).filter((key) => key !== "id" && key !== "type").sort());
-  assert.equal(input.kind, reference.kind);
-  assert.equal(input.frame, reference.frame);
-  assert.deepEqual(input.parameters, reference.parameters);
-  assert.equal(input.series, pattern.id, "names the real series, not the reference call's throwaway one");
-  // The coordinate itself is compared exactly, never by spelling (AGENTS.md:
-  // ICS writes month "01" where the generator writes "1").
-  assert.equal(
-    engine.coordinateDays(input.frame, input.coordinate).compare(engine.coordinateDays(reference.frame, reference.coordinate)),
-    0,
-    "the general control's default end-of-day time is the exact instant setSeriesEndStaple always used"
-  );
-});
-
-test("buildStapleInput's end-of-day default is unique to the end kind; every other kind defaults to midnight", () => {
-  const anchorInput = buildStapleInput({
-    scope: "object", targetId: "event:x", kind: "anchor", role: "start", dateText: "2026-01-19", frame: "calendar:test"
+    scope: "object", targetId: "event:x", kind: "anchor", nearPoint: "start",
+    farScope: "frame", farId: "frame:wall-time", coordinateText: "2026-01-19", law
   });
   const engine = new ChronologEngine(createStructuralDocument());
-  assert.equal(engine.coordinateDays("frame:wall-time", anchorInput.coordinate).compare(
-    engine.coordinateDays("frame:wall-time", civil(2026, 1, 19, 0, 0, 0))
-  ), 0);
-  assert.deepEqual(anchorInput.parameters, { dateOnly: true });
+  assert.equal(
+    engine.coordinateDays("frame:wall-time", input.ends[1].coordinate)
+      .compare(engine.coordinateDays("frame:wall-time", civil(2026, 1, 19, 0, 0, 0))),
+    0
+  );
 });
 
-test("a named anchor role pairs with an offset magnitude; start/end/midpoint never do", () => {
-  const named = buildStapleInput({
-    scope: "object", targetId: "event:x", kind: "anchor", role: "__custom__", roleName: "shift handover",
-    dateText: "2026-01-19", timeText: "17:00", frame: "calendar:test", offsetAmount: "45", offsetUnit: "minute"
+// An explicit clock time on purpose: this asserts that what was typed is what is
+// stored. The bare-date case is a question about how a SEGMENT CLOSES, not about
+// what the field records, and it is covered where the projection is checked.
+test("an end staple authored through buildStapleInput connects the series to a frame at the exact typed instant", () => {
+  const { document, pattern } = documentWithSeries();
+  const law = coordinateLaw(document, "calendar:test");
+  const input = buildStapleInput({
+    scope: "series", targetId: pattern.id, kind: "end",
+    farScope: "frame", farId: "calendar:test", coordinateText: "2026-01-19 23:59:59", law
   });
-  assert.equal(named.role, "shift handover");
-  assert.ok(named.payload?.offset, "the offset magnitude is paired with the named point");
+  assert.equal(input.kind, "end");
+  assert.deepEqual(input.ends[0], seriesEnd(pattern.id));
+  assert.equal(input.ends[1].frame, "calendar:test");
+  putStaple(document, { ...input, id: "relation:end-under-test" });
+  assert.equal(validateDocument(document).valid, true);
+  const engine = new ChronologEngine(document);
+  assert.equal(
+    engine.coordinateDays("calendar:test", document.relations["relation:end-under-test"].ends[1].coordinate)
+      .compare(engine.coordinateDays("calendar:test", civil(2026, 1, 19, 23, 59, 59))),
+    0
+  );
+});
+
+test("a named point pairs with an offset magnitude; start/end/midpoint never do", () => {
+  const { document } = documentWithEvent();
+  const law = coordinateLaw(document, "calendar:test");
+  const named = buildStapleInput({
+    scope: "object", targetId: "event:x", kind: "anchor",
+    nearPoint: "__custom__", nearPointName: "shift handover", nearOffsetAmount: "45", nearOffsetUnit: "minute",
+    farScope: "frame", farId: "calendar:test", coordinateText: "2026-01-19 17:00", law
+  });
+  assert.equal(named.ends[0].point, "shift handover");
+  assert.ok(named.ends[0].offset, "the offset magnitude is paired with the named point");
 
   const start = buildStapleInput({
-    scope: "object", targetId: "event:x", kind: "anchor", role: "start",
-    dateText: "2026-01-19", timeText: "17:00", frame: "calendar:test", offsetAmount: "45", offsetUnit: "minute"
+    scope: "object", targetId: "event:x", kind: "anchor", nearPoint: "start",
+    nearOffsetAmount: "45", nearOffsetUnit: "minute",
+    farScope: "frame", farId: "calendar:test", coordinateText: "2026-01-19 17:00", law
   });
-  assert.equal(start.payload, undefined, "an offset typed for a fixed role is not stored -- its meaning is not defined");
+  assert.equal(start.ends[0].offset, undefined, "an offset typed for a fixed point is not stored -- its meaning is not defined");
 });
 
 // ---------------------------------------------------------------------------
-// One list row's display fields
+// One list row's display fields -- one coordinate text, never a date/time pair
 // ---------------------------------------------------------------------------
 
-test("stapleRowModel reports the registry label, role, position, and fuzzy marker for one row", () => {
+test("stapleRowModel represents the implicit placement row as one row among others, with a single coordinate field", () => {
   const { document, event } = documentWithEvent();
-  assert.deepEqual(ANCHOR_ROLE_ORDER, ["start", "end", "midpoint"], "the precedence order the role field itself offers first");
-  const plain = putStaple(document, {
-    object: event.id, kind: "anchor", role: ANCHOR_ROLE_ORDER[0], frame: "calendar:test", coordinate: civil(2026, 2, 1, 9, 30, 0)
+  const rows = effectiveObjectStaples(document, event.id);
+  assert.equal(rows.length, 1);
+  const model = stapleRowModel(rows[0], document);
+  assert.equal(model.implicit, true);
+  assert.equal(model.nearPoint, "start");
+  assert.equal(model.farScope, "frame");
+  assert.equal(model.farId, "calendar:test");
+  assert.equal(model.coordinateText, "2026-01-05 09:00:00");
+  assert.equal(model.fuzzy, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(model, "date"), false, "no separate date field");
+  assert.equal(Object.prototype.hasOwnProperty.call(model, "time"), false, "no separate time field");
+});
+
+test("stapleRowModel reports the registry label, near/far, single coordinate text, and fuzzy marker for an authored row", () => {
+  const { document, event } = documentWithEvent();
+  const law = coordinateLaw(document, "calendar:test");
+  putStaple(document, {
+    id: "relation:plain-anchor",
+    kind: "anchor",
+    ends: [objectEnd(event.id, "start"), frameEnd("calendar:test", civil(2026, 2, 1, 9, 30, 0))]
   });
-  const plainRow = stapleRowModel(plain, "object");
-  assert.equal(plainRow.kindLabel, STAPLE_KINDS.anchor.label);
-  assert.equal(plainRow.role, "start");
-  assert.equal(plainRow.date, "2026-02-01");
-  assert.equal(plainRow.time, "09:30");
-  assert.equal(plainRow.fuzzy, false);
-  assert.equal(plainRow.scope, "object");
+  const plainRow = effectiveObjectStaples(document, event.id).find((row) => row.staple?.id === "relation:plain-anchor");
+  const plainModel = stapleRowModel(plainRow, document);
+  assert.equal(plainModel.implicit, false);
+  assert.equal(plainModel.kindLabel, STAPLE_KINDS.anchor.label);
+  assert.equal(plainModel.nearPoint, "start");
+  assert.equal(plainModel.farLabel, "Test calendar");
+  assert.equal(plainModel.coordinateText, "2026-02-01 09:30:00");
+  assert.equal(plainModel.fuzzy, false);
 
   const fuzzy = putStaple(document, buildStapleInput({
-    scope: "object", targetId: event.id, kind: "anchor", role: "end",
-    dateText: "2026-02-02", timeText: "", frame: "calendar:test",
+    scope: "object", targetId: event.id, kind: "anchor", nearPoint: "end",
+    farScope: "frame", farId: "calendar:test", coordinateText: "2026-02-02", law,
     fuzzy: true, spreadBeforeAmount: "10", spreadAfterAmount: "10"
   }));
-  const fuzzyRow = stapleRowModel(fuzzy, "object");
-  assert.equal(fuzzyRow.fuzzy, true);
-  assert.equal(fuzzyRow.time, "", "a dateOnly staple shows no time, matching the start-date field's own convention");
+  const fuzzyRow = effectiveObjectStaples(document, event.id).find((row) => row.staple?.id === fuzzy.id);
+  const fuzzyModel = stapleRowModel(fuzzyRow, document);
+  assert.equal(fuzzyModel.fuzzy, true);
+  assert.equal(fuzzyModel.coordinateText, "2026-02-02", "depth reflects exactly what was typed -- a bare date stays a bare date");
 });
 
 // ---------------------------------------------------------------------------
@@ -236,29 +285,28 @@ test("stapleRowModel reports the registry label, role, position, and fuzzy marke
 // ---------------------------------------------------------------------------
 
 test("adding a staple of each registered kind is one journalled, undoable change, and undo removes it", () => {
-  for (const [kindName, definition] of Object.entries(STAPLE_KINDS)) {
-    const scope = definition.targets[0];
+  for (const kindName of Object.keys(STAPLE_KINDS)) {
+    if (kindName === "correspondence") continue; // frame+frame only; never authored on this card
+    const definition = STAPLE_KINDS[kindName];
+    const scope = stapleKindScopes(kindName).includes("object") ? "object" : "series";
     const fixture = scope === "series" ? documentWithSeries() : documentWithEvent();
     const { document } = fixture;
     const targetId = scope === "series" ? fixture.pattern.id : fixture.event.id;
+    const law = coordinateLaw(document, "calendar:test");
     const { app, changes } = appFor(document);
     const input = buildStapleInput({
       scope,
       targetId,
       kind: kindName,
-      role: definition.anchors ? "start" : undefined,
-      dateText: "2026-02-01",
-      timeText: "09:00",
-      frame: "calendar:test"
+      nearPoint: definition.anchors ? "start" : undefined,
+      farScope: "frame",
+      farId: "calendar:test",
+      coordinateText: "2026-02-01 09:00",
+      law
     });
     const stapleId = "relation:staple-under-test";
 
     changes.length = 0;
-    // The same choice src/ui/inspector.js's staples section makes: a series
-    // staple through `executePatternChange`, an object staple through
-    // `executeEventChange` -- both now correctly track a staple in their
-    // bundle (`trackPatternStaples`/`trackObjectStaples` in
-    // src/ui/transactions.js), so both journal and undo it as one change.
     if (scope === "series") {
       app.executePatternChange(`Add ${kindName} staple`, targetId, (documentValue) => putStaple(documentValue, { ...input, id: stapleId }));
     } else {
@@ -280,15 +328,10 @@ test("adding a staple of each registered kind is one journalled, undoable change
   }
 });
 
-// AGENTS.md's cascade rule, staple-shaped: "an event's deletion has to sweep
-// its own staples exactly the way a pattern's deletion sweeps its own."
-// src/ui/inspector.js's Delete button relies on `executeEventChange` doing
-// this itself (`cascadeRemovedObjects` in src/ui/transactions.js) rather than
-// sweeping staples by hand, so this pins that the substrate really does it.
 test("deleting an event deletes its own object staples in the same undoable transaction, and undo restores both together", () => {
   const { document, event } = documentWithEvent();
   const staple = putStaple(document, {
-    object: event.id, kind: "anchor", role: "start", frame: "calendar:test", coordinate: civil(2026, 2, 1, 9, 0, 0)
+    kind: "anchor", ends: [objectEnd(event.id, "start"), frameEnd("calendar:test", civil(2026, 2, 1, 9, 0, 0))]
   });
   const { app } = appFor(document);
 
@@ -313,7 +356,7 @@ test("deleting an event deletes its own object staples in the same undoable tran
 test("removing a staple is one journalled, undoable change", () => {
   const { document, event } = documentWithEvent();
   const staple = putStaple(document, {
-    object: event.id, kind: "anchor", role: "start", frame: "calendar:test", coordinate: civil(2026, 2, 1, 9, 0, 0)
+    kind: "anchor", ends: [objectEnd(event.id, "start"), frameEnd("calendar:test", civil(2026, 2, 1, 9, 0, 0))]
   });
   const { app, changes } = appFor(document);
 
@@ -339,9 +382,14 @@ test("an end staple added through the general staples flow cuts a series project
   const frame = document.frames[imported.frames[0]];
   const pattern = Object.values(document.patterns).find((item) => item.kind === "ics-rrule");
   const { app, changes } = appFor(document);
+  const law = coordinateLaw(document, frame.id);
 
+  // A BARE DATE, typed the way a user types one. Nothing here is kind-special:
+  // day precision names a DAY, so the segment closes at the end of it and the
+  // 19th's own occurrence survives the cut.
   const input = buildStapleInput({
-    scope: "series", targetId: pattern.id, kind: "end", dateText: "2026-01-19", timeText: "", frame: frame.id
+    scope: "series", targetId: pattern.id, kind: "end",
+    farScope: "frame", farId: frame.id, coordinateText: "2026-01-19", law
   });
   changes.length = 0;
   app.executePatternChange("Add staple", pattern.id, (documentValue) => putStaple(documentValue, input));
@@ -362,14 +410,15 @@ test("an end staple added through the general staples flow cuts a series project
 });
 
 // ---------------------------------------------------------------------------
-// Fuzzy staples: asymmetric before/after spread
+// Fuzzy staples: asymmetric before/after spread, never inferred from depth
 // ---------------------------------------------------------------------------
 
 test("a fuzzy staple round-trips its asymmetric before/after spread", () => {
   const { document, event } = documentWithEvent();
+  const law = coordinateLaw(document, "calendar:test");
   const input = buildStapleInput({
-    scope: "object", targetId: event.id, kind: "anchor", role: "start",
-    dateText: "2026-02-01", timeText: "17:00", frame: "calendar:test",
+    scope: "object", targetId: event.id, kind: "anchor", nearPoint: "start",
+    farScope: "frame", farId: "calendar:test", coordinateText: "2026-02-01 17:00", law,
     fuzzy: true, spreadBeforeAmount: "15", spreadBeforeUnit: "minute", spreadAfterAmount: "30", spreadAfterUnit: "minute"
   });
   const staple = putStaple(document, input);
@@ -382,32 +431,67 @@ test("a fuzzy staple round-trips its asymmetric before/after spread", () => {
 
 test("a staple with no spread amounts entered is not reported as fuzzy", () => {
   const { document, event } = documentWithEvent();
+  const law = coordinateLaw(document, "calendar:test");
   const staple = putStaple(document, buildStapleInput({
-    scope: "object", targetId: event.id, kind: "anchor", role: "start",
-    dateText: "2026-02-01", frame: "calendar:test", fuzzy: true
+    scope: "object", targetId: event.id, kind: "anchor", nearPoint: "start",
+    farScope: "frame", farId: "calendar:test", coordinateText: "2026-02-01", law, fuzzy: true
   }));
   assert.equal(isFuzzyStaple(staple), false);
 });
 
+test("coordinate entry depth never sets a spread; the fuzzy checkbox is the only thing that does", () => {
+  const { document, event } = documentWithEvent();
+  const law = coordinateLaw(document, "calendar:test");
+  for (const text of ["2026", "2026-02-01", "2026-02-01 17:00:30"]) {
+    const input = buildStapleInput({
+      scope: "object", targetId: event.id, kind: "anchor", nearPoint: "start",
+      farScope: "frame", farId: "calendar:test", coordinateText: text, law
+    });
+    assert.equal(input.spread, undefined, `entry depth "${text}" must not imply fuzziness`);
+  }
+});
+
 // ---------------------------------------------------------------------------
-// The derived-extent readout
+// Variable precision, through the editor's own parse path, at three depths
+// ---------------------------------------------------------------------------
+
+test("variable precision at three depths, through the editor's own parse path, each lands on the exact instant", () => {
+  const { document, event } = documentWithEvent();
+  const law = coordinateLaw(document, "calendar:test");
+  const engine = new ChronologEngine(document);
+  const cases = [
+    ["2026", civil(2026, 1, 1, 0, 0, 0)],
+    ["2026 8 20", civil(2026, 8, 20, 0, 0, 0)],
+    ["2026 8 20 17:00", civil(2026, 8, 20, 17, 0, 0)]
+  ];
+  for (const [text, expected] of cases) {
+    const input = buildStapleInput({
+      scope: "object", targetId: event.id, kind: "anchor", nearPoint: "start",
+      farScope: "frame", farId: "calendar:test", coordinateText: text, law
+    });
+    assert.equal(
+      engine.coordinateDays("calendar:test", input.ends[1].coordinate).compare(engine.coordinateDays("calendar:test", expected)),
+      0,
+      `"${text}" lands on the exact instant`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The derived-extent readout, including `unresolved`
 // ---------------------------------------------------------------------------
 
 test("the derived-extent readout reports an end-anchored event's start, and names an overdetermined anchor", () => {
   const { document, event } = documentWithEvent();
-  const engine = new ChronologEngine(document);
 
-  // Explicit ids, not the substrate's own random `createId` ones: "authored
-  // order" (src/staples.js's `byAuthoredOrder`) is a lexicographic sort over
-  // relation ids, and this test's whole point is which of two same-role
-  // anchors that order picks -- a random UUID's sort position carries no
-  // relationship to which `putStaple` call actually happened first, so a
-  // random id here would make the assertion below pass or fail by chance.
+  // Explicit ids, not the substrate's own random `createId` ones: the whole
+  // point of this test is which of two same-role anchors the stable order
+  // picks, and a random id would make that pass or fail by chance.
   putStaple(document, {
     id: "relation:end-anchor-1",
-    object: event.id, kind: "anchor", role: "end", frame: "calendar:test", coordinate: civil(2026, 1, 5, 17, 0, 0)
+    kind: "anchor", ends: [objectEnd(event.id, "end"), frameEnd("calendar:test", civil(2026, 1, 5, 17, 0, 0))]
   });
-  const before = extentReadoutModel(resolveObjectExtent(document, engine, event.id));
+  const before = extentReadoutModel(resolveObjectExtent(document, new ChronologEngine(document), event.id));
   assert.equal(before.source, "anchor+magnitude");
   assert.equal(before.derivedMagnitude, false);
   assert.equal(before.end, "2026-01-05 17:00:00");
@@ -415,20 +499,21 @@ test("the derived-extent readout reports an end-anchored event's start, and name
   // half an hour earlier, not at the object's own unrelated placement.
   assert.equal(before.start, "2026-01-05 16:30:00");
   assert.deepEqual(before.overdetermined, []);
+  assert.deepEqual(before.unresolved, []);
 
   // A second "end" anchor cannot also be believed -- it is retained, named,
   // and reported, never silently averaged in.
   putStaple(document, {
     id: "relation:end-anchor-2",
-    object: event.id, kind: "anchor", role: "end", frame: "calendar:test", coordinate: civil(2026, 1, 6, 12, 0, 0)
+    kind: "anchor", ends: [objectEnd(event.id, "end"), frameEnd("calendar:test", civil(2026, 1, 6, 12, 0, 0))]
   });
-  const after = extentReadoutModel(resolveObjectExtent(document, engine, event.id));
+  const after = extentReadoutModel(resolveObjectExtent(document, new ChronologEngine(document), event.id));
   assert.equal(after.start, before.start, "placement is unchanged -- the extra anchor is not used");
   assert.equal(after.overdetermined.length, 1);
   assert.equal(after.overdetermined[0].kind, "anchor");
   assert.equal(after.overdetermined[0].kindLabel, STAPLE_KINDS.anchor.label);
   assert.equal(after.overdetermined[0].role, "end");
-  assert.match(after.overdetermined[0].reason, /already anchors this role/);
+  assert.match(after.overdetermined[0].reason, /already anchors this point/);
 });
 
 test("a zero-staple object reports an unresolved-free honest placement, not a fabricated extent", () => {
@@ -444,6 +529,68 @@ test("a zero-staple object reports an unresolved-free honest placement, not a fa
   assert.equal(model.source, "unstapled");
   assert.equal(model.start, null);
   assert.equal(model.end, null);
+  assert.deepEqual(model.unresolved, []);
+});
+
+test("a connection whose other end has no resolvable position is surfaced as unresolved, never averaged or hidden", () => {
+  const document = createStructuralDocument();
+  addFrame(document, { id: "calendar:test", title: "Test calendar", traits: ["set", "calendar"], basis: "frame:wall-time" });
+  const floating = addEvent(document, {
+    id: "event:floating", traits: ["event"], magnitudes: { duration: durationMagnitude("0") }, payload: { title: "Floating" }
+  });
+  const dependent = addEvent(document, {
+    id: "event:dependent", traits: ["event"], magnitudes: { duration: durationMagnitude("1", "hour") }, payload: { title: "Dependent" }
+  });
+  putStaple(document, {
+    kind: "anchor",
+    ends: [objectEnd(dependent.id, "start"), objectEnd(floating.id, "end")]
+  });
+  const engine = new ChronologEngine(document);
+  const model = extentReadoutModel(resolveObjectExtent(document, engine, dependent.id));
+  assert.equal(model.start, null);
+  assert.equal(model.unresolved.length, 1);
+  assert.equal(model.unresolved[0].kind, "anchor");
+  assert.match(model.unresolved[0].reason, /no resolvable position/);
+});
+
+// ---------------------------------------------------------------------------
+// An object-to-object row: the other half the owner said was missing
+// ---------------------------------------------------------------------------
+
+test("an object-to-object row authored through the editor produces a valid two-object-end staple, and the downstream event resolves at the upstream event's chosen point", () => {
+  const document = createStructuralDocument();
+  addFrame(document, { id: "calendar:test", title: "Test calendar", traits: ["set", "calendar"], basis: "frame:wall-time" });
+  const upstream = addEvent(document, {
+    id: "event:upstream", traits: ["event"],
+    magnitudes: { duration: durationMagnitude("2", "hour") },
+    payload: { title: "Upstream" }
+  });
+  addRelation(document, { type: "attachment", event: upstream.id, frame: "calendar:test", role: "placed", coordinate: civil(2026, 4, 1, 8, 0, 0) });
+
+  const downstream = addEvent(document, {
+    id: "event:downstream", traits: ["event"],
+    magnitudes: { duration: durationMagnitude("30", "minute") },
+    payload: { title: "Downstream" }
+  });
+  addRelation(document, { type: "attachment", event: downstream.id, frame: "calendar:test", role: "placed" });
+
+  const input = buildStapleInput({
+    scope: "object", targetId: downstream.id, kind: "anchor", nearPoint: "start",
+    farScope: "object", farId: upstream.id, farPoint: "end"
+  });
+  assert.deepEqual(input.ends[0], objectEnd(downstream.id, "start"));
+  assert.deepEqual(input.ends[1], objectEnd(upstream.id, "end"));
+
+  putStaple(document, { ...input, id: "relation:cross-object" });
+  assert.equal(validateDocument(document).valid, true);
+
+  const engine = new ChronologEngine(document);
+  const upstreamExtent = resolveObjectExtent(document, engine, upstream.id);
+  const downstreamExtent = resolveObjectExtent(document, engine, downstream.id);
+  assert.equal(
+    downstreamExtent.startDays.compare(upstreamExtent.endDays), 0,
+    "the downstream event starts exactly at the upstream event's chosen (end) point"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -461,12 +608,6 @@ test("the weight readout lists contributing groups in application order with cor
   const model = weightReadoutModel(explainFactWeight({ document, engine }, { event }));
   assert.equal(model.base, 1);
   assert.equal(model.baseVerdict, "standard");
-  // The event's own calendar ("Test calendar") is a contributing frame too
-  // (contributingFrameIds unions direct frame attachments with group
-  // membership) -- it ties Group A on the default weightOrder (0) and loses
-  // the tiebreak on group size (0 members vs Group A's 1), so it applies
-  // its own (unauthored, identity) formula second, before Group B's
-  // explicit weightOrder (1) places it last.
   assert.deepEqual(model.rows.map((row) => row.title), ["Group A", "Test calendar", "Group B"],
     "application order, not authored/iteration order");
   assert.deepEqual(model.rows.map((row) => row.formula), ["w * 2", "w", "w + 1"]);
@@ -481,18 +622,16 @@ test("the weight readout lists contributing groups in application order with cor
 });
 
 // ---------------------------------------------------------------------------
-// "Visible in" is gone -- structural checks on the rendered card
+// The rendered card: no start-date/start-time control, "Visible in" gone
 // ---------------------------------------------------------------------------
 
 // A minimal but real-enough stub DOM: `innerHTML` actually parses into a tree
 // (copied from test/dock-card-refresh.test.js's `MiniNode`), extended with
 // just enough of `HTMLFormElement`'s surface (`.elements`, settable
 // `.value`/`.checked`, `#id`/`.closest` lookups, `classList.toggle`) to open
-// the real event editor and submit it for real, because those two things —
-// "no rendered control writes display.lenses any more" and "existing
-// display.lenses survives a save" — are exactly the shape of thing this
-// repo's stub-DOM limit says to stop pulling into pure functions and just
-// render.
+// the real event editor and submit it for real. `dispatch(type, {target})`
+// (test/dock-dom.test.js's own established pattern) is how a delegated
+// listener on an ancestor is driven, since this stub does not bubble events.
 function createFormDom() {
   const VOID_TAGS = new Set(["input", "br", "img", "hr"]);
   function unescapeHTML(value) {
@@ -509,6 +648,7 @@ function createFormDom() {
       this.textContent = "";
       this._value = undefined;
       this._checked = undefined;
+      this.hidden = false;
     }
     get className() { return this.attrs.get("class") || ""; }
     set className(value) { this.attrs.set("class", value); }
@@ -548,6 +688,8 @@ function createFormDom() {
     set value(v) { this._value = String(v); }
     get checked() { return this._checked !== undefined ? this._checked : this.attrs.has("checked"); }
     set checked(v) { this._checked = Boolean(v); }
+    get placeholder() { return this.attrs.get("placeholder") || ""; }
+    set placeholder(v) { this.attrs.set("placeholder", String(v)); }
     get elements() {
       const map = {};
       for (const node of this.descendants()) {
@@ -637,43 +779,76 @@ function createFormDom() {
   return { MiniNode, FakeFormData };
 }
 
-function openFormHarness(document, eventId) {
+// Builds the editor's own `app` object against a real engine and real
+// undo/journalling (`createTransactions`), without opening any card -- the
+// shared base for `openFormHarness` (below) and the quick-creation test,
+// which needs `createEventAt` rather than an already-existing event.
+function buildEditorApp(document, activeFrame = "calendar:test") {
   const { MiniNode, FakeFormData } = createFormDom();
   const previous = {
     document: globalThis.document,
     FormData: globalThis.FormData,
-    requestAnimationFrame: globalThis.requestAnimationFrame
+    requestAnimationFrame: globalThis.requestAnimationFrame,
+    HTMLInputElement: globalThis.HTMLInputElement
   };
   globalThis.document = { createElement: (tag) => new MiniNode(tag) };
   globalThis.FormData = FakeFormData;
   globalThis.requestAnimationFrame = (fn) => fn(0);
+  // `focusInspectorEditor` (a freshly-created draft's own focus call) checks
+  // `instanceof HTMLInputElement`, which Node has no host definition for --
+  // stand `MiniNode` in for it so a stub `<input>` satisfies the check the
+  // way a real one would, rather than skipping the codepath entirely.
+  globalThis.HTMLInputElement = MiniNode;
   const engine = new ChronologEngine(document);
   let cardBody = null;
   const app = {
     chronolog: document,
     engine,
-    session: { inspector: null, activeFrame: "calendar:test" },
+    history: new CommandHistory(document, () => {}),
+    session: {
+      inspector: null,
+      activeFrame,
+      currentLens: () => "tactical",
+      intimateGrain: 30,
+      law: coordinateLaw(document, activeFrame)
+    },
     openDockCard(options) { cardBody = options.body; },
     dockIsOpen: () => true,
     closeDockCard() {},
     dockCardBody: () => cardBody,
-    toast() {},
+    toast(message) { app.lastToast = message; },
     store: { beginDeferred() {}, endDeferred() {} },
     refreshEngine(documentValue) { app.engine.setDocument(documentValue); return app.engine; }
   };
   Object.assign(app, createTransactions(app));
   const inspector = createInspector(app);
-  inspector.openEventInspector(eventId);
   const restore = () => Object.assign(globalThis, previous);
-  return { app, cardBody, restore };
+  return { app, inspector, getCardBody: () => cardBody, restore };
 }
 
-test("the staples section sits below the recurrence rows and above the Groups field; no control writes display.lenses", () => {
+function openFormHarness(document, eventId) {
+  const { app, inspector, getCardBody, restore } = buildEditorApp(document);
+  inspector.openEventInspector(eventId);
+  return { app, cardBody: getCardBody(), restore };
+}
+
+test("there is no start-date or start-time control in the card; the staple list is the only placement interface", () => {
   const { document, event } = documentWithEvent();
   event.display = { lenses: ["intimate", "tactical"] };
   const { cardBody, restore } = openFormHarness(document, event.id);
   try {
+    assert.equal(cardBody.querySelector('[name="startDate"]'), null);
+    assert.equal(cardBody.querySelector('[name="startTime"]'), null);
+    assert.equal(cardBody.querySelector("[data-object-date-label]"), null);
+    assert.equal(cardBody.querySelector("[data-object-time-label]"), null);
     assert.equal(cardBody.querySelector('[name="visibility"]'), null, "the 'Visible in' select is gone from the rendered card");
+    // No date/time pair anywhere in the staple Add control either -- the
+    // single coordinate field replaces it everywhere, not just on Start.
+    assert.equal(cardBody.querySelector('[name="stapleDate"]'), null);
+    assert.equal(cardBody.querySelector('[name="stapleTime"]'), null);
+    assert.equal(cardBody.querySelector('[name="endStapleDate"]'), null);
+    assert.equal(cardBody.querySelector('[name="endStapleTime"]'), null);
+    assert.ok(cardBody.querySelector('[name="stapleCoordinate"]'), "the one coordinate field exists");
 
     const order = cardBody.descendants();
     const recurrenceIndex = order.indexOf(cardBody.querySelector("[data-recurrence-row]"));
@@ -682,11 +857,6 @@ test("the staples section sits below the recurrence rows and above the Groups fi
     assert.ok(recurrenceIndex >= 0 && staplesIndex >= 0 && groupsIndex >= 0, "all three landmarks render");
     assert.ok(recurrenceIndex < staplesIndex, "staples section is below the recurrence rows");
     assert.ok(staplesIndex < groupsIndex, "staples section is above the Groups field");
-
-    // The end-staple's own former fields are gone as a sibling control too --
-    // it is one row in the general list now, not a bespoke pair of inputs.
-    assert.equal(cardBody.querySelector('[name="endStapleDate"]'), null);
-    assert.equal(cardBody.querySelector('[name="endStapleTime"]'), null);
   } finally {
     restore();
   }
@@ -718,6 +888,141 @@ test("the weight readout renders inside the card, near the color row, not as a c
 });
 
 // ---------------------------------------------------------------------------
+// THE BUG DIES: an end anchor plus a duration places the event, no error
+// ---------------------------------------------------------------------------
+
+test("OWNER'S BUG, as a test: an end anchor at 17:00 plus a 180-minute duration places the event with no start coordinate typed, through the editor's own submit path", () => {
+  const document = createStructuralDocument();
+  addFrame(document, { id: "calendar:test", title: "Test calendar", traits: ["set", "calendar"], basis: "frame:wall-time" });
+  const event = addEvent(document, {
+    id: "event:end-anchored",
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("180", "minute") },
+    payload: { title: "End-anchored shift" }
+  });
+  // Bare frame membership -- no coordinate at all. This is exactly what the
+  // owner's bug used to delete for lack of a typed start.
+  addRelation(document, { id: "relation:membership", type: "attachment", event: event.id, frame: "calendar:test", role: "placed" });
+
+  const law = coordinateLaw(document, "calendar:test");
+  const input = buildStapleInput({
+    scope: "object", targetId: event.id, kind: "anchor", nearPoint: "end",
+    farScope: "frame", farId: "calendar:test", coordinateText: "2026-02-10 17:00", law
+  });
+  const { app } = appFor(document);
+  app.executeEventChange("Add staple", event.id, (documentValue) => putStaple(documentValue, input));
+
+  const engineBefore = new ChronologEngine(document);
+  const expectedEnd = engineBefore.coordinateDays("calendar:test", civil(2026, 2, 10, 17, 0, 0));
+  const expectedStart = expectedEnd.sub(Rational.parse(180).div(1440));
+
+  // Drive the real editor's own submit path -- no start field exists to type
+  // into, and Save must not throw "start time is null" or delete the
+  // membership relation for lack of a coordinate.
+  const { cardBody, app: editorApp, restore } = openFormHarness(document, event.id);
+  try {
+    cardBody.dispatch("submit", {});
+    assert.equal(editorApp.lastToast, undefined, "no error toast -- the owner's exact bug is gone");
+  } finally {
+    restore();
+  }
+
+  assert.ok(document.relations["relation:membership"], "the frame membership survives with no coordinate typed");
+  assert.equal(document.relations["relation:membership"].coordinate, undefined);
+
+  const engineAfter = new ChronologEngine(document);
+  const extent = resolveObjectExtent(document, engineAfter, event.id);
+  assert.equal(extent.startDays.compare(expectedStart), 0, "exact Rational start, 3 hours before the 17:00 end anchor");
+  assert.equal(extent.endDays.compare(expectedEnd), 0);
+
+  const facts = engineAfter.queryFacts({
+    frame: "calendar:test", start: civil(2026, 2, 1), end: civil(2026, 2, 20), limit: 50
+  }).facts;
+  const fact = facts.find((item) => item.event.id === event.id);
+  assert.ok(fact, "the event is a real, visible fact on its calendar frame -- no error, no missing event");
+  assert.equal(Rational.parse(fact.day).compare(expectedStart), 0);
+});
+
+// ---------------------------------------------------------------------------
+// Quick creation stays quick: one row, nothing more
+// ---------------------------------------------------------------------------
+
+test("quick creation: one typed coordinate yields exactly one effective staple row", () => {
+  const document = createStructuralDocument();
+  addFrame(document, { id: "calendar:test", title: "Test calendar", traits: ["set", "calendar"], basis: "frame:wall-time" });
+  const { app, inspector, restore } = buildEditorApp(document);
+  try {
+    inspector.createEventAt("10", "11");
+    const eventId = Object.keys(document.events)[0];
+    assert.ok(eventId, "the event was created");
+    const rows = effectiveObjectStaples(document, eventId);
+    assert.equal(rows.length, 1, "one row, no extra ceremony");
+    assert.equal(rows[0].implicit, true);
+  } finally {
+    restore();
+  }
+  assert.equal(app.chronolog, document);
+});
+
+// ---------------------------------------------------------------------------
+// Editing/removing the implicit placement row
+// ---------------------------------------------------------------------------
+
+test("editing the implicit placement row updates the attachment relation directly and mints no staple; removing it leaves the object placed by its remaining staples", () => {
+  const { document, event } = documentWithEvent();
+  const relationCountBefore = Object.keys(document.relations).length;
+  const { cardBody, restore } = openFormHarness(document, event.id);
+  try {
+    const stapleListEl = cardBody.querySelector("[data-staple-list]");
+    const implicitRow = stapleListEl.querySelector("[data-staple-row]");
+    assert.equal(implicitRow.dataset.implicit, "true", "the implicit row renders first");
+
+    const coordinateInput = implicitRow.querySelector("[data-row-coordinate]");
+    coordinateInput.value = "2026-03-01 09:00";
+    stapleListEl.dispatch("change", { target: coordinateInput });
+
+    assert.equal(Object.keys(document.relations).length, relationCountBefore, "no staple record was minted");
+    const editedRelation = document.relations["relation:test-placed"];
+    const engine1 = new ChronologEngine(document);
+    assert.equal(
+      engine1.coordinateDays("calendar:test", editedRelation.coordinate)
+        .compare(engine1.coordinateDays("calendar:test", civil(2026, 3, 1, 9, 0, 0))),
+      0,
+      "the attachment relation's own coordinate was patched"
+    );
+
+    // An explicit staple, authored directly (bypassing the Add control,
+    // which is exercised elsewhere), so the object stays placed once the
+    // implicit reading is removed.
+    putStaple(document, {
+      id: "relation:explicit-anchor",
+      kind: "anchor",
+      ends: [objectEnd(event.id, "start"), frameEnd("calendar:test", civil(2026, 3, 5, 8, 0, 0))]
+    });
+
+    const refreshedList = cardBody.querySelector("[data-staple-list]");
+    const rows = refreshedList.querySelectorAll("[data-staple-row]");
+    const implicitRowAfter = rows.find((row) => row.dataset.implicit === "true");
+    const removeButton = implicitRowAfter.querySelector("[data-remove-staple]");
+    refreshedList.dispatch("click", { target: removeButton });
+  } finally {
+    restore();
+  }
+
+  const relation = document.relations["relation:test-placed"];
+  assert.equal(relation.coordinate, undefined, "the placement coordinate is gone");
+  assert.equal(relation.parameters, undefined);
+  assert.ok(document.relations[relation.id], "the attachment relation itself (frame membership) survives");
+  const engine = new ChronologEngine(document);
+  const extent = resolveObjectExtent(document, engine, event.id);
+  assert.equal(extent.source, "anchor+magnitude", "placed by its remaining explicit staple now");
+  assert.equal(
+    extent.startDays.compare(engine.coordinateDays("calendar:test", civil(2026, 3, 5, 8, 0, 0))),
+    0
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The following rule (LEXICON's Rob-and-John, second half)
 // ---------------------------------------------------------------------------
 //
@@ -725,25 +1030,18 @@ test("the weight readout renders inside the card, near the color row, not as a c
 // to the initial series rule, then either define a new rule post-staple or a
 // new series, on preference."
 //
-// The substrate has always been able to carry a following rule; until this the
-// editor could only ever author a staple that TERMINATES, which is the same
-// "an end staple is the only thing a staple can do" presupposition the whole
-// item exists to remove. These pin the authoring path, and the last one proves
-// the authored record really re-rules the series rather than merely validating.
+// The substrate has always been able to carry a following rule; the editor's
+// job here is authoring it through the same single coordinate field the rest
+// of the card uses -- "New rule starts" is one field, not a date/time pair
+// either.
 
 test("an inflection staple authored with a following rule carries that rule head", () => {
+  const law = coordinateLaw(createStructuralDocument(), "frame:wall-time");
   const input = buildStapleInput({
-    scope: "series",
-    targetId: "pattern:test",
-    kind: "inflection",
-    dateText: "2032-03-01",
-    frame: "calendar:test",
-    ruleRepeat: "WEEKLY",
-    ruleInterval: "1",
-    ruleDateText: "2032-03-04",
-    ruleTimeText: "12:00",
-    ruleDurationAmount: "45",
-    ruleDurationUnit: "minute"
+    scope: "series", targetId: "pattern:test", kind: "inflection",
+    farScope: "frame", farId: "frame:wall-time", coordinateText: "2032-03-01", law,
+    ruleRepeat: "WEEKLY", ruleInterval: "1", ruleCoordinateText: "2032-03-04 12:00", ruleLaw: law,
+    ruleDurationAmount: "45", ruleDurationUnit: "minute"
   });
   assert.equal(input.kind, "inflection");
   assert.equal(input.payload.rule.rrule.FREQ, "WEEKLY");
@@ -751,24 +1049,26 @@ test("an inflection staple authored with a following rule carries that rule head
   // The following rule gets its OWN start, not the staple's instant -- the new
   // meeting is a Thursday lunch, not the old Monday 6:15.
   assert.ok(input.payload.rule.coordinate, "the rule head carries its own base coordinate");
-  assert.equal(input.payload.rule.frame, "calendar:test");
+  assert.equal(input.payload.rule.frame, "frame:wall-time");
   assert.equal(input.payload.rule.magnitude.value.levels[0].value, "45");
 });
 
 test("the weekdays preset expands to BYDAY in a following rule, as the main repeat control does", () => {
+  const law = coordinateLaw(createStructuralDocument(), "frame:wall-time");
   const input = buildStapleInput({
     scope: "series", targetId: "pattern:test", kind: "inflection",
-    dateText: "2032-03-01", frame: "calendar:test",
-    ruleRepeat: "WEEKDAYS", ruleDateText: "2032-03-04"
+    farScope: "frame", farId: "frame:wall-time", coordinateText: "2032-03-01", law,
+    ruleRepeat: "WEEKDAYS", ruleCoordinateText: "2032-03-04", ruleLaw: law
   });
   assert.equal(input.payload.rule.rrule.FREQ, "WEEKLY");
   assert.equal(input.payload.rule.rrule.BYDAY, "MO,TU,WE,TH,FR");
 });
 
 test("leaving the following rule blank makes the inflection staple simply end the series", () => {
+  const law = coordinateLaw(createStructuralDocument(), "frame:wall-time");
   const input = buildStapleInput({
     scope: "series", targetId: "pattern:test", kind: "inflection",
-    dateText: "2032-03-01", frame: "calendar:test", ruleRepeat: ""
+    farScope: "frame", farId: "frame:wall-time", coordinateText: "2032-03-01", law, ruleRepeat: ""
   });
   assert.equal(input.payload?.rule, undefined, "no rule follows -- the other preference, authored by omission");
 });
@@ -777,10 +1077,11 @@ test("a kind that cannot carry a rule ignores the rule fields entirely", () => {
   // Registry-driven: `end` has carriesRule false, so rule fields submitted
   // against it are not quietly attached to a record whose kind would then fail
   // validation (src/model.js refuses payload.rule on a non-carriesRule kind).
+  const law = coordinateLaw(createStructuralDocument(), "frame:wall-time");
   const input = buildStapleInput({
     scope: "series", targetId: "pattern:test", kind: "end",
-    dateText: "2032-03-01", frame: "calendar:test",
-    ruleRepeat: "WEEKLY", ruleDateText: "2032-03-04"
+    farScope: "frame", farId: "frame:wall-time", coordinateText: "2032-03-01", law,
+    ruleRepeat: "WEEKLY", ruleCoordinateText: "2032-03-04"
   });
   assert.equal(input.payload?.rule, undefined);
 });
@@ -804,18 +1105,20 @@ test("a following rule authored through the editor really re-rules the series", 
   const imported = importICS(source, document, { label: "Work" });
   const frame = document.frames[imported.frames[0]];
   const pattern = Object.values(document.patterns).find((item) => item.kind === "ics-rrule");
+  const law = coordinateLaw(document, frame.id);
 
   const input = buildStapleInput({
     scope: "series",
     targetId: pattern.id,
     kind: "inflection",
-    dateText: "2026-02-02",
-    timeText: "23:59",
-    frame: frame.id,
+    farScope: "frame",
+    farId: frame.id,
+    coordinateText: "2026-02-02 23:59",
+    law,
     ruleRepeat: "WEEKLY",
     ruleInterval: "1",
-    ruleDateText: "2026-02-05",
-    ruleTimeText: "12:00",
+    ruleCoordinateText: "2026-02-05 12:00",
+    ruleLaw: law,
     ruleDurationAmount: "45",
     ruleDurationUnit: "minute"
   });
@@ -835,7 +1138,7 @@ test("a following rule authored through the editor really re-rules the series", 
   // The cut is the staple's own instant, resolved exactly -- never compared as
   // coordinate text, since the ICS-imported rule and the editor-authored staple
   // spell the same instant differently ("01" vs "1").
-  const cut = new ChronologEngine(document).coordinateDays(frame.id, input.coordinate);
+  const cut = new ChronologEngine(document).coordinateDays(frame.id, input.ends[1].coordinate);
   const before = facts.filter((fact) => Rational.parse(fact.day).compare(cut) <= 0);
   const after = facts.filter((fact) => Rational.parse(fact.day).compare(cut) > 0);
 

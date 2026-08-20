@@ -9,6 +9,9 @@ import {
   addRelation,
   clearSeriesEndStaple,
   durationMagnitude,
+  frameEnd,
+  objectEnd,
+  seriesEnd,
   putStaple,
   seriesEndStaple,
   setSeriesEndStaple,
@@ -264,11 +267,8 @@ test("deleting an event deletes its object staples in one undoable transaction, 
   const app = transactionsFor(document);
   app.executeEventChange("Anchor the shift's end", shift.id, (documentValue) => {
     putStaple(documentValue, {
-      object: shift.id,
       kind: "anchor",
-      role: "end",
-      frame: "frame:wall-time",
-      coordinate: civil(2026, 3, 3, 5, 0, 0)
+      ends: [objectEnd(shift.id, "end"), frameEnd("frame:wall-time", civil(2026, 3, 3, 5, 0, 0))]
     });
   });
   const staple = staplesForObject(document, shift.id)[0];
@@ -293,4 +293,141 @@ test("deleting an event deletes its object staples in one undoable transaction, 
   app.history.redo();
   assert.equal(document.events[shift.id], undefined);
   assert.equal(document.relations[staple.id], undefined, "redo removes both again");
+});
+
+// --- Precision-aware close: the staple cuts at the end of the unit named ----
+//
+// Ruled for "ends on a date" in src/recurrence-end.js: "'Ends on this date'
+// means through the whole of that day, whatever time of day the occurrences
+// fall at -- so the value is the last second of the date, not its midnight. A
+// midnight UNTIL would silently drop a 09:00 series' final occurrence, which is
+// the kind of off-by-one a user reads as a bug." A bare-date STAPLE cutting at
+// midnight is that same bug one layer up, so it takes the same answer.
+
+test("REGRESSION: a bare-date end staple keeps that day's own occurrence -- it does not cut at midnight", () => {
+  const { document, frame, pattern } = weeklySeries();
+  // The series runs Mondays at 09:00. Staple it with day precision only: the
+  // author wrote a DAY, so the segment closes at the end of that day.
+  putStaple(document, {
+    id: "relation:bare-date-end",
+    kind: "end",
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, date(2026, "1", "19"))]
+  });
+  assert.equal(validateDocument(document).valid, true);
+
+  const projected = occurrences(document, frame);
+  assert.deepEqual(projected, [
+    "2026-01-05 09:00:00",
+    "2026-01-12 09:00:00",
+    "2026-01-19 09:00:00"
+  ], "the 19th's own 09:00 occurrence survives a staple authored as a bare date");
+
+  // The close instant itself is the last measurable moment of the 19th, exactly
+  // the value recurrenceUntilForDate writes for the same authored intent.
+  const engine = new ChronologEngine(document);
+  const closed = seriesEffectiveUntilDays(engine, pattern);
+  const lastSecond = engine.coordinateDays(frame.id, civil(2026, 1, 19, 23, 59, 59));
+  assert.equal(closed.compare(lastSecond), 0, "the close is the last second of the day, never its midnight");
+  const midnight = engine.coordinateDays(frame.id, date(2026, "1", "19"));
+  assert.notEqual(closed.compare(midnight), 0);
+});
+
+test("an explicit clock time closes exactly there, so precision the author gave is precision honoured", () => {
+  const { document, frame, pattern } = weeklySeries();
+  // 08:00 on the 19th is BEFORE that day's 09:00 occurrence, so it cuts it.
+  putStaple(document, {
+    id: "relation:timed-end",
+    kind: "end",
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, civil(2026, 1, 19, 8, 0, 0))]
+  });
+  assert.equal(validateDocument(document).valid, true);
+  assert.deepEqual(occurrences(document, frame), [
+    "2026-01-05 09:00:00",
+    "2026-01-12 09:00:00"
+  ], "a clock time names an instant, not a day, and the 09:00 falls outside it");
+
+  const engine = new ChronologEngine(document);
+  assert.equal(
+    seriesEffectiveUntilDays(engine, pattern)
+      .compare(engine.coordinateDays(frame.id, civil(2026, 1, 19, 8, 0, 0))),
+    0,
+    "no end-of-unit expansion is applied below the base unit"
+  );
+});
+
+test("a bare MONTH closes at the end of that month, carrying through its own declared length", () => {
+  const { document, frame, pattern } = weeklySeries();
+  putStaple(document, {
+    id: "relation:bare-month-end",
+    kind: "end",
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, coordinate([
+      { level: "year", value: "2026" },
+      { level: "month", value: "1" }
+    ]))]
+  });
+  assert.equal(validateDocument(document).valid, true);
+  assert.deepEqual(occurrences(document, frame), [
+    "2026-01-05 09:00:00",
+    "2026-01-12 09:00:00",
+    "2026-01-19 09:00:00",
+    "2026-01-26 09:00:00"
+  ], "every January occurrence survives, including the last Monday of the month");
+
+  const engine = new ChronologEngine(document);
+  assert.equal(
+    seriesEffectiveUntilDays(engine, pattern)
+      .compare(engine.coordinateDays(frame.id, civil(2026, 1, 31, 23, 59, 59))),
+    0,
+    "the close is the last second of January, read from the month's own length"
+  );
+});
+
+test("a bare date on the last day of a month closes there without spilling into the next", () => {
+  const { document, frame, pattern } = weeklySeries();
+  // The 31st of January 2026 -- incrementing the day has to carry into February
+  // rather than produce a 32nd, and the close must still land inside January.
+  putStaple(document, {
+    id: "relation:month-edge-end",
+    kind: "end",
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, date(2026, "1", "31"))]
+  });
+  assert.equal(validateDocument(document).valid, true);
+  const engine = new ChronologEngine(document);
+  assert.equal(
+    seriesEffectiveUntilDays(engine, pattern)
+      .compare(engine.coordinateDays(frame.id, civil(2026, 1, 31, 23, 59, 59))),
+    0,
+    "the day after the 31st is the 1st of February, so the close is the 31st's last second"
+  );
+  assert.deepEqual(occurrences(document, frame), [
+    "2026-01-05 09:00:00",
+    "2026-01-12 09:00:00",
+    "2026-01-19 09:00:00",
+    "2026-01-26 09:00:00"
+  ]);
+});
+
+test("a bare-date inflection hands off after the whole of that day, so no occurrence lands in both segments", () => {
+  const { document, frame, pattern } = weeklySeries();
+  putStaple(document, {
+    id: "relation:bare-date-inflection",
+    kind: "inflection",
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, date(2026, "1", "19"))],
+    payload: {
+      rule: {
+        rrule: { FREQ: "WEEKLY" },
+        coordinate: civil(2026, 1, 22, 12, 0, 0),
+        frame: frame.id,
+        magnitude: durationMagnitude("45", "minute")
+      }
+    }
+  });
+  assert.equal(validateDocument(document).valid, true);
+  const projected = occurrences(document, frame);
+  // The 19th belongs to the closing segment and to nothing else; the following
+  // rule starts on the 22nd. The inclusive close and the exclusive open are the
+  // SAME instant, so the boundary day is never projected twice.
+  assert.equal(new Set(projected).size, projected.length, "no occurrence is projected twice across the boundary");
+  assert.ok(projected.includes("2026-01-19 09:00:00"), "the boundary day's own occurrence survives in the closing segment");
+  assert.ok(projected.includes("2026-01-22 12:00:00"), "the following rule projects from its own start");
 });

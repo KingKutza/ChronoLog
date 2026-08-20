@@ -7,7 +7,8 @@ import {
   floorDiv,
   floorMod
 } from "./exact.js";
-import { lawForCalendar } from "./coordinate-law.js";
+import { coordinateLaw, lawForCalendar } from "./coordinate-law.js";
+import { coordinateEntryDepth } from "./coordinate-entry.js";
 import {
   applyVirtualOverrides,
   coordinateToDays,
@@ -23,7 +24,10 @@ import {
   resolveObjectExtent,
   seriesIsSegmented,
   seriesPhaseDays,
-  seriesSegments
+  seriesSegments,
+  frameEndOf,
+  isPlacement,
+  stapleEnds
 } from "./staples.js";
 
 function rational(value) {
@@ -402,12 +406,12 @@ function occurrenceFacts(engine, pattern, lower, upper, limit = Infinity) {
 // A cheap fingerprint of every staple relation in the document, used only to
 // decide whether `setDocument`'s `preserveRecurrence` request is actually
 // safe -- see the comment on `setDocument` below for the trap this closes.
-// Every field a staple's own derivations read (kind/frame/coordinate/payload/
-// role/spread, on top of which series or object it targets) participates, so
-// a staple's coordinate moving, its kind changing, or its following rule's
-// payload changing all change the signature; unrelated relations (any
-// non-staple) never do, which is what keeps this cheap on a document whose
-// edit had nothing to do with staples at all.
+// Every field a staple's own derivations read participates -- its kind, its
+// spread, its following-rule payload, and both of its ends including each end's
+// point, coordinate and offset -- so a connection moving, changing kind, or
+// being re-pointed at a different object all change the signature; unrelated
+// relations (any non-staple) never do, which is what keeps this cheap on a
+// document whose edit had nothing to do with staples at all.
 function stapleSignature(document) {
   const staples = Object.values(document?.relations || {})
     .filter((relation) => relation?.type === "staple")
@@ -478,6 +482,47 @@ export class ChronologEngine {
         const patterns = this.patternsByFrame.get(frameId) || [];
         patterns.push(pattern);
         this.patternsByFrame.set(frameId, patterns);
+      }
+    }
+
+    // Overscale doctrine: `resolveObjectExtent` runs once per event during fact
+    // indexing and follows connection chains through other objects, so "every
+    // staple touching this id" has to be O(1). Both ends are indexed, because a
+    // connection is reachable from either thing it joins.
+    // The object's implicit placement staple, indexed for the same reason its
+    // explicit ones are: extent resolution asks for it once per object and again
+    // at every step of a connection chain.
+    // Every object with ANY attachment is recorded, mapping to its placement
+    // relation or to null -- "seen, and it has none" has to be a hit, or an
+    // object placed purely by a connection (a coordinate-less membership) would
+    // miss and pay a document-wide scan on every lookup.
+    this.placementByEvent = new Map();
+    for (const relation of Object.values(document.relations)) {
+      if (relation.type !== "attachment") continue;
+      const current = this.placementByEvent.get(relation.event) || null;
+      if (!current) this.placementByEvent.set(relation.event, isPlacement(relation) ? relation : null);
+    }
+    this.staplesByObject = new Map();
+    this.staplesBySeries = new Map();
+    this.staplesByFrame = new Map();
+    for (const relation of Object.values(document.relations)) {
+      if (relation.type !== "staple") continue;
+      for (const end of stapleEnds(relation)) {
+        const index = end.object ? this.staplesByObject
+          : end.series ? this.staplesBySeries
+            : end.frame ? this.staplesByFrame : null;
+        if (!index) continue;
+        const id = end.object || end.series || end.frame;
+        const bucket = index.get(id) || [];
+        if (!bucket.includes(relation)) bucket.push(relation);
+        index.set(id, bucket);
+      }
+    }
+    // The same total, deterministic order src/staples.js tie-breaks on, applied
+    // once here rather than per lookup.
+    for (const index of [this.staplesByObject, this.staplesBySeries, this.staplesByFrame]) {
+      for (const bucket of index.values()) {
+        bucket.sort((left, right) => String(left.id).localeCompare(String(right.id)));
       }
     }
 
@@ -747,6 +792,23 @@ export class ChronologEngine {
     return durationMagnitudeDays(event?.magnitudes?.duration, this.document);
   }
 
+  // The deepest level the author actually wrote for whatever placed this fact,
+  // or null when nothing placed it at a coordinate at all (an extent derived
+  // from a connection to another object inherits that object's precision through
+  // the anchor's own end).
+  authoredPrecision(source) {
+    const end = source?.anchors?.[0] ? frameEndOf(source.anchors[0].staple) : null;
+    const written = end?.coordinate || source?.coordinate || null;
+    if (!written) return null;
+    const frameId = end?.frame || source?.frame || null;
+    if (!frameId) return null;
+    try {
+      return coordinateEntryDepth(written, coordinateLaw(this.document, frameId));
+    } catch {
+      return null;
+    }
+  }
+
   indexedExplicitFacts(frameId) {
     const cached = this.explicitFactsByFrame.get(frameId);
     if (cached) return cached;
@@ -759,7 +821,7 @@ export class ChronologEngine {
     let maxDuration = Rational.parse(0);
     const extentByEvent = new Map();
     for (const relation of this.relationsByFrame.get(frameId) || []) {
-      if (!relation.coordinate || templateRelations.has(relation.id)) continue;
+      if (templateRelations.has(relation.id)) continue;
       const event = this.document.events[relation.event];
       if (!event) continue;
       let extent = extentByEvent.get(event.id);
@@ -770,6 +832,16 @@ export class ChronologEngine {
       const anchored = relation.role !== "completed"
         && extent.startDays !== null
         && (extent.source === "anchors" || extent.source === "anchor+magnitude");
+      // A coordinate-less attachment relation is bare MEMBERSHIP -- "this object
+      // belongs to this frame" -- and membership alone has never placed anything.
+      // It places the object here only when the object's own connections resolve
+      // an extent IN THIS FRAME'S coordinate space, which is what makes an event
+      // defined purely by where it stops appear at all: the placement coordinate
+      // it used to need is exactly what a staple now supplies. The frame identity
+      // check is load-bearing rather than defensive: an event's group attachments
+      // are coordinate-less too, and without it every anchored event would also
+      // draw itself on each of its groups.
+      if (!relation.coordinate && !(anchored && extent.frame === relation.frame)) continue;
       const day = anchored ? extent.startDays : attachmentDay(this, relation);
       if (!day) continue;
       const duration = anchored ? extent.magnitudeDays : this.eventDurationDays(event);
@@ -783,6 +855,15 @@ export class ChronologEngine {
           relation,
           day: day.toJSON(),
           coordinate,
+          // AUTHORED PRECISION, carried so display can honour it. A coordinate
+          // of {year: 1973} resolves to the start of 1973 and comes back from
+          // `fromDays` with every level filled in, at which point it is
+          // indistinguishable from an authored January 1st midnight -- the
+          // missing levels having been supplied by the law, not by the author.
+          // Depth is authored data (an entry stops where the author stopped) and
+          // must not be inferred back out of a resolved instant, so it is read
+          // from the SOURCE coordinate and travels on the fact.
+          precision: this.authoredPrecision(anchored ? extent : relation),
           extent
         }
       });

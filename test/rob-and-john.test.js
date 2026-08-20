@@ -12,11 +12,18 @@ import {
   createId,
   durationMagnitude,
   durationMagnitudeDays,
+  frameEnd,
+  objectEnd,
   putStaple,
   removeStaple,
+  seriesEnd,
   validateDocument
 } from "../src/model.js";
 import { applySeriesHeal, overrideHealDecision, planSeriesHeal } from "../src/series-heal.js";
+import {
+  resolveObjectExtent,
+  stapleReferencesId
+} from "../src/staples.js";
 import { createStructuralDocument } from "./helpers/sample-document.js";
 
 // LEXICON.md's Rob-and-John scenario, followed beat by beat -- this is the
@@ -204,10 +211,8 @@ test("Rob-and-John beat 4: an inflection staple partitions the series into Monda
   const { inflectionDays, inflectionCoordinate, thursdayCoordinate } = sixYearsOnInflection();
 
   const staple = putStaple(document, {
-    series: pattern.id,
     kind: "inflection",
-    frame: frame.id,
-    coordinate: inflectionCoordinate,
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, inflectionCoordinate)],
     payload: {
       rule: {
         rrule: { FREQ: "WEEKLY" },
@@ -263,10 +268,8 @@ test("Rob-and-John beat 5: 'a new rule, or a new series, on preference' render t
   const single = buildWorld();
   const { inflectionCoordinate, thursdayCoordinate } = sixYearsOnInflection();
   putStaple(single.document, {
-    series: single.pattern.id,
     kind: "inflection",
-    frame: single.frame.id,
-    coordinate: inflectionCoordinate,
+    ends: [seriesEnd(single.pattern.id), frameEnd(single.frame.id, inflectionCoordinate)],
     payload: {
       rule: {
         rrule: { FREQ: "WEEKLY" },
@@ -283,10 +286,8 @@ test("Rob-and-John beat 5: 'a new rule, or a new series, on preference' render t
   // series for the Thursday lunch.
   const split = buildWorld();
   putStaple(split.document, {
-    series: split.pattern.id,
     kind: "end",
-    frame: split.frame.id,
-    coordinate: inflectionCoordinate
+    ends: [seriesEnd(split.pattern.id), frameEnd(split.frame.id, inflectionCoordinate)]
   });
   const lunchEvent = addEvent(split.document, {
     traits: ["event"],
@@ -332,10 +333,8 @@ test("Rob-and-John beat 6: removing the inflection staple restores the original 
 
   const { inflectionCoordinate, thursdayCoordinate } = sixYearsOnInflection();
   const staple = putStaple(document, {
-    series: pattern.id,
     kind: "inflection",
-    frame: frame.id,
-    coordinate: inflectionCoordinate,
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, inflectionCoordinate)],
     payload: {
       rule: {
         rrule: { FREQ: "WEEKLY" },
@@ -386,10 +385,8 @@ test("Rob-and-John beat 7: the healing invariant holds across a rule change -- a
   const { document, frame, pattern } = buildWorld();
   const { inflectionCoordinate, thursdayCoordinate } = sixYearsOnInflection();
   putStaple(document, {
-    series: pattern.id,
     kind: "inflection",
-    frame: frame.id,
-    coordinate: inflectionCoordinate,
+    ends: [seriesEnd(pattern.id), frameEnd(frame.id, inflectionCoordinate)],
     payload: {
       rule: {
         rrule: { FREQ: "WEEKLY" },
@@ -426,4 +423,92 @@ test("Rob-and-John beat 7: the healing invariant holds across a rule change -- a
     frame: frame.id, start: date(2032), end: date(2033), limit: 50
   }).facts;
   assert.ok(restored.some((item) => item.virtualId === fact.virtualId), "the healed Thursday lunch slot projects once more");
+});
+
+// --- Beat 8: the healing invariant composes with connections ---------------
+
+test("Rob-and-John beat 8: the healing invariant composes with connections -- moving a materialized occurrence's end back onto the pattern moves what is stapled to it", () => {
+  const { document, frame, pattern } = buildWorld();
+  const engine = new ChronologEngine(document);
+  const facts = engine.queryFacts({ frame: frame.id, start: date(2026), end: date(2026, 2, 1), limit: 10 })
+    .facts.filter((fact) => fact.kind === "virtual");
+  const fact = facts[1]; // 2026-01-12, 06:15-06:30
+
+  const { override, event, relation } = materialize(document, fact, pattern);
+  const trueStartDays = new Rational(daysFromCivil(2026n, 1n, 12n))
+    .add(Rational.parse(6).div(24)).add(Rational.parse(15).div(1440));
+  const durationDays = durationMagnitudeDays(event.magnitudes.duration);
+
+  // Deviate the materialized occurrence 20 minutes later -- an authored
+  // edit, not yet matching the series (the owner's own "edit then move
+  // back... it does not matter" healing case, quoted in src/series-heal.js).
+  const deviatedStartDays = trueStartDays.add(Rational.parse(20).div(1440));
+  relation.coordinate = daysToCivilCoordinate(deviatedStartDays);
+  let engineNow = new ChronologEngine(document);
+  assert.equal(overrideHealDecision(document, engineNow, override).healable, false, "the deviation is not healable yet");
+
+  // A follower event is stapled to the materialized occurrence's end.
+  const follower = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("10", "minute") },
+    payload: { title: "Follow-up chat" }
+  });
+  putStaple(document, {
+    kind: "anchor",
+    ends: [objectEnd(follower.id, "start"), objectEnd(event.id, "end")]
+  });
+  assert.equal(validateDocument(document).valid, true);
+
+  engineNow = new ChronologEngine(document);
+  let followerExtent = resolveObjectExtent(document, engineNow, follower.id);
+  assert.equal(followerExtent.startDays.compare(deviatedStartDays.add(durationDays)), 0, "the follower sits at the deviated occurrence's end");
+
+  // Move the occurrence back onto the pattern -- the owner's own healing
+  // scenario. The follower has to follow, through the staple, before the
+  // heal ever fires.
+  relation.coordinate = daysToCivilCoordinate(trueStartDays);
+  engineNow = new ChronologEngine(document);
+  followerExtent = resolveObjectExtent(document, engineNow, follower.id);
+  assert.equal(
+    followerExtent.startDays.compare(trueStartDays.add(durationDays)), 0,
+    "moving the occurrence's end back onto the pattern moves the follower with it, through the staple"
+  );
+
+  // Back on the pattern the occurrence's own values match again -- but a
+  // connection to it is authored content the pattern does not project, and
+  // src/series-heal.js counts anything the pattern does not project as
+  // deviation. So the heal refuses while the follower is stapled to this
+  // occurrence's end: healing it away would delete the very point the
+  // follower is placed by, which is the asymmetry that module is built on --
+  // a missed heal leaves an extra record, a wrong one destroys authored data.
+  assert.equal(
+    overrideHealDecision(document, engineNow, override).healable, false,
+    "an occurrence something else is stapled to does not heal away underneath it"
+  );
+  const blocked = planSeriesHeal(document, engineNow);
+  assert.equal(blocked.healed, 0);
+  applySeriesHeal(document, blocked);
+  assert.ok(document.overrides[override.id], "the override survives");
+  assert.ok(document.events[event.id], "and so does the occurrence the follower needs");
+  assert.equal(validateDocument(document).valid, true, "no dangling connection is ever produced");
+
+  // The refusal is about the connection, not a permanent block: remove the
+  // connection and the ordinary healing invariant reasserts unchanged.
+  const connection = Object.values(document.relations)
+    .find((relation) => relation.type === "staple" && stapleReferencesId(relation, follower.id));
+  delete document.relations[connection.id];
+  const engineAfter = new ChronologEngine(document);
+  assert.equal(overrideHealDecision(document, engineAfter, override).healable, true, "with nothing stapled to it, the override heals again");
+  const plan = planSeriesHeal(document, engineAfter);
+  assert.equal(plan.healed, 1);
+  applySeriesHeal(document, plan);
+  assert.equal(document.overrides[override.id], undefined);
+  assert.equal(document.events[event.id], undefined);
+  assert.equal(validateDocument(document).valid, true);
+
+  const engineRestored = new ChronologEngine(document);
+  const restored = engineRestored.queryFacts({ frame: frame.id, start: date(2026), end: date(2026, 2, 1), limit: 10 }).facts;
+  assert.ok(restored.some((item) => item.virtualId === fact.virtualId), "the healed slot projects again, unconditionally");
+  // The follower is now genuinely unplaced rather than pointing at a ghost.
+  assert.equal(resolveObjectExtent(document, engineRestored, follower.id).startDays, null);
 });

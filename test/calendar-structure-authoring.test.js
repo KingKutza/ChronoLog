@@ -116,10 +116,11 @@ test("a names list is checked against the count its own meaning requires, and sa
     () => validateNameList(["one", "two"], 8, "month names", "month"),
     /month names needs 8 names, one for each month; 2 were given\./
   );
-  assert.throws(
-    () => validateNameList(["Mon", "mon"], 2, "weekday names", "weekday"),
-    /repeats the name "mon"/
-  );
+  // A repeated name is accepted: distinctness is not authoring's job. What it
+  // protected was lookup-by-name ("March" resolving to month 3 alone), and this
+  // module has no such lookup -- an ambiguous name is refused at RESOLUTION,
+  // not withheld from the author here.
+  assert.deepEqual(validateNameList(["Mon", "mon"], 2, "weekday names", "weekday"), ["Mon", "mon"]);
   assert.deepEqual(parseNameList("a, ,b,,c , "), ["a", "b", "c"]);
   assert.deepEqual(parseNameList(["a", " b "]), ["a", "b"]);
   assert.deepEqual(parseNameList(undefined), []);
@@ -166,4 +167,31 @@ test("editing the structure grid drops a stale fixed-calendar summary but keeps 
     previous: built.coordinate
   });
   assert.equal(changed.fixed, undefined, "a summary that no longer describes the levels is dropped, not kept as a lie");
+});
+
+test("baseLevel and origin are authorable for a wholly invented, uniform ladder", () => {
+  // A ladder with no registered transition anywhere in it has nothing to infer
+  // a day from, so it states its own base level and starting day ordinal --
+  // the two fields a uniform calendar (12 months of 30 days, say) needs to
+  // become positional at all.
+  const built = buildCoordinateStructure({
+    levels: [{ name: "year" }, { name: "month", count: "12" }, { name: "day", count: "30" }],
+    baseLevel: "day",
+    origin: "0"
+  });
+  assert.equal(built.baseLevel, "day");
+  assert.deepEqual(built.origin, { days: "0" });
+  const law = coordinateLaw({ frames: { uniform: { id: "uniform", traits: ["set", "calendar"], coordinate: built } } }, "uniform");
+  assert.equal(law.positional, true);
+  assert.equal(law.baseLevel, "day");
+
+  // Blank fields are omitted rather than stored empty, so a document that never
+  // authors either stays byte-identical to one that still doesn't -- exactly
+  // the rule the structure grid already applies to `fixed` and `cycles`.
+  const rows = editableCoordinateStructure(law);
+  assert.equal(rows.baseLevel, "day");
+  assert.equal(rows.origin, "0");
+  const withoutEither = buildCoordinateStructure({ levels: rows.levels, kind: rows.kind });
+  assert.equal(Object.hasOwn(withoutEither, "baseLevel"), false);
+  assert.equal(Object.hasOwn(withoutEither, "origin"), false);
 });

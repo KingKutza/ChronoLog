@@ -1132,6 +1132,47 @@ svg [data-selected="true"] {
   margin-top: 9px;
 }
 .inline-create input { min-height: 34px; }
+
+/* The staple list: every row -- implicit placement or authored -- is one
+   flex line of the same controls, per the owner's "that staple interface is
+   the only interface here" ruling. Kept minimal; the row's own fields reuse
+   .field/.form-row/.check-chip. */
+.staple-list { list-style: none; margin: 0 0 9px; padding: 0; display: grid; gap: 7px; }
+.staple-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+}
+.staple-row[data-implicit="true"] { border-style: dashed; }
+.staple-list-empty { color: var(--faint); font: 11px/1.4 var(--data); }
+.staple-coordinate-wrap { position: relative; display: inline-flex; gap: 4px; align-items: center; }
+.staple-coordinate-input,
+.staple-coordinate-field input { min-height: 30px; width: auto; }
+.staple-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--strong);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+}
+.staple-coordinate-field .staple-picker { position: static; box-shadow: none; margin-top: 6px; }
+.staple-picker-rung { display: grid; gap: 3px; }
+.staple-picker-rung select,
+.staple-picker-rung input { min-height: 28px; }
+.staple-overdetermined,
+.staple-unresolved { margin: 0 0 8px; padding-left: 18px; font: 11px/1.4 var(--data); color: var(--faint); }
 .advanced-fields {
   margin: 8px 0 2px;
   padding: 8px 10px;

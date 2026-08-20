@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Rational, coordinate } from "../src/exact.js";
+import { Rational, coordinate, nowDays } from "../src/exact.js";
 import {
   CoordinateLaw,
   GREGORIAN_DECLARATION,
@@ -19,14 +19,20 @@ import {
 import { ChronologEngine } from "../src/engine.js";
 import {
   CommandHistory,
+  addEvent,
+  addRelation,
+  clone,
   coordinateToDays,
   createEmptyWorkspaceDocument,
   daysToCoordinate,
   durationMagnitude
 } from "../src/model.js";
+import { exportICS } from "../src/ics.js";
 import { buildCoordinateStructure, editableCoordinateStructure } from "../src/calendar-structure.js";
 import { minimapLabelTicks } from "../src/minimap.js";
 import { ViewSession } from "../src/session.js";
+import { createInspector } from "../src/ui/inspector.js";
+import { toggleTodoCompletion } from "../src/ui/roster.js";
 import { createTransactions } from "../src/ui/transactions.js";
 import { findByClass, renderWithStubDom } from "./helpers/render-dom.js";
 
@@ -126,10 +132,27 @@ test("names and the weekday cycle come from the declaration, and a declaration t
   assert.equal(authored.weekdayLabel(6), "Batman", "an authored name is used verbatim, never normalized away");
   assert.equal(authored.weekdayLabel(0), "Thu");
 
-  // A frame that authored no names at all still reads: meaning is inherited
-  // from the registered calendar, never invented.
-  const bare = new CoordinateLaw({ kind: "gregorian" });
-  assert.equal(bare.monthNames()[7], "August");
+  // A frame that authored no ladder at all still reads: the registered ladder is
+  // substituted for it, so it genuinely HAS months and inherits their names.
+  const inherited = coordinateLaw({
+    frames: { "line:bare": { id: "line:bare", traits: ["line", "gregorian"] } }
+  }, "line:bare");
+  assert.equal(inherited.monthNames()[7], "August");
+  assert.equal(inherited.hasWeekdays(), true);
+
+  // But a declaration that names levels and has no month among them declares no
+  // months, and says so rather than claiming January through December. Inheriting
+  // the standard is right for a law that counts in the registered calendar and
+  // merely left a level unnamed; it is a fabrication for a law with no months.
+  const monthless = new CoordinateLaw({
+    kind: "nested",
+    levels: [{ name: "day" }, { name: "hour", within: "day", radix: "24" }]
+  });
+  assert.equal(monthless.monthNames(), null);
+  assert.equal(monthless.hasMonths(), false);
+  assert.equal(monthless.weekdayNames(), null, "a world with no week has no weekday names");
+  assert.equal(monthless.hasWeekdays(), false);
+  assert.equal(monthless.weekdayLabel(0), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -159,34 +182,49 @@ test("declaring 23 hours in a day changes what an hour is worth everywhere the l
   const wall = coordinateLaw(document, "frame:wall-time");
   const measure = coordinateLaw(document, "measure:human-time");
 
+  // Owner ruling: "I did not change the lenght of an hour I changed the length
+  // of a day. Day is defined as a number of hours, which are themselves a number
+  // of minutes, ect." Units compose FROM BELOW, so a radix is a statement about
+  // the length of the unit ABOVE it.
   assert.equal(wall.hoursPerDay().toJSON(), "23");
-  assert.equal(wall.unitDays("hour").toJSON(), "1/23");
-  // The sub-hour ladder follows: minutes and seconds are subdivisions of THIS
-  // hour, so a 23-hour day has 1380 minutes and 82800 seconds.
+  assert.equal(wall.unitDays("hour").toJSON(), "1/24", "the hour is untouched -- it was not the thing edited");
+  assert.equal(wall.unitDays("day").toJSON(), "23/24", "the DAY is now twenty-three standard hours long");
+  // Everything below the hour is likewise untouched, and the per-day counts fall
+  // out of the shortened day rather than out of fattened parts.
+  assert.equal(wall.unitDays("minute").toJSON(), "1/1440");
   assert.equal(wall.minutesPerDay().toJSON(), "1380");
   assert.equal(wall.secondsPerDay().toJSON(), "82800");
-  assert.equal(wall.minutesPerHour().toJSON(), "60", "the radices below the hour are untouched");
+  assert.equal(wall.minutesPerHour().toJSON(), "60");
   assert.equal(measure.hoursPerDay().toJSON(), "23");
 
-  // Duration magnitudes: an event authored as one hour is now 1/23 of a day,
-  // and the fixed {hour:"1/24"} factor table that used to answer this is gone.
-  assert.equal(durationMagnitudeDays(durationMagnitude("1", "hour"), document).toJSON(), "1/23");
-  assert.equal(durationMagnitudeDays(durationMagnitude("90", "minute"), document).toJSON(), "3/46");
-  // A week is still seven days: the day is the base unit and the edit was below it.
+  // Duration magnitudes agree: an hour is a standard hour and 180 minutes are
+  // 180 standard minutes whatever the day radix says, while "1 day" is now the
+  // shortened thing.
+  assert.equal(durationMagnitudeDays(durationMagnitude("1", "hour"), document).toJSON(), "1/24");
+  assert.equal(durationMagnitudeDays(durationMagnitude("180", "minute"), document).toJSON(), "1/8");
+  assert.equal(durationMagnitudeDays(durationMagnitude("1", "day"), document).toJSON(), "23/24");
+  // A week is seven of THIS law's days, because a week is composed of them.
   assert.equal(durationMagnitudeDays(durationMagnitude("2", "week"), document).toJSON(), "14");
 
-  // Coordinate conversion: noon-by-the-clock is hour 12 of 23, which is no
-  // longer the middle of the day, and the round trip is still exact.
+  // Conversion: twelve o'clock is twelve STANDARD hours after this day began,
+  // and the day itself is twenty-three standard hours long. Both are stated as
+  // differences, because the absolute position of any given day now drifts.
+  const midnight = coordinateToDays(document, "frame:wall-time", civil(2026, 8, 20, 0, 0, 0));
   const twelve = coordinateToDays(document, "frame:wall-time", civil(2026, 8, 20, 12, 0, 0));
-  assert.equal(twelve.sub(twelve.floor()).toJSON(), "12/23");
+  const nextMidnight = coordinateToDays(document, "frame:wall-time", civil(2026, 8, 21, 0, 0, 0));
+  assert.equal(twelve.sub(midnight).toJSON(), "1/2", "twelve hours in is twelve standard hours in");
+  assert.equal(nextMidnight.sub(midnight).toJSON(), "23/24", "successive day boundaries are 23 standard hours apart");
   assert.deepEqual(daysToCoordinate(document, "frame:wall-time", twelve), civil(2026, 8, 20, 12, 0, 0));
 
-  // The date ladder above the base unit is untouched, so dates still land where
-  // they always did -- and the series' rules stay ICS-expressible.
-  assert.equal(
-    coordinateToDays(document, "frame:wall-time", civil(2026, 8, 20)).toJSON(),
-    civilCoordinateToDays(civil(2026, 8, 20)).toJSON()
-  );
+  // MIDNIGHT DRIFT: because the day is the shortened unit, this frame's day
+  // sequence slides against the standard calendar. Day N of the frame sits at
+  // N * 23/24 standard days, so a date is a position in the FRAME's own day
+  // sequence and not the standard date of the same spelling.
+  const civilDay = civilCoordinateToDays(civil(2026, 8, 20));
+  assert.equal(midnight.toJSON(), civilDay.mul(Rational.parse("23/24")).toJSON());
+  assert.notEqual(midnight.toJSON(), civilDay.toJSON(), "an edited day length necessarily drifts");
+  // The DATE ladder is still Gregorian, so the rule stays ICS-expressible even
+  // though the instants it names are not standard instants.
   assert.equal(wall.calendarScale(), GREGORY);
 });
 
@@ -257,8 +295,16 @@ test("the frame editor's apply path makes a ladder edit live, undoable, and jour
   assert.equal(coordinateLaw(document, "frame:wall-time").hoursPerDay().toJSON(), "23");
   // The engine, not just the model helper: this is the path every occurrence,
   // staple and projection query goes through.
+  // Twelve hours in is twelve STANDARD hours in, and the day it sits in is
+  // twenty-three standard hours long -- both stated as differences, because
+  // under bottom-up composition the absolute position of a given day drifts.
+  const midnight = engine.coordinateDays("frame:wall-time", civil(2026, 8, 20, 0, 0, 0));
   const twelve = engine.coordinateDays("frame:wall-time", civil(2026, 8, 20, 12, 0, 0));
-  assert.equal(twelve.sub(twelve.floor()).toJSON(), "12/23");
+  assert.equal(twelve.sub(midnight).toJSON(), "1/2");
+  assert.equal(
+    engine.coordinateDays("frame:wall-time", civil(2026, 8, 21, 0, 0, 0)).sub(midnight).toJSON(),
+    "23/24"
+  );
   assert.deepEqual(engine.daysCoordinate("frame:wall-time", twelve), civil(2026, 8, 20, 12, 0, 0));
 
   // One undoable entry that actually undoes, and a journal op naming the record.
@@ -360,5 +406,211 @@ test("a duration magnitude with no governing law falls back to the registered st
   assert.equal(
     durationMagnitudeDays({ frame: "measure:human-time", value: { levels: [{ level: "fortnight", value: "3" }] } }).toJSON(),
     "0"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Wave 8.20 Wave B: Wave A's residue class. `civilCoordinateToDays`/
+// `daysToCivilCoordinate` are the registered-standard boundary -- the name is
+// the assertion "standard Gregorian, deliberately". A call site that builds a
+// coordinate with them and then stores it against, or resolves it against, a
+// frame whose law is NOT the registered standard silently means the wrong
+// instant once that frame's own law is edited. The rule: a coordinate stored
+// in, or resolved against, a document frame must be built under THAT frame's
+// own law (`coordinateLaw(document, frame)`), never the standard boundary --
+// the standard boundary is reserved for the host clock, RFC 5545's wire, and
+// an explicit "go to this calendar date" entry.
+//
+// Each test below drives the actual fixed function (not a re-derivation of
+// its logic) against a frame whose law is edited exactly the owner's way
+// (`twentyThreeHourDocument`, Hour:Day:23), and proves the stored/queried
+// coordinate resolves back through the frame's OWN law to the exact day it
+// started from.
+// ---------------------------------------------------------------------------
+
+function personalFrameOn(document) {
+  document.frames["calendar:personal"] = {
+    id: "calendar:personal",
+    title: "Personal",
+    traits: ["set", "calendar"],
+    basis: "frame:wall-time"
+  };
+  return document.frames["calendar:personal"];
+}
+
+test("wave 8.20 residue: under the registered standard, a frame's own law resolves a day exactly as the civil boundary it replaces", () => {
+  // Every fixed call site now reads `coordinateLaw(document, frame).fromDays`
+  // where it used to read `daysToCivilCoordinate` outright. For an ordinary
+  // (unedited) document this must be a no-op -- proved once here, generically,
+  // rather than once per call site.
+  const document = createEmptyWorkspaceDocument("Standard");
+  personalFrameOn(document);
+  const probe = civilCoordinateToDays(civil(2026, 3, 15, 13, 45, 30));
+  assert.deepEqual(coordinateLaw(document, "calendar:personal").fromDays(probe), daysToCivilCoordinate(probe));
+});
+
+test("wave 8.20 residue: toggleTodoCompletion (src/ui/roster.js) resolves 'now' under the ToDo's own calendar frame", () => {
+  const document = twentyThreeHourDocument();
+  personalFrameOn(document);
+  const todo = addEvent(document, {
+    traits: ["event", "task", "todo"],
+    magnitudes: { duration: durationMagnitude("0") },
+    payload: { title: "Renew the parking permit" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: todo.id,
+    frame: "calendar:personal",
+    role: "observed",
+    coordinate: coordinateLaw(document, "calendar:personal").fromDays(Rational.parse("20000"))
+  });
+
+  const app = { chronolog: document, session: new ViewSession({ activeFrame: "calendar:personal" }) };
+  app.history = new CommandHistory(document, () => {});
+  Object.assign(app, createTransactions(app));
+
+  // `nowDays()` is not injectable (it is the deliberate host-clock civil
+  // boundary), so the live instant is bounded rather than pinned to a literal.
+  const before = nowDays();
+  toggleTodoCompletion(app, todo.id);
+  const after = nowDays();
+
+  const completed = Object.values(app.chronolog.relations).find(
+    (relation) => relation.type === "attachment" && relation.event === todo.id && relation.role === "completed"
+  );
+  assert.ok(completed, "checking the box wrote a completed relation");
+  assert.equal(completed.frame, "calendar:personal");
+  const resolved = coordinateLaw(app.chronolog, "calendar:personal").toDays(completed.coordinate);
+  // `fromDays` carries its continuous tail as a 12-place decimal (its own
+  // documented `fractionPlaces` default), so a real-clock fraction that does
+  // not divide evenly into a 23-radix hour loses at most ~1e-12 of a day on
+  // the round trip -- an existing, unrelated precision bound of `fromDays`
+  // itself, not this fix. `slack` is three orders of magnitude looser than
+  // that truncation and five orders tighter than one wall-clock second, so it
+  // cannot mask the bug this test exists to catch (which is minutes wide, not
+  // microseconds).
+  const slack = Rational.parse("1/1000000000");
+  assert.ok(
+    resolved.compare(before.sub(slack)) >= 0 && resolved.compare(after.add(slack)) <= 0,
+    "the stored coordinate resolves back through the frame's OWN 23-hour law to the instant it was written at"
+  );
+  // The bug this replaces: `daysToCivilCoordinate(nowDays())` builds an "hour"
+  // value out of 24, which this 23-hour frame's law would then divide by 23 on
+  // the way back -- a different instant whenever the hour is not zero.
+  const hourLevel = completed.coordinate.levels.find((level) => level.level === "hour");
+  if (hourLevel && Number(hourLevel.value) > 0) {
+    assert.notEqual(civilCoordinateToDays(completed.coordinate).compare(resolved), 0);
+  }
+});
+
+// A minimal harness for `createInspector(app).createEventAt`: it needs
+// `executeEventChange`/`store`/`toast`, but not the real undo journal or the
+// object card's own DOM (built with innerHTML the stub-DOM harness cannot
+// parse -- see the frame-editor test above for the same constraint). Each
+// `executeEventChange` mutation is snapshotted immediately, so the write this
+// test cares about survives even though `openEventInspector`'s later DOM/
+// engine-dependent work (unreachable here, deliberately unstubbed) throws and
+// triggers the same provisional-draft discard a real failed open would.
+function createEventAtHarness(document, activeFrame) {
+  const snapshots = [];
+  const app = {
+    chronolog: document,
+    session: new ViewSession({ activeFrame }),
+    store: { beginDeferred() {}, endDeferred() {} },
+    toast() {},
+    executeEventChange(label, eventId, mutate) {
+      mutate(document);
+      snapshots.push(clone(document.relations));
+    }
+  };
+  return { inspector: createInspector(app), snapshots };
+}
+
+test("wave 8.20 residue: createEventAt (src/ui/inspector.js) resolves the drag-provided day under the active frame's own law", () => {
+  const document = twentyThreeHourDocument();
+  personalFrameOn(document);
+  const { inspector, snapshots } = createEventAtHarness(document, "calendar:personal");
+
+  // A day-fraction only this frame's own law can place correctly. Hour 5 is
+  // five STANDARD hours into the frame's day (units compose from below), and
+  // 20000 is not a boundary of the frame's own shortened day sequence, so
+  // nothing but that law resolves this ordinal back to what it means.
+  const startDay = Rational.parse("20000").add(Rational.parse("5/24"));
+  inspector.createEventAt(startDay, startDay, "event");
+
+  const created = Object.values(snapshots[0] || {}).find((relation) => relation.type === "attachment");
+  assert.ok(created, "createEventAt wrote a placement relation before any later failure could discard it");
+  assert.equal(created.frame, "calendar:personal");
+  assert.equal(
+    coordinateLaw(document, "calendar:personal").toDays(created.coordinate).compare(startDay), 0,
+    "the stored coordinate resolves back through the frame's OWN 23-hour law to the exact day the drag handed in"
+  );
+});
+
+test("wave 8.20 residue: createEventAt is byte-identical to the old civil conversion under the registered standard", () => {
+  const document = createEmptyWorkspaceDocument("Standard create");
+  personalFrameOn(document);
+  const { inspector, snapshots } = createEventAtHarness(document, "calendar:personal");
+
+  const startDay = Rational.parse("20000").add(Rational.parse("5/24"));
+  inspector.createEventAt(startDay, startDay, "event");
+
+  const created = Object.values(snapshots[0] || {}).find((relation) => relation.type === "attachment");
+  assert.ok(created);
+  assert.deepEqual(created.coordinate, daysToCivilCoordinate(startDay));
+});
+
+test("wave 8.20 residue: the ICS export window (src/ui/calendar-sync-panel.js) is resolved under the exporting frame's own law", () => {
+  // The owner's scenario, applied to an export window: `session.window()`
+  // hands back universal day ordinals, and the fix resolves them with
+  // `coordinateLaw(document, frame).fromDays` before handing them to
+  // `exportICS`, which resolves them back with `coordinateLaw(...).toDays`
+  // (src/ics.js). Half a day under the standard boundary (hour 12 of 24) is a
+  // DIFFERENT absolute instant than half a day under this frame's real 23-hour
+  // law (hour 12 of 23 is 12/23 of a day, not 1/2) -- so an event placed just
+  // past the true half-day mark is wrongly swept into the export by the old
+  // boundary, and correctly excluded by the fix.
+  const document = twentyThreeHourDocument();
+  const frame = personalFrameOn(document);
+  const law = coordinateLaw(document, frame.id);
+  const dayStart = GREGORIAN_LAW.toDays(civil(2026, 8, 20));
+
+  const event = addEvent(document, {
+    traits: ["event"],
+    magnitudes: { duration: durationMagnitude("0") },
+    payload: { title: "Just past the true half-day mark" }
+  });
+  addRelation(document, {
+    type: "attachment",
+    event: event.id,
+    frame: frame.id,
+    role: "placed",
+    coordinate: law.fromDays(dayStart.add(Rational.parse("51/100")))
+  });
+
+  const windowStartFixed = law.fromDays(dayStart);
+  const windowEndFixed = law.fromDays(dayStart.add(Rational.parse("1/2")));
+  const fixedExport = exportICS(document, { frame: frame.id, start: windowStartFixed, end: windowEndFixed });
+  assert.doesNotMatch(fixedExport, /Just past the true half-day mark/, "the fix excludes it: 51/100 is past the true half-day bound");
+
+  // The bug, reproduced: the same window bounds built through the standard
+  // boundary instead. `dayStart` itself is bare and survives (0 hours is 0
+  // hours under any radix), but the fractional end does not.
+  const windowStartBuggy = daysToCivilCoordinate(dayStart);
+  const windowEndBuggy = daysToCivilCoordinate(dayStart.add(Rational.parse("1/2")));
+  // Under bottom-up composition the divergence is larger and structural, not a
+  // fraction-of-a-day rounding: this frame's DAY is shorter, so its whole day
+  // sequence drifts against the standard calendar and a standard-boundary
+  // coordinate names an entirely different instant. Both bounds move, so the
+  // buggy window is a different interval altogether -- which is the point. The
+  // assertion is that it IS different, not which way it lands, because "which
+  // way" is a function of how far from the epoch the window sits.
+  assert.notEqual(
+    law.toDays(windowEndBuggy).compare(law.toDays(windowEndFixed)), 0,
+    "a standard-boundary coordinate is not this frame's boundary once its day length is authored"
+  );
+  assert.notEqual(
+    law.toDays(windowStartBuggy).compare(law.toDays(windowStartFixed)), 0,
+    "the drift moves the start bound too, so the buggy window is a different interval"
   );
 });

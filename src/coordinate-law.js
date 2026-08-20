@@ -4,10 +4,12 @@ import {
   coordinate,
   daysFromCivil,
   daysInMonth,
+  floorDiv,
   floorMod,
   isLeapYear,
   levelValue
 } from "./exact.js";
+import { EraTable } from "./eras.js";
 
 // The one coordinate-arithmetic engine. Every unit relationship in ChronoLog --
 // how many hours are in a day, how long a month is, how a nested coordinate
@@ -67,15 +69,23 @@ const TRANSITIONS = new Map();
 const FAMILIES = new Map();
 const CALENDARS = new Map();
 
+// A family receives the LADDER it is asked to execute -- the ordered level
+// descriptors above the base, root first -- rather than only a signature string,
+// because a family may need the levels' own radices to do its arithmetic at all.
+// `calendar: null` means "this family is not a CLDR calendar scale": it can
+// execute a ladder but names no standard calendar, so `calendarScale()` reports
+// null and the ICS boundary converts or refuses rather than claiming a scale.
 export function registerCalendarFamily(definition) {
   const name = String(definition?.name || "");
   if (!name) throw new TypeError("A calendar family needs a name.");
-  if (typeof definition.toWholeUnits !== "function" || typeof definition.fromWholeUnits !== "function") {
-    throw new TypeError(`Calendar family ${name} must implement toWholeUnits and fromWholeUnits.`);
+  for (const required of ["supports", "toWholeUnits", "fromWholeUnits"]) {
+    if (typeof definition[required] !== "function") {
+      throw new TypeError(`Calendar family ${name} must implement ${required}.`);
+    }
   }
   const family = Object.freeze({ defaults: {}, aliases: [], calendar: name, ...definition });
   FAMILIES.set(name, family);
-  for (const id of [family.calendar, ...family.aliases]) {
+  for (const id of family.calendar === null ? [] : [family.calendar, ...family.aliases]) {
     CALENDARS.set(String(id).toLowerCase(), family);
   }
   return family;
@@ -246,14 +256,70 @@ export const GREGORIAN_FAMILY = registerCalendarFamily({
   // date, and an absent year means the day-zero epoch year -- the defaults the
   // shipped civil conversion has always used.
   defaults: { year: "1970", month: "1", day: "1" },
-  ladder(signature) {
-    return GREGORIAN_LADDERS.get(signature) || null;
+  signature(ladder) {
+    return ladder.slice(1).map((level) => level.transition || "").join("+");
   },
-  toWholeUnits(signature, parts) {
-    return GREGORIAN_LADDERS.get(signature).toWholeUnits(parts);
+  supports(ladder) {
+    return GREGORIAN_LADDERS.has(this.signature(ladder));
   },
-  fromWholeUnits(signature, days) {
-    return GREGORIAN_LADDERS.get(signature).fromWholeUnits(days);
+  toWholeUnits(ladder, parts) {
+    return GREGORIAN_LADDERS.get(this.signature(ladder)).toWholeUnits(parts);
+  },
+  fromWholeUnits(ladder, days) {
+    return GREGORIAN_LADDERS.get(this.signature(ladder)).fromWholeUnits(days);
+  }
+});
+
+// The uniform positional family: any ladder whose levels above the base all
+// count a CONSTANT number of children. This is what a wholly invented calendar
+// needs -- 12 months of 30 days in a 360-day year, or Tamriel's fixed year --
+// and it is registered rather than special-cased, so such a calendar converts
+// through the same seam Gregorian does.
+//
+// It names no CLDR calendar scale, so a series counting in it is not
+// ICS-expressible as a rule (AGENTS.md's ICS contract) even though its dates
+// resolve to exact day ordinals.
+//
+// Root values are 1-based, matching the family defaults every other level uses,
+// and may be zero or negative: a descending era (Merethic, BCE) resolves to
+// proper years at or below zero, and `floorDiv`/`floorMod` carry that through
+// exactly rather than truncating toward zero.
+export const UNIFORM_FAMILY = registerCalendarFamily({
+  name: "uniform",
+  calendar: null,
+  defaults: { },
+  // Whole units of the base level spanned by one unit of each ladder level.
+  spans(ladder) {
+    const spans = new Array(ladder.length);
+    let span = 1n;
+    for (let index = ladder.length - 1; index >= 0; index -= 1) {
+      spans[index] = span;
+      if (index > 0) span *= ladder[index].radix.n;
+    }
+    return spans;
+  },
+  supports(ladder) {
+    return ladder.length > 0
+      && ladder.slice(1).every((level) => level.radix && !level.transition && level.radix.d === 1n);
+  },
+  toWholeUnits(ladder, parts) {
+    const spans = this.spans(ladder);
+    let total = 0n;
+    for (const [index] of ladder.entries()) {
+      total += (parts.get(index) - 1n) * spans[index];
+    }
+    return total;
+  },
+  fromWholeUnits(ladder, wholeUnits) {
+    const spans = this.spans(ladder);
+    let remainder = BigInt(wholeUnits);
+    const values = [];
+    for (const [index, level] of ladder.entries()) {
+      const amount = floorDiv(remainder, spans[index]);
+      remainder -= amount * spans[index];
+      values.push([level.name, amount + 1n]);
+    }
+    return values;
   }
 });
 
@@ -390,60 +456,181 @@ export class CoordinateLaw {
     this._byName = byName;
     this._cycles = normalizeCycles(declaration, frameLabel);
     this._unitDays = new Map();
+    this._unitAtoms = new Map();
 
-    // The BASE LEVEL is the level whose unit is one day of the base measure --
-    // the unit every `days` number in ChronoLog counts. Everything above it is
-    // measured by transitions (which count whole base units); everything below
-    // it is measured by radix division.
+    // THE ATOM: the finest declared unit, the one everything else is composed
+    // from. Its own absolute length is the one thing composition cannot supply,
+    // so it comes from the registered standard for a unit of that name (a second
+    // is 1/86400 of a standard day wherever it appears) or is authored outright
+    // with `atomDays`.
     //
-    // A `fixed` block names its own base explicitly: its finest level, scaled by
-    // `smallestUnitDays`. Otherwise the base is the deepest level reached by a
-    // transition, because a transition's whole point is that it counts days.
-    // With neither, the root is the base -- a bare `day -> hour` ladder needs no
-    // ceremony to mean what it says.
-    const fixed = declaration?.fixed;
-    const deepestTransition = [...levels].reverse().find((level) => level.transition) || null;
-    if (fixed && levels.length) {
-      this.baseLevel = levels[levels.length - 1].name;
-      this.baseDays = Rational.parse(fixed.smallestUnitDays ?? "1");
-      this.epochDays = Rational.parse(fixed.epochDays ?? "0");
+    // This is also the shared denominator for cross-frame comparison: two laws
+    // relate absolutely exactly insofar as they share an atom, whether directly
+    // or through basis inheritance. Two frames with no shared atom have no
+    // automatic absolute relation at all -- that is what connection staples are
+    // for, and inventing one would be the same fabrication as an invented origin.
+    const finest = levels.length ? levels[levels.length - 1] : null;
+    // A continuous tail is not a unit of its own; the finest FIXED unit is the
+    // level above it.
+    this.atomLevel = finest && !finest.radix && !finest.transition && levels.length > 1
+      ? levels[levels.length - 2].name
+      : finest?.name || null;
+    const authoredAtomDays = declaration?.atomDays
+      ?? declaration?.baseUnitDays
+      ?? declaration?.fixed?.smallestUnitDays;
+    if (authoredAtomDays !== undefined && authoredAtomDays !== null) {
+      this.atomDays = Rational.parse(authoredAtomDays);
+    } else if (this.atomLevel && STANDARD_UNIT_DAYS[this.atomLevel]) {
+      this.atomDays = STANDARD_UNIT_DAYS[this.atomLevel];
     } else {
-      this.baseLevel = deepestTransition?.name || levels[0]?.name || "day";
-      this.baseDays = Rational.parse(1);
-      this.epochDays = Rational.parse(0);
+      this.atomDays = Rational.parse(1);
     }
-    if (this.baseDays.compare(0) <= 0) {
+    if (this.atomDays.compare(0) <= 0) {
       throw new TypeError(`${frameLabel}: the smallest unit must be longer than zero days.`);
     }
+
+    // The BASE LEVEL is the level the family's whole-unit arithmetic COUNTS IN --
+    // the "day" of this ladder. It is no longer "one standard day": under
+    // bottom-up composition its length is whatever its own radices make it, so a
+    // frame declaring 23 hours in a day has a base unit of 23 standard hours and
+    // its day sequence DRIFTS against the standard calendar. That drift is the
+    // ruling, not a defect: successive day boundaries fall 23 standard hours
+    // apart because the day is the thing that was shortened.
+    //
+    // A `fixed` block's finest level is its base. Otherwise the base is the
+    // deepest level reached by a transition, because a transition counts whole
+    // base units. A UNIFORM ladder has no transition to infer from, so such a
+    // calendar states `baseLevel` outright, and that statement outranks every
+    // inference here.
+    const fixed = declaration?.fixed;
+    const deepestTransition = [...levels].reverse().find((level) => level.transition) || null;
+    const declaredBase = declaration?.baseLevel ? String(declaration.baseLevel) : null;
+    if (declaredBase && !byName.has(declaredBase)) {
+      throw new TypeError(
+        `${frameLabel}: the base unit is declared as "${declaredBase}", which is not one of its levels`
+        + ` (${levels.map((level) => level.name).join(", ") || "none"}).`
+      );
+    }
+    this.baseLevel = declaredBase
+      || (fixed && levels.length ? levels[levels.length - 1].name : null)
+      || deepestTransition?.name
+      || levels[0]?.name
+      || "day";
+    this.epochDays = Rational.parse(fixed?.epochDays ?? "0");
 
     const baseIndex = levels.findIndex((level) => level.name === this.baseLevel);
     this.aboveLadder = baseIndex < 0 ? Object.freeze([]) : Object.freeze(levels.slice(0, baseIndex + 1));
     this.belowLadder = baseIndex < 0 ? Object.freeze([]) : Object.freeze(levels.slice(baseIndex + 1));
 
+    // The ERA TABLE sits above the year level and renumbers it. Its level is the
+    // declaration's root, and the level directly below it is the one whose
+    // numbering restarts per era -- so an era-qualified coordinate carries BOTH
+    // ("3E", 433) and the ladder underneath is unchanged. The era level is
+    // deliberately NOT part of the family's ladder: the table converts
+    // (era, year) to the PROPER YEAR the ladder already counts in, and the family
+    // takes it from there. That composition is what keeps eras first-class
+    // instead of a label over a linearized year.
+    if (declaration?.eras) {
+      if (levels.length < 2) {
+        throw new TypeError(`${frameLabel}: an era table needs an era level and a year level beneath it.`);
+      }
+      try {
+        this.eraTable = new EraTable(declaration.eras);
+      } catch (error) {
+        throw new TypeError(`${frameLabel}: ${error.message}`);
+      }
+      this.eraLevel = levels[0].name;
+      this.yearLevel = levels[1].name;
+      if (levels[0].radix || levels[0].transition) {
+        throw new TypeError(
+          `${frameLabel}: level "${this.eraLevel}" is governed by the era table, so it takes no count or transition.`
+        );
+      }
+      if (this.eraLevel === this.baseLevel) {
+        throw new TypeError(`${frameLabel}: the era level cannot also be the base unit.`);
+      }
+    } else {
+      this.eraTable = null;
+      this.eraLevel = null;
+      this.yearLevel = null;
+    }
+
+    // What the family actually executes: the above-base ladder minus the era
+    // level, whose job the table has already done.
+    this.familyLadder = this.eraTable ? Object.freeze(this.aboveLadder.slice(1)) : this.aboveLadder;
+
     // Every transition above the base must belong to one family: half a
     // Gregorian ladder spliced onto half of something else is not a calendar.
-    const families = new Set(this.aboveLadder
+    const families = new Set(this.familyLadder
       .filter((level) => level.transition)
       .map((level) => TRANSITIONS.get(level.transition).family.name));
     if (families.size > 1) {
       throw new TypeError(`${frameLabel}: levels mix the ${[...families].join(" and ")} calendar families.`);
     }
-    this.signature = this.aboveLadder.slice(1).map((level) => level.transition || "").join("+");
-    const family = families.size ? FAMILIES.get([...families][0]) : null;
-    if (family && !family.ladder(this.signature)) {
+    // A ladder with no transitions at all is uniform: constant counts the whole
+    // way down. It only becomes POSITIONAL when the author says where it starts
+    // (`origin.days`) or hands it an era table, because without an origin there
+    // is no statement of which day the calendar's first unit begins on, and
+    // inventing one would place every date in the document by guess.
+    const origin = declaration?.origin;
+    let family = families.size ? FAMILIES.get([...families][0]) : null;
+    // An era table renumbers YEARS; it says nothing about which day the calendar
+    // starts on, so it never substitutes for an origin. Anchoring at day zero by
+    // default would place every date in the document by an invented convention.
+    if (!family && this.familyLadder.length && UNIFORM_FAMILY.supports(this.familyLadder) && origin) {
+      family = UNIFORM_FAMILY;
+    }
+    if (family && !family.supports(this.familyLadder)) {
       throw new TypeError(
         `${frameLabel}: the ${family.name} family cannot execute the level ladder `
-        + `${this.aboveLadder.map((level) => level.name).join(" > ")}.`
+        + `${this.familyLadder.map((level) => level.name).join(" > ")}.`
       );
     }
-    this.positional = positional === undefined ? Boolean(family) : Boolean(positional && family);
+    if (origin !== undefined && origin !== null) {
+      this.originDays = Rational.parse(origin?.days ?? origin);
+      // `fixed.epochDays` and `origin.days` are two statements of the same fact —
+      // where this calendar's counting begins. Carrying both would silently add
+      // them together, so one of them has to go rather than be reconciled here.
+      if (!this.epochDays.isZero()) {
+        throw new TypeError(
+          `${frameLabel}: the declaration states its starting day twice, as a fixed-calendar epoch`
+          + ` and as an origin. Keep one.`
+        );
+      }
+    } else {
+      this.originDays = Rational.parse(0);
+    }
+    // An era table is itself a statement that these coordinates are positions,
+    // not magnitudes -- there is no such thing as a duration of "3E 433".
+    const declaredPositional = positional === undefined
+      ? Boolean(family)
+      : Boolean((positional || this.eraTable || origin) && family);
+    this.positional = declaredPositional;
     this.family = this.positional ? family : null;
+    if (this.eraTable && !this.family) {
+      throw new TypeError(
+        `${frameLabel}: an era table needs a year ladder its family can execute; `
+        + `declare an origin day for a uniform ladder, or use a registered transition.`
+      );
+    }
     // Retained even when this law is not positional, so an authoring surface can
     // still describe a measure frame's variable levels ("365 or 366 days").
     this.declaredFamily = family;
   }
 
   // --- Structure --------------------------------------------------------
+
+  // The base unit's own length, COMPOSED from its radices rather than assumed to
+  // be one standard day. Every consumer that used to read a hardcoded 1 here now
+  // reads whatever the declaration actually adds up to.
+  get baseDays() {
+    return this.unitDays(this.baseLevel) ?? this.atomDays;
+  }
+
+  /** How many atoms one base unit spans -- the family's counting granularity. */
+  get baseAtoms() {
+    return this.unitAtoms(this.baseLevel) ?? Rational.parse(1);
+  }
 
   level(name) {
     return this._byName.get(String(name)) || null;
@@ -473,10 +660,26 @@ export class CoordinateLaw {
     return standard?.names || null;
   }
 
+  // The names of this law's month-scale level, or NULL when it has no such
+  // concept at all.
+  //
+  // The distinction matters and used to be lost: a frame declaring no month
+  // level and no calendar family was told it had January through December.
+  // Inheriting the standard is right for a law that COUNTS in the registered
+  // calendar and simply left a level unnamed; it is a fabrication for a law that
+  // has no months. A caller that draws a month grid must therefore handle null by
+  // not drawing one.
   monthNames() {
     const monthLevel = this.levels.find((level) => level.transition === "gregorian.months")
       || this.level("month");
-    return (monthLevel && this.namesFor(monthLevel.name)) || STANDARD_MONTH_NAMES;
+    const authored = monthLevel && this.namesFor(monthLevel.name);
+    if (authored) return authored;
+    if (monthLevel && this.declaredFamily) return STANDARD_MONTH_NAMES;
+    return this.declaredFamily && !this.levels.length ? STANDARD_MONTH_NAMES : null;
+  }
+
+  hasMonths() {
+    return this.monthNames() !== null;
   }
 
   // The CLDR calendar scale this law's DATE ladder counts in, or null when it
@@ -504,30 +707,54 @@ export class CoordinateLaw {
     return value;
   }
 
-  // Below the base, a unit divides down from its parent; above the base, it
-  // multiplies up from the child that nests in it. A level whose own edge is a
-  // transition -- or that contains one -- has no constant length at all, and
-  // says so by returning null rather than a mean masquerading as exact.
-  _computeUnitDays(name) {
-    if (name === this.baseLevel) return this.baseDays;
+  // UNITS ARE DEFINED BY COMPOSITION FROM BELOW.
+  //
+  // Owner ruling: "that is wrong, I did not change the lenght of an hour I
+  // changed the length of a day. Day is defined as a number of hours, which are
+  // themselves a number of minutes, ect."
+  //
+  // So the finest declared unit is the ATOM, and every level's length is the
+  // product of the radices beneath it. A radix says how many children fill one
+  // parent, which makes it a statement about the PARENT's length: editing
+  // hour-within-day to 23 makes the DAY twenty-three standard hours long and
+  // leaves the hour untouched. Anchoring the other way round -- holding the day
+  // fixed and fattening its hours -- is the inversion this replaces.
+  //
+  // A level containing a transition has no constant length and says so by
+  // returning null rather than a mean masquerading as exact.
+  _computeUnitAtoms(name) {
     const level = this.level(name);
-    if (!level) {
-      return STANDARD_UNIT_DAYS[name] ? STANDARD_UNIT_DAYS[name].mul(this.baseDays) : null;
-    }
-    if (level.transition) return null;
-    if (this.belowLadder.some((entry) => entry.name === name)) {
-      const parent = level.within ? this.unitDays(level.within) : null;
-      // A below-base level with no radix (the ladder's `subsecond` tail) is its
-      // parent subdivided continuously rather than into a fixed count: a value
-      // of 0.25 there means a quarter of one parent unit. Radix 1, in other
-      // words -- which is exactly how the shipped civil conversion treated
-      // `subsecond`, as a fraction carried in seconds.
-      return parent !== null ? parent.div(level.radix || 1) : null;
-    }
+    if (!level) return STANDARD_UNIT_DAYS[name] ? STANDARD_UNIT_DAYS[name].div(this.atomDays) : null;
+    if (name === this.atomLevel) return Rational.parse(1);
+    // A level's OWN edge (radix or transition) says how many of IT fit in its
+    // parent, so it describes the PARENT's length and says nothing about its own.
+    // Only the child's edge does that. Reading a level's own transition here is
+    // what made `day` -- which carries `gregorian.days`, "how many days in a
+    // month" -- look like a unit of no fixed length.
     const child = this.levels.find((entry) => entry.within === name);
-    if (!child || child.transition || !child.radix) return null;
-    const childDays = this.unitDays(child.name);
-    return childDays === null ? null : childDays.mul(child.radix);
+    if (!child) return Rational.parse(1);
+    if (child.transition) return null;
+    const childAtoms = this.unitAtoms(child.name);
+    // A level with no radix beneath it (the ladder's continuous `subsecond`
+    // tail) subdivides its parent continuously rather than into a fixed count,
+    // so it contributes a factor of one: a value of 0.25 there means a quarter
+    // of one parent unit, which is how the shipped civil conversion has always
+    // treated it.
+    return childAtoms === null ? null : childAtoms.mul(child.radix || 1);
+  }
+
+  /** How many atoms one unit of `name` spans, or null when it varies. */
+  unitAtoms(name) {
+    const key = String(name);
+    if (this._unitAtoms.has(key)) return this._unitAtoms.get(key);
+    const value = this._computeUnitAtoms(key);
+    this._unitAtoms.set(key, value);
+    return value;
+  }
+
+  _computeUnitDays(name) {
+    const atoms = this.unitAtoms(name);
+    return atoms === null ? null : atoms.mul(this.atomDays);
   }
 
   // Exact mean days per unit, defined for every level: a variable level's mean
@@ -627,6 +854,9 @@ export class CoordinateLaw {
   cycle(name) {
     const declared = this._cycles.get(String(name));
     if (declared) return declared;
+    // Same rule as `namesFor`: only a law that counts in the registered calendar
+    // inherits its cycles. A law that does not has no week unless it says so.
+    if (!this.declaredFamily) return null;
     const standard = GREGORIAN_DECLARATION.cycles.find((entry) => entry.name === String(name));
     if (!standard) return null;
     return {
@@ -668,12 +898,70 @@ export class CoordinateLaw {
     return cycle.names?.[index] ?? `${cycle.name} ${index + 1}`;
   }
 
+  // The weekday cycle's names, or NULL when this law declares no such cycle and
+  // inherits no calendar that would. A world with no week has no weekday names,
+  // and handing it seven Gregorian ones invents a fact.
   weekdayNames() {
-    return this.cycleNames("weekday") || STANDARD_WEEKDAY_NAMES;
+    const authored = this.cycleNames("weekday");
+    if (authored) return authored;
+    return this.declaredFamily ? STANDARD_WEEKDAY_NAMES : null;
+  }
+
+  hasWeekdays() {
+    return this.weekdayNames() !== null;
   }
 
   weekdayLabel(days) {
-    return this.cycleLabel("weekday", days);
+    return this.hasWeekdays() ? this.cycleLabel("weekday", days) : null;
+  }
+
+  // --- Eras -------------------------------------------------------------
+
+  hasEras() {
+    return this.eraTable !== null;
+  }
+
+  eras() {
+    return this.eraTable ? this.eraTable.entries : [];
+  }
+
+  /**
+   * How a year renders under this law: "3E 433" where the law has eras, and the
+   * plain year otherwise. `value` is a coordinate, so this reads whichever
+   * levels the law actually declares rather than assuming a `year` level exists.
+   */
+  formatYear(value) {
+    if (!this.eraTable) {
+      const level = this.familyLadder[0]?.name || this.levels[0]?.name;
+      return level ? String(levelValue(value, level, "")) : "";
+    }
+    const era = value?.levels?.find((entry) => entry.level === this.eraLevel);
+    if (!era) return "";
+    return this.eraTable.format(era.value, levelValue(value, this.yearLevel, "1"));
+  }
+
+  /** The era-qualified year at a day ordinal, or the plain year without eras. */
+  formatYearAtDays(days) {
+    return this.formatYear(this.fromDays(days));
+  }
+
+  /** Era-qualified text ("3E 433", "44 BCE") to {era, year}, or null. */
+  parseYear(text) {
+    return this.eraTable ? this.eraTable.parse(text) : null;
+  }
+
+  /**
+   * Does this law place its coordinates on the running clock at all?
+   *
+   * Only a positional law does: a non-positional law reads its base level as a
+   * bare count with no statement of which day anything begins on, so "now" has
+   * no position in it. An author may also say so outright with `clock: false` --
+   * a calendar of a world with no relation to this one has no now, and drawing a
+   * Now line on it invents a fact (the owner's field note: "no artificial Now
+   * line on a calendar with no now-mapping").
+   */
+  mapsToClock() {
+    return this.positional && this.declaration?.clock !== false;
   }
 
   // --- Conversion -------------------------------------------------------
@@ -691,12 +979,45 @@ export class CoordinateLaw {
   toDays(value) {
     if (this.family) {
       const parts = new Map();
-      for (const [index, level] of this.aboveLadder.entries()) {
+      for (const [index, level] of this.familyLadder.entries()) {
+        // The era table owns the year level's numbering, so that value is the
+        // PROPER year it resolves to rather than whatever the coordinate stored.
+        if (this.eraTable && level.name === this.yearLevel) {
+          parts.set(index, this._properYear(value));
+          continue;
+        }
         const fallback = this.family.defaults[level.name] ?? "1";
         parts.set(index, BigInt(levelValue(value, level.name, fallback)));
       }
-      const whole = this.family.toWholeUnits(this.signature, parts);
-      return new Rational(whole).mul(this.baseDays).add(this.epochDays).add(this._belowDays(value));
+      // In ATOMS first, then out to standard days once: the whole-unit count is
+      // in base units, each of which is `baseAtoms` atoms long, and the levels
+      // below contribute their own atoms directly. Composing in the atom is what
+      // makes a shortened day shorten the absolute span rather than compress the
+      // hours inside it.
+      const whole = this.family.toWholeUnits(this.familyLadder, parts);
+      const atoms = new Rational(whole).mul(this.baseAtoms).add(this._belowAtoms(value));
+      return atoms.mul(this.atomDays).add(this.epochDays).add(this.originDays);
+    }
+    // A value naming levels this law does not declare is NOT a value in this
+    // law, and reading its base level as a bare count would answer a question
+    // nobody asked: a {year, month, day} coordinate handed to a law with no
+    // family placed 1973-03-15 at day 15, silently, because `day` happened to be
+    // the base level. A magnitude of "15 days" and the fifteenth of March are not
+    // the same number, so this refuses instead of reading.
+    //
+    // A law that declares no levels at all is a bare day axis and keeps the
+    // permissive read: there is nothing there to contradict.
+    if (this.levels.length) {
+      const foreign = (value?.levels || [])
+        .map((entry) => entry.level)
+        .filter((level) => !this._byName.has(level));
+      if (foreign.length) {
+        throw new TypeError(
+          `Frame ${this.frameId || "(anonymous)"} declares no ${foreign.join(", ")} level,`
+          + ` so this coordinate is not a position in it (its levels are `
+          + `${this.levelNames().join(", ")}).`
+        );
+      }
     }
     const raw = value?.levels?.find((entry) => entry.level === this.baseLevel)
       || value?.levels?.find((entry) => entry.level === "day");
@@ -706,10 +1027,26 @@ export class CoordinateLaw {
     return Rational.parse(raw.value).mul(this.baseDays).add(this.epochDays);
   }
 
-  _belowDays(value) {
+  // The proper year an era-qualified coordinate names. The era is REQUIRED: a
+  // year with no era on a calendar that has eras is genuinely ambiguous, and
+  // defaulting it to "the era the anchor happens to sit in" would be exactly the
+  // invented meaning this model refuses.
+  _properYear(value) {
+    const era = value?.levels?.find((entry) => entry.level === this.eraLevel);
+    if (!era) {
+      throw new TypeError(
+        `This calendar numbers years within eras, so a coordinate needs one of `
+        + `${this.eraTable.eraKeys().join(", ")} in its "${this.eraLevel}" level.`
+      );
+    }
+    const year = levelValue(value, this.yearLevel, "1");
+    return this.eraTable.toProperYear(era.value, year);
+  }
+
+  _belowAtoms(value) {
     let total = Rational.parse(0);
     for (const level of this.belowLadder) {
-      const unit = this.unitDays(level.name);
+      const unit = this.unitAtoms(level.name);
       if (unit === null) continue;
       total = total.add(Rational.parse(levelValue(value, level.name, "0")).mul(unit));
     }
@@ -727,15 +1064,31 @@ export class CoordinateLaw {
         value: value.sub(this.epochDays).div(this.baseDays).toJSON()
       }]);
     }
-    const baseUnits = value.sub(this.epochDays).div(this.baseDays);
+    // Into ATOMS once, then decompose: whole base units first, then whatever
+    // atoms are left spent down the below-base ladder.
+    const atoms = value.sub(this.epochDays).sub(this.originDays).div(this.atomDays);
+    const baseUnits = atoms.div(this.baseAtoms);
     const whole = baseUnits.floor();
-    let remainder = baseUnits.sub(whole).mul(this.baseDays);
-    const levels = this.family.fromWholeUnits(this.signature, whole)
-      .map(([level, amount]) => ({ level, value: amount }));
+    let remainder = atoms.sub(this.baseAtoms.mul(whole));
+    const resolved = this.family.fromWholeUnits(this.familyLadder, whole);
+    // The era table turns the proper year back into an era plus a year within
+    // it, and BOTH land in the coordinate -- the round trip preserves what the
+    // author wrote, not a linearized equivalent of it.
+    const levels = this.eraTable
+      ? (() => {
+          const properYear = resolved.find(([name]) => name === this.yearLevel)?.[1];
+          const era = this.eraTable.fromProperYear(properYear);
+          return [
+            { level: this.eraLevel, value: era.era },
+            ...resolved.map(([level, amount]) =>
+              level === this.yearLevel ? { level, value: era.year } : { level, value: amount })
+          ];
+        })()
+      : resolved.map(([level, amount]) => ({ level, value: amount }));
     const below = [];
     let significant = false;
     for (const [index, level] of this.belowLadder.entries()) {
-      const unit = this.unitDays(level.name);
+      const unit = this.unitAtoms(level.name);
       if (unit === null) continue;
       // The continuous tail carries whatever is left as a fraction of one of its
       // own units, and only appears at all when there is something left.
@@ -792,13 +1145,35 @@ function resolveDeclaration(documentValue, frameId, seen) {
   if (frame.coordinateDefinition) return resolveDeclaration(documentValue, frame.coordinateDefinition, seen);
   const declaration = frame.coordinate;
   const authored = Array.isArray(declaration?.levels) && declaration.levels.length;
+  // POSITIONALITY IS A PROPERTY OF THE LADDER AND THE REGISTRY, never of a kind
+  // string or a trait. `positional: undefined` hands the decision to the
+  // constructor, which asks whether a registered family can actually execute the
+  // ladder -- so an identical year > month > day declaration resolves the same
+  // way whether or not anyone remembered to write `kind: "gregorian"` on it.
+  // Deciding by label instead placed 2026-08-20 at day ordinal 20, silently, for
+  // any declaration that spelled its kind differently.
+  //
+  // The one semantic marker that survives is `measure`, and it is not a label
+  // for arithmetic: it says what the frame IS. A measure frame's coordinate is a
+  // MAGNITUDE -- "5 days" -- so its levels are counts and not positions, and no
+  // family may reinterpret them as a date.
+  const magnitude = frame.traits?.includes("measure") || frame.traits?.includes("duration");
+  const positional = magnitude ? false : undefined;
   if (declaration?.kind === "gregorian" || frame.traits?.includes("gregorian")) {
     // A gregorian frame with no authored ladder gets the registered one, which
-    // is what the `gregorian` kind has always meant here.
-    return { declaration: authored ? declaration : GREGORIAN_DECLARATION, frameId, positional: true };
+    // is what the `gregorian` kind has always meant here. The kind survives only
+    // as this default-ladder shorthand, never as the positionality answer.
+    return { declaration: authored ? declaration : GREGORIAN_DECLARATION, frameId, positional };
+  }
+  // An ERA TABLE or an authored ORIGIN is a frame stating that its own levels
+  // name positions -- an era is not a magnitude, and an origin is precisely the
+  // statement of which day the ladder starts on. Such a frame owns its
+  // coordinates outright and does not defer to a basis for them.
+  if (authored && (declaration.eras || declaration.origin)) {
+    return { declaration, frameId, positional };
   }
   if (frame.basis) return resolveDeclaration(documentValue, frame.basis, seen);
-  return { declaration: declaration || null, frameId, positional: false };
+  return { declaration: declaration || null, frameId, positional };
 }
 
 export function coordinateLaw(documentValue, frameId) {
@@ -843,6 +1218,35 @@ export function coordinateLawError(documentValue, frameId) {
     return null;
   } catch (error) {
     return error.message;
+  }
+}
+
+// What is wrong with this COORDINATE under its frame's law, in the author's
+// words, or null when it resolves.
+//
+// The refuse-before-store discipline extends to validation: a document whose era
+// coordinates only fail at query time is not a valid document, and reporting it
+// as one defers a certain failure to the worst possible moment. This is the seam
+// `validateDocument` calls per attachment/staple coordinate; `coordinateLawError`
+// is its per-frame sibling.
+export function coordinateValueError(documentValue, frameId, value) {
+  try {
+    coordinateLaw(documentValue, frameId).toDays(value);
+    return null;
+  } catch (error) {
+    return error.message;
+  }
+}
+
+// The query path's counterpart to `displayLaw`'s catch: a single unresolvable
+// frame must not take down a whole projection, for exactly the reason a broken
+// frame must not blank the stage. Returns null instead of throwing, so a caller
+// can skip the record and collect the reason rather than abort the query.
+export function coordinateDaysOrNull(documentValue, frameId, value) {
+  try {
+    return coordinateLaw(documentValue, frameId).toDays(value);
+  } catch {
+    return null;
   }
 }
 
