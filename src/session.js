@@ -1,10 +1,9 @@
 import {
   Rational,
   coordinate,
-  daysFromCivil,
-  daysToCivilCoordinate,
   nowDays
 } from "./exact.js";
+import { GREGORIAN_LAW, civilCoordinateToDays } from "./coordinate-law.js";
 import { clampDockWidth, normalizeDockSide } from "./dock-layout.js";
 import { FrameSelection } from "./frame-selection.js";
 import { normalizeRadialGuideValues, positiveRadialCycle } from "./radial.js";
@@ -272,8 +271,16 @@ export class ViewSession {
       INTIMATE_HOUR_PIXELS_MIN,
       Math.min(INTIMATE_HOUR_PIXELS_MAX, Number(input.intimateHourPixels) || LENS_VIEW_DEFAULTS.intimate.intimateHourPixels)
     );
-    this.intimateStartHour = Math.max(0, Math.min(23, Math.floor(Number(input.intimateStartHour ?? LENS_VIEW_DEFAULTS.intimate.intimateStartHour))));
-    this.intimateEndHour = Math.max(this.intimateStartHour + 1, Math.min(24, Math.floor(Number(input.intimateEndHour ?? LENS_VIEW_DEFAULTS.intimate.intimateEndHour))));
+    // The governing frame's coordinate law, assigned by the render loop
+    // (app.js's reconcileSession) whenever the primary frame or its declaration
+    // changes. Every view number that used to carry 24 or 30.4375 as a literal
+    // -- the intimate hour window, a month-sized span -- reads it instead, so a
+    // frame whose day is 23 hours long produces a 23-hour rail rather than a
+    // 24-hour rail with an hour of nothing at the bottom. Defaults to the
+    // registered standard so a session constructed before any document loads is
+    // still coherent.
+    this.law = GREGORIAN_LAW;
+    this._clampIntimateHours(input);
     this.tacticalRows = Math.max(1, Math.floor(Number(input.tacticalRows ?? LENS_VIEW_DEFAULTS.tactical.tacticalRows)));
     this.tacticalColumns = Math.max(1, Math.floor(Number(input.tacticalColumns ?? LENS_VIEW_DEFAULTS.tactical.tacticalColumns)));
     this.strategicMonths = Math.max(1, Math.floor(Number(input.strategicMonths ?? LENS_VIEW_DEFAULTS.strategic.strategicMonths)));
@@ -309,6 +316,34 @@ export class ViewSession {
     // every lens, so a lens nobody has configured renders identically to
     // before this setting existed.
     this.lensThresholds = normalizeLensThresholds(input.lensThresholds);
+  }
+
+  // The intimate window is expressed in this frame's hours, so its bounds are
+  // this frame's hours-per-day rather than 24. Re-run whenever the law changes:
+  // a window of 4..20 is meaningless on a calendar with eight hours in a day.
+  _clampIntimateHours(input = {}) {
+    const hoursPerDay = Math.max(1, Math.floor(this.law.hoursPerDay().toNumber()));
+    const start = Number(input.intimateStartHour ?? this.intimateStartHour ?? LENS_VIEW_DEFAULTS.intimate.intimateStartHour);
+    const end = Number(input.intimateEndHour ?? this.intimateEndHour ?? LENS_VIEW_DEFAULTS.intimate.intimateEndHour);
+    this.intimateStartHour = Math.max(0, Math.min(hoursPerDay - 1, Math.floor(start)));
+    this.intimateEndHour = Math.max(this.intimateStartHour + 1, Math.min(hoursPerDay, Math.floor(end)));
+  }
+
+  // The one place the governing law reaches view state. Assigning it re-derives
+  // every bound that depends on it rather than leaving a stale clamp behind --
+  // an editor that accepts an edit and ignores it is the bug this wave fixes.
+  setCoordinateLaw(law) {
+    if (!law || law === this.law) return;
+    this.law = law;
+    this._clampIntimateHours();
+  }
+
+  hoursPerDay() {
+    return this.law.hoursPerDay();
+  }
+
+  minutesPerDay() {
+    return this.law.minutesPerDay();
   }
 
   // The one place a lens's thresholds change, so the lens workspace UI has a
@@ -501,8 +536,12 @@ export class ViewSession {
     const lens = this.currentLens();
     if (lens === "intimate") return this.intimateBack + this.intimateForward + 1;
     if (lens === "tactical") return this.tacticalRows * this.tacticalColumns;
-    if (lens === "strategic") return this.strategicMonths * 30.4375;
-    if (lens === "wall") return this.wallMonths * 30.4375;
+    // A month-sized window is as long as this frame says a month is: exactly
+    // 146097/4800 days under the registered Gregorian law, whatever the
+    // declaration says under any other.
+    const monthDays = this.law.meanMonthDays().toNumber();
+    if (lens === "strategic") return this.strategicMonths * monthDays;
+    if (lens === "wall") return this.wallMonths * monthDays;
     if (lens === "lines") return this.linesDays;
     if (this.projection === "radial") {
       return this.radialCycle.mul(this.radialPast + this.radialFuture + 1).toNumber();
@@ -518,10 +557,16 @@ export class ViewSession {
     };
   }
 
+  // Where the focus sits, read under the governing law.
   focusCoordinate() {
-    return daysToCivilCoordinate(this.currentFocus());
+    return this.law.fromDays(this.currentFocus());
   }
 
+  // Deliberately CIVIL: this is the "go to this calendar date" entry point used
+  // by date pickers and ICS-shaped input, so it converts through the registered
+  // standard Gregorian boundary rather than the governing law. It used to
+  // rebuild that conversion inline (the /24, /1440, /86400 triple); melting it
+  // onto `civilCoordinateToDays` is what makes the boundary a single place.
   setCivilFocus(year, month, day, hour = 0, minute = 0, second = 0) {
     const value = coordinate([
       { level: "year", value: String(year) },
@@ -531,11 +576,7 @@ export class ViewSession {
       { level: "minute", value: String(minute) },
       { level: "second", value: String(second) }
     ]);
-    const ordinal = new Rational(daysFromCivil(BigInt(year), BigInt(month), BigInt(day)))
-      .add(Rational.parse(hour).div(24))
-      .add(Rational.parse(minute).div(1440))
-      .add(Rational.parse(second).div(86400));
-    this.setFocus(ordinal);
+    this.setFocus(civilCoordinateToDays(value));
     return value;
   }
 

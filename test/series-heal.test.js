@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ChronologEngine } from "../src/engine.js";
-import { Rational, daysFromCivil, daysToCivilCoordinate } from "../src/exact.js";
+import { Rational, daysFromCivil } from "../src/exact.js";
+import { daysToCivilCoordinate } from "../src/coordinate-law.js";
 import { importICS } from "../src/ics.js";
 import { clearSeriesEndStaple, createId, setSeriesEndStaple, validateDocument } from "../src/model.js";
 import { applyOps } from "../src/ops.js";

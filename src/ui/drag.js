@@ -1,4 +1,5 @@
-import { Rational, daysToCivilCoordinate, formatCivil } from "../exact.js";
+import { Rational, formatCivil } from "../exact.js";
+import { daysToCivilCoordinate } from "../coordinate-law.js";
 import {
   INTIMATE_COLUMN_PIXELS_FALLBACK,
   intimatePanStep,
@@ -28,6 +29,14 @@ export function createDragController(app, dom) {
 
   function intimateScroll() {
     return projection.querySelector(".intimate-scroll");
+  }
+
+  // The governing frame's hours-per-day, as a plain number for pixel/layout
+  // math. Every `dataset.bufferHours`/`dataset.timelineHours` fallback below
+  // used to assume a bare 24; this is what they fall back to instead, so a
+  // 23-hour frame gets 23-hour columns rather than one silently missing hour.
+  function frameHoursPerDay() {
+    return app.session.hoursPerDay().toNumber();
   }
 
   // One day column's width in pixels: the distance a horizontal gesture has to
@@ -90,7 +99,7 @@ export function createDragController(app, dom) {
     const scroll = projection.querySelector(".intimate-scroll");
     const offset = pointerOffset ?? scroll?.clientHeight / 2 ?? projection.clientHeight / 2;
     const hourPixels = Number(scroll?.dataset.hourPixels || session.intimateHourPixels);
-    const bufferHours = Number(scroll?.dataset.bufferHours || 24);
+    const bufferHours = Number(scroll?.dataset.bufferHours || frameHoursPerDay());
     const headerPixels = Number(scroll?.dataset.headerPixels || 70);
     const localHour = scroll
       ? (scroll.scrollTop + offset - headerPixels) / hourPixels - bufferHours
@@ -183,7 +192,11 @@ export function createDragController(app, dom) {
   // its seam (usually near a midnight marker).
   function rebaseIntimateScroll(scroll, direction) {
     const hourPixels = Number(scroll.dataset.hourPixels || 56);
-    const dayPixels = hourPixels * 24;
+    // `dataset.hoursPerDay` lives on this same element (it already carries
+    // `hourPixels`) when the projection has one to offer; absent that, the
+    // governing law is the fallback -- never the bare civil 24.
+    const hoursPerDay = Number(scroll.dataset.hoursPerDay) || frameHoursPerDay();
+    const dayPixels = hourPixels * hoursPerDay;
     app.pendingIntimateRebase = {
       top: Math.max(0, scroll.scrollTop - direction * dayPixels),
       left: scroll.scrollLeft
@@ -253,7 +266,8 @@ export function createDragController(app, dom) {
       dragPreview.style.right = "4px";
       if (cell.classList.contains("intimate-day-column")) {
         const timelineStart = Rational.parse(cell.dataset.timelineStart || cell.dataset.createDay);
-        const timelineDays = Number(cell.dataset.timelineHours || 24) / 24;
+        const perDayHours = frameHoursPerDay();
+        const timelineDays = Number(cell.dataset.timelineHours || perDayHours) / perDayHours;
         dragPreview.style.top = `${destination.sub(timelineStart).toNumber() / timelineDays * 100}%`;
         dragPreview.style.height = `${Math.max(.75, eventDrag.durationDays / timelineDays * 100)}%`;
       } else {
@@ -273,10 +287,11 @@ export function createDragController(app, dom) {
     if (cell.dataset.timelineStart) {
       const start = Rational.parse(cell.dataset.timelineStart);
       const bounds = cell.getBoundingClientRect();
-      const totalMinutes = Number(cell.dataset.timelineHours || 24) * 60;
+      const minutesPerHour = session.law.minutesPerHour().toNumber();
+      const totalMinutes = Number(cell.dataset.timelineHours || frameHoursPerDay()) * minutesPerHour;
       const fraction = Math.max(0, Math.min(0.999999, (clientY - bounds.top) / bounds.height));
       const minute = Math.round(fraction * totalMinutes / session.intimateGrain) * session.intimateGrain;
-      return start.add(Rational.parse(Math.min(totalMinutes - session.intimateGrain, minute)).div(1440));
+      return start.add(Rational.parse(Math.min(totalMinutes - session.intimateGrain, minute)).div(session.minutesPerDay()));
     }
     if (cell.dataset.dropStart) {
       const start = Rational.parse(cell.dataset.dropStart);
@@ -314,12 +329,12 @@ export function createDragController(app, dom) {
       const bounds = cell.getBoundingClientRect();
       const fraction = Math.max(0, Math.min(0.999999, (clientY - bounds.top) / bounds.height));
       const timelineStart = Rational.parse(cell.dataset.timelineStart || base);
-      const timelineMinutes = Number(cell.dataset.timelineHours || 24) * 60;
+      const timelineMinutes = Number(cell.dataset.timelineHours || frameHoursPerDay()) * session.law.minutesPerHour().toNumber();
       const minute = Math.min(
         timelineMinutes - session.intimateGrain,
         Math.max(0, Math.round(fraction * timelineMinutes / session.intimateGrain) * session.intimateGrain)
       );
-      return timelineStart.add(Rational.parse(minute).div(1440));
+      return timelineStart.add(Rational.parse(minute).div(session.minutesPerDay()));
     }
     const source = Rational.parse(sourceDay);
     return base.add(source.sub(source.floor()));
@@ -366,7 +381,7 @@ export function createDragController(app, dom) {
       startX: event.clientX,
       startY: event.clientY,
       title: item.textContent.trim() || item.getAttribute("aria-label") || "Event",
-      durationDays: durationMagnitudeDays(app.chronolog.events[item.dataset.eventId]?.magnitudes?.duration).toNumber(),
+      durationDays: durationMagnitudeDays(app.chronolog.events[item.dataset.eventId]?.magnitudes?.duration, app.chronolog).toNumber(),
       active: false
     };
   });
@@ -557,7 +572,8 @@ export function createDragController(app, dom) {
       createPreview.className = "drag-preview";
       document.body.append(createPreview);
     }
-    const duration = end.sub(createDrag.start).abs().mul(24).toNumber();
+    const perDayHours = frameHoursPerDay();
+    const duration = end.sub(createDrag.start).abs().mul(session.hoursPerDay()).toNumber();
     createPreview.style.left = `${Math.min(innerWidth - 260, event.clientX + 16)}px`;
     createPreview.style.top = `${Math.min(innerHeight - 80, event.clientY + 16)}px`;
     if (!(cell instanceof SVGElement)) {
@@ -566,10 +582,10 @@ export function createDragController(app, dom) {
       createPreview.style.left = "4px";
       createPreview.style.right = "4px";
       createPreview.style.top = cell.classList.contains("intimate-day-column")
-        ? `${(createDrag.start.compare(end) <= 0 ? createDrag.start : end).sub(Rational.parse(cell.dataset.timelineStart || cell.dataset.createDay)).toNumber() / (Number(cell.dataset.timelineHours || 24) / 24) * 100}%`
+        ? `${(createDrag.start.compare(end) <= 0 ? createDrag.start : end).sub(Rational.parse(cell.dataset.timelineStart || cell.dataset.createDay)).toNumber() / (Number(cell.dataset.timelineHours || perDayHours) / perDayHours) * 100}%`
         : "28px";
       createPreview.style.height = cell.classList.contains("intimate-day-column")
-        ? `${Math.max(.75, Math.min(100, duration / Number(cell.dataset.timelineHours || 24) * 100))}%`
+        ? `${Math.max(.75, Math.min(100, duration / Number(cell.dataset.timelineHours || perDayHours) * 100))}%`
         : "auto";
     }
     const firstDay = createDrag.start.floor() < end.floor() ? createDrag.start.floor() : end.floor();

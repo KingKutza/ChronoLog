@@ -1,16 +1,12 @@
-import {
-  Rational,
-  civilCoordinateToDays,
-  coordinate,
-  daysToCivilCoordinate,
-  durationMagnitudeDays
-} from "./exact.js";
+import { Rational, coordinate } from "./exact.js";
+import { GREGORIAN_DECLARATION, coordinateLaw, durationMagnitudeDays } from "./coordinate-law.js";
 import { mapSnapshot, opsFromMaps, putOp } from "./ops.js";
 import { STAPLE_KINDS, stapleKind, stapleTarget } from "./staples.js";
 
-// Re-exported from exact.js, where the arithmetic now lives (it reads the
-// nested-levels shape and touches no document). Kept exported here so every
-// existing caller's import path is unchanged.
+// Re-exported from coordinate-law.js, where the arithmetic now lives: a
+// duration's worth in days is a question about the magnitude frame's declared
+// unit ladder, so it is answered there. Kept exported here so every existing
+// caller's import path is unchanged.
 export { durationMagnitudeDays };
 
 export const SCHEMA_VERSION = "chronolog/1";
@@ -65,22 +61,17 @@ export function createEmptyWorkspaceDocument(title = "Untitled Chronolog") {
       ]
     }
   };
+  // Wall time ships the REGISTERED Gregorian declaration verbatim -- ladder,
+  // radices, month names, and the weekday cycle -- rather than a hand-copied
+  // subset of it. The names matter: they are what the minimap and the day
+  // headers read, so putting them in the declaration is what makes them
+  // editable at all, and Wall Time is the frame every derived calendar inherits
+  // its structure from.
   document.frames["frame:wall-time"] = {
     id: "frame:wall-time",
     title: "Wall time",
     traits: ["line", "temporal", "gregorian"],
-    coordinate: {
-      kind: "gregorian",
-      levels: [
-        { name: "year" },
-        { name: "month", within: "year", transition: "gregorian.months" },
-        { name: "day", within: "month", transition: "gregorian.days" },
-        { name: "hour", within: "day", radix: "24" },
-        { name: "minute", within: "hour", radix: "60" },
-        { name: "second", within: "minute", radix: "60" },
-        { name: "subsecond", within: "second" }
-      ]
-    }
+    coordinate: clone(GREGORIAN_DECLARATION)
   };
   return document;
 }
@@ -567,40 +558,17 @@ export function renderTerminatorState(document, lineId, boundaryAttachmentId) {
   return termination?.state || "open";
 }
 
+// Both directions are now one line each, because the dispatch they used to
+// perform (walk `coordinateDefinition`, then branch on `kind: "gregorian"` into
+// hardcoded civil functions, then fall through to `basis`) IS the coordinate law
+// -- and running it from a frame's own declaration instead of from a hardcoded
+// branch is what makes an edited ladder take effect. See src/coordinate-law.js.
 export function coordinateToDays(document, frameId, value) {
-  return coordinateToDaysSeen(document, frameId, value, new Set());
-}
-
-function coordinateToDaysSeen(document, frameId, value, seen) {
-  if (seen.has(frameId)) throw new Error(`Coordinate definition cycle at ${frameId}`);
-  seen.add(frameId);
-  const frame = document.frames[frameId];
-  if (!frame) throw new Error(`Unknown frame: ${frameId}`);
-  if (frame.coordinateDefinition) return coordinateToDaysSeen(document, frame.coordinateDefinition, value, seen);
-  if (frame.coordinate?.kind === "gregorian" || frame.traits.includes("gregorian")) {
-    return civilCoordinateToDays(value);
-  }
-  if (frame.basis) return coordinateToDaysSeen(document, frame.basis, value, seen);
-  const days = value?.levels?.find((entry) => entry.level === "day");
-  if (days) return Rational.parse(days.value);
-  throw new Error(`Frame ${frameId} has no temporal coordinate law`);
+  return coordinateLaw(document, frameId).toDays(value);
 }
 
 export function daysToCoordinate(document, frameId, days) {
-  return daysToCoordinateSeen(document, frameId, days, new Set());
-}
-
-function daysToCoordinateSeen(document, frameId, days, seen) {
-  if (seen.has(frameId)) throw new Error(`Coordinate definition cycle at ${frameId}`);
-  seen.add(frameId);
-  const frame = document.frames[frameId];
-  if (!frame) throw new Error(`Unknown frame: ${frameId}`);
-  if (frame.coordinateDefinition) return daysToCoordinateSeen(document, frame.coordinateDefinition, days, seen);
-  if (frame.coordinate?.kind === "gregorian" || frame.traits.includes("gregorian")) {
-    return daysToCivilCoordinate(days);
-  }
-  if (frame.basis) return daysToCoordinateSeen(document, frame.basis, days, seen);
-  return coordinate([{ level: "day", value: Rational.parse(days).toJSON() }]);
+  return coordinateLaw(document, frameId).fromDays(days);
 }
 
 // An override names the occurrence it acts on by a virtual id, which

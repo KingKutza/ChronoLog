@@ -4,6 +4,7 @@
 // as part of the model-facing renderer contract.
 
 import { applyWeightFormula, defaultWeightRuntime, normalizeWeightFormula, weightContributionOrder } from "./weight-formula.js";
+import { GREGORIAN_LAW } from "./coordinate-law.js";
 
 export const THEME_FIELDS = Object.freeze({
   ground: "Ground",
@@ -145,10 +146,16 @@ export function resolveObjectColor({
  * than a legacy trait string would carry no sigil marking its role at all --
  * the shape-carries-meaning contract in AGENTS.md would be broken exactly
  * the way color alone breaking it would be.
+ *
+ * "Covers a whole day" is the GOVERNING frame's minutes-per-day, not a fixed
+ * 1440 -- an event that fills a 23-hour day is a span at 23*60 minutes, not
+ * 1440. `minutesPerDay` defaults to the registered standard's 1440 so every
+ * caller that has no law at hand (this module is DOM- and document-free by
+ * design) keeps its prior answer unchanged.
  */
-export function sigilForFact(fact, durationMinutes = 0, importance = "standard") {
+export function sigilForFact(fact, durationMinutes = 0, importance = "standard", minutesPerDay = GREGORIAN_LAW.minutesPerDay().toNumber()) {
   const event = fact?.event;
-  if (durationMinutes >= 1440) return "span";
+  if (durationMinutes >= minutesPerDay) return "span";
   if (hasTrait(event, "terminator")) return "terminator";
   if (hasTrait(event, "task", "todo", "float")) return "task";
   if (hasTrait(event, "note")) return "note";
@@ -158,8 +165,8 @@ export function sigilForFact(fact, durationMinutes = 0, importance = "standard")
   return "point";
 }
 
-export function sigilDescription(fact, durationMinutes = 0, importance = "standard") {
-  return SIGIL_VOCABULARY[sigilForFact(fact, durationMinutes, importance)].label;
+export function sigilDescription(fact, durationMinutes = 0, importance = "standard", minutesPerDay = GREGORIAN_LAW.minutesPerDay().toNumber()) {
+  return SIGIL_VOCABULARY[sigilForFact(fact, durationMinutes, importance, minutesPerDay)].label;
 }
 
 function importanceSource(context, fact) {

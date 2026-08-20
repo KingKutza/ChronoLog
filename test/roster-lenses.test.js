@@ -6,7 +6,7 @@ import { DEFAULT_LENS_ORDER, ViewSession } from "../src/session.js";
 import { toggleTodoCompletion } from "../src/ui/roster.js";
 import { createTransactions } from "../src/ui/transactions.js";
 import { createSampleDocument, createStructuralDocument } from "./helpers/sample-document.js";
-import { renderProjection } from "../src/projections.js";
+import { findByClass, renderWithStubDom } from "./helpers/render-dom.js";
 import { ChronologEngine } from "../src/engine.js";
 import { FIXED_RADIAL_CYCLES, polar, resolveRadialCycle } from "../src/radial.js";
 import { daysFromCivil } from "../src/exact.js";
@@ -273,87 +273,10 @@ test("dock geometry and lens visibility both survive a session round trip", () =
   assert.ok(restored.lensOrder.includes("radial"), "a hidden lens is still remembered");
 });
 
-// There is no DOM-execution harness in this repo beyond the stub pattern
-// test/dock-dom.test.js established -- this is that same shape, sized down to
-// exactly what src/projections.js touches while building Intimate day columns
-// and radial-family SVG (createElement/createElementNS, style, dataset,
-// classList, append/replaceChildren). It is real enough to run renderProjection
-// end to end and inspect the actual elements it produces, so these are
-// behavioral checks against rendered output, not against the implementation's
-// source text.
-function createRenderStubDom() {
-  class StubElement {
-    constructor(tag) {
-      this.tagName = String(tag).toUpperCase();
-      this.className = "";
-      this.textContent = "";
-      this.dataset = {};
-      this.children = [];
-      this.parentElement = null;
-      this.attributes = new Map();
-      this.clientHeight = 900;
-      const node = this;
-      this.style = {
-        setProperty(name, value) { this[name] = String(value); },
-        getPropertyValue(name) { return this[name] ?? ""; }
-      };
-      this.classList = {
-        add(cls) { node.className = node.className ? `${node.className} ${cls}` : cls; }
-      };
-    }
-
-    append(...nodes) {
-      for (const n of nodes) { n.parentElement = this; this.children.push(n); }
-    }
-
-    replaceChildren(...nodes) {
-      this.children = [];
-      this.append(...nodes);
-    }
-
-    setAttribute(name, value) {
-      this.attributes.set(name, String(value));
-      // svgElement() sets the SVG "class" attribute via setAttribute rather
-      // than the className property real HTML elements get from element()
-      // -- mirror it the way a real DOM keeps className and the class
-      // attribute in sync, so classList.add (used for sigil classes) and
-      // this attribute-set class both land in the one place findByClass reads.
-      if (name === "class") this.className = String(value);
-    }
-
-    getAttribute(name) { return this.attributes.get(name) ?? null; }
-
-    descendants() {
-      return this.children.flatMap((child) => [child, ...child.descendants()]);
-    }
-  }
-  const documentStub = {
-    createElement: (tag) => new StubElement(tag),
-    createElementNS: (_ns, tag) => new StubElement(tag)
-  };
-  return { StubElement, documentStub };
-}
-
-// Runs renderProjection with the document/window globals stubbed for exactly
-// the duration of the call, and always restores them -- a leaked stub
-// `document` would corrupt every test that runs after this one in the same
-// process.
-function renderWithStubDom(context) {
-  const { StubElement, documentStub } = createRenderStubDom();
-  const previousDocument = globalThis.document;
-  globalThis.document = documentStub;
-  const target = new StubElement("div");
-  try {
-    renderProjection(target, context);
-    return target;
-  } finally {
-    globalThis.document = previousDocument;
-  }
-}
-
-function findByClass(root, className) {
-  return root.descendants().filter((node) => String(node.className).split(/\s+/).includes(className));
-}
+// The stub DOM this suite renders into lives in test/helpers/render-dom.js,
+// shared with the coordinate-law acceptance test. A second copy of a DOM stub
+// is a second set of silent divergences in what "the DOM does" means, so there
+// is one.
 
 // A day column's rendered "timed" rail is a continuous multi-day window (it
 // carries several buffer days either side of the visible day for scroll

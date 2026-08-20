@@ -669,7 +669,17 @@ export function createToolbar(app, dom) {
     const controls = [];
     const navControls = [];
     const barControls = [];
-    const hourLabel = (hour) => hour === 0 || hour === 24 ? "12 AM" : hour === 12 ? "12 PM" : `${hour % 12} ${hour < 12 ? "AM" : "PM"}`;
+    // The Intimate start/end hour pickers offer one option per hour of the
+    // PRIMARY frame's own day (law.hoursPerDay()), not a bare 24 -- a 23-hour
+    // frame offers 23 of them. 12-hour AM/PM wording only reads correctly
+    // when the day divides into two 12-hour halves; any other hour count (a
+    // 23-hour day, for instance) has no meridiem at all, so the label falls
+    // back to a plain hour number rather than a wrapped, meaningless AM/PM.
+    const intimateHoursPerDay = Math.max(1, Math.round(session.law.hoursPerDay().toNumber()));
+    const intimateMeridiem = intimateHoursPerDay === 24;
+    const hourLabel = (hour) => intimateMeridiem
+      ? (hour === 0 || hour === 24 ? "12 AM" : hour === 12 ? "12 PM" : `${hour % 12} ${hour < 12 ? "AM" : "PM"}`)
+      : String(hour);
     const todayControl = button("◎", goToToday, "Center this lens on today");
     todayControl.id = "today";
     todayControl.classList.add("today-target", "square");
@@ -697,10 +707,10 @@ export function createToolbar(app, dom) {
         number("back", session.intimateBack, 0, 14, (value) => { session.intimateBack = value; }),
         number("forward", session.intimateForward, 0, 14, (value) => { session.intimateForward = value; }),
         select("grain", [["15", "15 min"], ["30", "30 min"], ["60", "1 hour"]], String(session.intimateGrain), (value) => { session.intimateGrain = Number(value); }),
-        select("from", Array.from({ length: 24 }, (_, hour) => [String(hour), hourLabel(hour)]), String(session.intimateStartHour), (value) => {
+        select("from", Array.from({ length: intimateHoursPerDay }, (_, hour) => [String(hour), hourLabel(hour)]), String(session.intimateStartHour), (value) => {
           session.intimateStartHour = Math.min(Number(value), session.intimateEndHour - 1);
         }),
-        select("to", Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => [String(hour), hourLabel(hour)]), String(session.intimateEndHour), (value) => {
+        select("to", Array.from({ length: intimateHoursPerDay }, (_, index) => index + 1).map((hour) => [String(hour), hourLabel(hour)]), String(session.intimateEndHour), (value) => {
           session.intimateEndHour = Math.max(Number(value), session.intimateStartHour + 1);
         })
       );
@@ -756,8 +766,14 @@ export function createToolbar(app, dom) {
       const guide = radialGuideSettings(session);
       const divisions = guide.divisions;
       const subdivisionDays = cycleDays / divisions;
+      // Below one day per spoke, the readout switches to hours -- of THIS
+      // frame's day, not a bare civil 24. The unit word itself stays "hr"
+      // (deriving it from the law's declared level name would need to guess
+      // an abbreviation for whatever a custom frame calls its sub-day level,
+      // which is not a cheap, reliable derivation) -- only the number melts.
+      const subdivisionHours = subdivisionDays * session.law.hoursPerDay().toNumber();
       const subdivision = subdivisionDays < 1
-        ? `${(subdivisionDays * 24).toFixed(subdivisionDays * 24 < 10 ? 1 : 0)} hr / spoke`
+        ? `${subdivisionHours.toFixed(subdivisionHours < 10 ? 1 : 0)} hr / spoke`
         : `${subdivisionDays.toFixed(subdivisionDays < 10 ? 1 : 0)} days / spoke`;
       navControls.push(
         button("‹ cycle", () => session.move(session.radialCycle.neg()), "Back one cycle"),
@@ -1065,7 +1081,11 @@ export function createToolbar(app, dom) {
     const documentCycles = Object.values(chronolog.frames)
       .filter((frame) => frame.traits?.includes("cycle"))
       .map((frame) => {
-        const period = cyclePeriodHint(frame.period);
+        // `frame.period.frame` names the frame the period's own magnitude is
+        // measured against (normally `measure:human-time`) -- passing the
+        // document is what lets cyclePeriodHint resolve that frame's law
+        // instead of always assuming the registered standard.
+        const period = cyclePeriodHint(frame.period, chronolog);
         return {
           id: frame.id,
           title: period ? frame.title : `${frame.title} (variable)`,
@@ -1078,8 +1098,8 @@ export function createToolbar(app, dom) {
   }
 
   function reconcileRadialCycle() {
-    const { session } = app;
-    const resolved = resolveRadialCycle(radialCycleOptions(), session.activeCycle, session.currentFocus());
+    const { session, chronolog } = app;
+    const resolved = resolveRadialCycle(radialCycleOptions(), session.activeCycle, session.currentFocus(), chronolog);
     if (!resolved) return null;
     session.activeCycle = resolved.id;
     session.radialResolution = resolved;

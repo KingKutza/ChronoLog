@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createSampleDocument, createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
-import { civilCoordinateToDays, coordinate, daysFromCivil } from "../src/exact.js";
+import { coordinate, daysFromCivil } from "../src/exact.js";
+import { civilCoordinateToDays } from "../src/coordinate-law.js";
 import {
   escapeICSText,
   eventComponentKey,
@@ -78,6 +79,36 @@ test("EXDATE export preserves params, value typing, and multiplicity", () => {
   assert.ok(output.includes("EXDATE;VALUE=DATE:20260809"));
   assert.equal((output.match(/EXDATE/g) || []).length, 2);
   assert.doesNotThrow(() => parseICSTree(output));
+});
+
+// RFC 7529's own default: a rule that counts in the registered `gregory`
+// scale omits RSCALE entirely on export (that is what keeps a plain,
+// RSCALE-free import byte-identical), while a rule naming a calendar nothing
+// here implements is passed through exactly as authored -- this module
+// cannot assert a spelling is spec-correct for a calendar it does not know.
+test("RSCALE export omits the parameter for the registered Gregorian scale and preserves an unsupported one verbatim", () => {
+  const { document, result } = importCalendar([
+    "BEGIN:VEVENT",
+    "UID:rscale-greg@example.test",
+    "DTSTART:20260101T090000Z",
+    "RRULE:RSCALE=GREGORIAN;FREQ=DAILY;COUNT=3",
+    "SUMMARY:Gregorian scale event",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:rscale-hebrew@example.test",
+    "DTSTART:20260101T090000Z",
+    "RRULE:RSCALE=HEBREW;FREQ=YEARLY;COUNT=3",
+    "SUMMARY:Hebrew scale event",
+    "END:VEVENT"
+  ]);
+  const engine = new ChronologEngine(document);
+  const output = exportICS(document, { frame: result.frames[0], engine, now: NOW });
+  const blocks = output.split("BEGIN:VEVENT").slice(1);
+  const gregBlock = blocks.find((block) => block.includes("rscale-greg@example.test"));
+  const hebrewBlock = blocks.find((block) => block.includes("rscale-hebrew@example.test"));
+  assert.match(gregBlock, /RRULE:FREQ=DAILY;COUNT=3/);
+  assert.ok(!/RRULE:[^\r\n]*RSCALE/i.test(gregBlock));
+  assert.match(hebrewBlock, /RRULE:RSCALE=HEBREW;FREQ=YEARLY;COUNT=3/);
 });
 
 test("VTODO round-trips DTSTART, DTSTAMP, and COMPLETED distinctly", () => {

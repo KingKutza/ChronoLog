@@ -1,4 +1,5 @@
-import { daysToCivilCoordinate, formatCivil, nowDays } from "../exact.js";
+import { formatCivil, nowDays } from "../exact.js";
+import { daysToCivilCoordinate } from "../coordinate-law.js";
 import { addRelation } from "../model.js";
 import { OBJECT_KINDS, rosterEntries } from "../object-kinds.js";
 import { escapeHTML } from "./dom-helpers.js";

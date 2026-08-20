@@ -34,7 +34,7 @@ function query(rrule, dtstart, { start = date(2026), end = date(2028) } = {}) {
   const dates = output.facts
     .filter((fact) => fact.kind === "virtual" && fact.event.payload.uid === "rule@example.test")
     .map((fact) => formatCivil(fact.coordinate));
-  return { output, dates };
+  return { output, dates, document, result };
 }
 
 test("WEEKLY honors COUNT", () => {
@@ -117,4 +117,29 @@ test("unsupported FREQ values raise clear errors", () => {
     assert.equal(dates.length, 0);
     assert.ok(output.errors.some((error) => /Unsupported FREQ/.test(error.message)));
   }
+});
+
+// RFC 7529: RSCALE names the calendar a rule counts in. It is one more key
+// inside the RRULE value text (`parseRRule` already splits it generically),
+// so a rule naming the registered `gregory` scale resolves exactly as if
+// RSCALE were absent, while a rule naming a calendar this build has not
+// registered must be refused honestly -- never silently projected as though
+// it counted in Gregorian.
+test("RSCALE naming the registered Gregorian scale resolves exactly as FREQ alone", () => {
+  const plain = query("FREQ=WEEKLY;COUNT=3", "20260105T090000Z");
+  const scaled = query("RSCALE=GREGORIAN;FREQ=WEEKLY;COUNT=3", "20260105T090000Z");
+  assert.deepEqual(scaled.dates, plain.dates);
+  assert.deepEqual(scaled.dates, ["2026-01-05", "2026-01-12", "2026-01-19"]);
+  const upperCase = query("RSCALE=GREGORY;FREQ=WEEKLY;COUNT=3", "20260105T090000Z");
+  assert.deepEqual(upperCase.dates, plain.dates);
+});
+
+test("RSCALE naming an unregistered calendar preserves the rule and refuses projection", () => {
+  const { dates, output, document, result } = query("RSCALE=HEBREW;FREQ=YEARLY;COUNT=3", "20260101T090000Z");
+  assert.equal(dates.length, 0);
+  assert.ok(output.errors.some((error) => /RSCALE=HEBREW/.test(error.message)));
+  assert.ok(output.errors.some((error) => /cannot be projected/.test(error.message)));
+  const pattern = Object.values(document.patterns).find((item) => item.id === result.patterns[0]);
+  assert.equal(pattern.rrule.RSCALE, "HEBREW");
+  assert.equal(pattern.rawRule.value, "RSCALE=HEBREW;FREQ=YEARLY;COUNT=3");
 });

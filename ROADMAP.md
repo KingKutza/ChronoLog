@@ -88,26 +88,36 @@ the archive.
    plays worse still with non-Gregorian calendars. The formula language
    exists for exactly this; the authoring surface doesn't. Needs design
    alongside #4.
-6. **Custom calendars are first-class** — prerequisite stage: the frame's
-   coordinate declaration becomes the executed law. Today the levels /
-   radix / transition ladder on `frame:wall-time` is dead metadata: the
-   engine dispatches on `kind: "gregorian"` to hardcoded civil functions
-   in exact.js, the transition strings resolve to nothing, and ~50 call
-   sites carry 24/1440/86400 (and a mean month length) as literals. Melt
-   into one coordinate-arithmetic engine that reads the frame's
-   declaration, with a transition registry (the exact.js civil functions
-   become the registered Gregorian entries, not a bypass). Acceptance
-   test: set hours-per-day to 23 and everything updates everywhere —
-   until that edit works, no non-Gregorian calendar can. Then the
-   surface work, with custom day/month/year names: the minimap must
-   respect the new names; units must be addable/removable; Strategic
-   must adapt (full months per line, weeks per line, custom month
-   labels) and Wall the same; no artificial Now line on a calendar with
-   no now-mapping; jump-to-date must exist. Epochs/ages need handling —
-   BCE/CE, or first/second/third ages — as part of the same model.
-   Observed-boundary cycles need a computed sibling: a cycle derived
-   from formula or ephemeris — the moon by Newton, not by a list of
-   observations — with observation as the override, not the definition.
+6. **Custom calendars are first-class** — the prerequisite stage has
+   shipped: the frame's coordinate declaration is the executed law. One
+   coordinate-arithmetic engine (`src/coordinate-law.js`, and AGENTS.md's
+   "Coordinate law") reads the levels / radix / transition ladder, the
+   exact.js civil functions are the registered Gregorian entries rather
+   than a bypass, calendar families are CLDR calendar scales so a new
+   calendar is one registration, and the ~50 call sites that carried
+   24/1440/86400 and a float mean month now ask the governing frame.
+   Setting hours-per-day to 23 moves engine occurrence math, projection
+   layout, minimap strides, duration magnitudes, drag snapping and the
+   editor together. The frame editor authors that declaration directly —
+   levels, radices, transitions, names, and cycles, with weekday names as
+   a cycle rather than a level — on Wall Time, which is the frame every
+   derived calendar inherits from. ICS is a lossy boundary with a settled
+   contract, including RFC 7529 `RSCALE` import/export.
+   What remains. **Positional conversion for a fully custom ladder**: a
+   `fixed`-block calendar still reads its base level as a day count
+   rather than converting its own year/month/day to a day ordinal, and
+   the Gregorian month-boundary walks in the minimap and Radial are
+   still the registered ladder's own. **Projection export** of a series
+   ICS cannot express. Then the surface work, with custom
+   day/month/year names: the minimap must respect the new names; units
+   must be addable/removable; Strategic must adapt (full months per
+   line, weeks per line, custom month labels) and Wall the same; no
+   artificial Now line on a calendar with no now-mapping; jump-to-date
+   must exist. Epochs/ages need handling — BCE/CE, or first/second/third
+   ages — as part of the same model. Observed-boundary cycles need a
+   computed sibling: a cycle derived from formula or ephemeris — the moon
+   by Newton, not by a list of observations — with observation as the
+   override, not the definition.
 7. **Intimate overlap and create-in-place** — overlap is indicated
    locally, not globally: a 30-minute collision must not lane both
    events full-height. Events stay rectangles — no key-shaped blocks.

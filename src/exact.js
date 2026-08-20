@@ -279,6 +279,13 @@ export function daysInMonth(yearValue, monthValue) {
 // call site, not fork a second helper.
 // `clock` is an optional injected `Date` (or Date-constructible value) so
 // this stays testable without mocking the global `Date`.
+// The 24/1440/86400 below are NOT the document's coordinate law and must never
+// be melted into it: they are the host operating system's own civil units, the
+// only units a `Date` can report. This converts a host reading into a day
+// ordinal on the shared days axis; how that ordinal then reads as hours is the
+// governing frame's law to decide (src/coordinate-law.js). Same boundary rule as
+// ICS: the outside world speaks standard civil time, and conversion happens once
+// on the way in.
 export function nowDays(clock = new Date()) {
   const date = clock instanceof Date ? clock : new Date(clock);
   return new Rational(daysFromCivil(
@@ -306,86 +313,14 @@ export function levelValue(value, name, fallback = "0") {
   return entry ? entry.value : fallback;
 }
 
-// The one duration-in-days primitive: every level factor is exact, a
-// malformed level value (unparseable magnitude, e.g. from imported ICS data
-// ~169 MB of which is plausibly dirty) is tolerated rather than thrown, and a
-// negative-summing duration clamps to zero rather than corrupting a caller
-// that treats duration as a non-negative span (engine overlap/lookback
-// windows, a drag span, a duration shown in a form all agree: 0 reads better
-// than a thrown error or a negative span). This used to be forked into a
-// throwing/unclamped copy and a tolerant/clamped copy under the same name in
-// two modules; this is the single reconciled behavior both now share.
-//
-// It lives here rather than in model.js because it is exact arithmetic over
-// the nested-levels shape this module already owns (`coordinate`,
-// `levelValue`) and reaches for no part of a document. Keeping it here is also
-// what lets src/staples.js read magnitudes without importing model.js, which
-// would close an import cycle around validation. `model.js` re-exports it, so
-// every existing caller's import path is unchanged.
-export function durationMagnitudeDays(magnitude) {
-  const factors = {
-    week: "7",
-    day: "1",
-    hour: "1/24",
-    minute: "1/1440",
-    second: "1/86400"
-  };
-  let total = Rational.parse(0);
-  try {
-    for (const part of magnitude?.value?.levels || []) {
-      const factor = factors[part.level];
-      if (factor !== undefined) total = total.add(Rational.parse(part.value).mul(factor));
-    }
-  } catch {
-    return Rational.parse(0);
-  }
-  return total.compare(0) > 0 ? total : Rational.parse(0);
-}
-
-export function civilCoordinateToDays(value) {
-  const year = BigInt(levelValue(value, "year", "1970"));
-  const month = BigInt(levelValue(value, "month", "1"));
-  const day = BigInt(levelValue(value, "day", "1"));
-  const hours = Rational.parse(levelValue(value, "hour", "0"));
-  const minutes = Rational.parse(levelValue(value, "minute", "0"));
-  const seconds = Rational.parse(levelValue(value, "second", "0"));
-  const subsecond = Rational.parse(levelValue(value, "subsecond", "0"));
-  const dayFraction = hours.div(24)
-    .add(minutes.div(1440))
-    .add(seconds.add(subsecond).div(86400));
-  return new Rational(daysFromCivil(year, month, day)).add(dayFraction);
-}
-
-export function daysToCivilCoordinate(dayValue, subsecondPlaces = 12) {
-  const value = Rational.parse(dayValue);
-  const wholeDays = value.floor();
-  let remainder = value.sub(wholeDays);
-  const civil = civilFromDays(wholeDays);
-  const totalSeconds = remainder.mul(86400);
-  const hour = totalSeconds.floor() / 3600n;
-  remainder = totalSeconds.sub(hour * 3600n);
-  const minute = remainder.floor() / 60n;
-  remainder = remainder.sub(minute * 60n);
-  const second = remainder.floor();
-  const subsecond = remainder.sub(second);
-  const levels = [
-    { level: "year", value: civil.year },
-    { level: "month", value: civil.month },
-    { level: "day", value: civil.day }
-  ];
-  if (hour || minute || second || !subsecond.isZero()) {
-    levels.push(
-      { level: "hour", value: hour },
-      { level: "minute", value: minute },
-      { level: "second", value: second }
-    );
-    if (!subsecond.isZero()) {
-      levels.push({ level: "subsecond", value: subsecond.toDecimal(subsecondPlaces) });
-    }
-  }
-  return coordinate(levels);
-}
-
+// Duration magnitudes, nested-coordinate conversion, and the unit ladder that
+// used to live here now belong to src/coordinate-law.js: every one of them is a
+// question about a FRAME'S DECLARED LAW ("how long is an hour here?"), not a
+// question about exact arithmetic, and answering them from a fixed table here is
+// what made a frame's levels/radix/transition ladder dead metadata. What remains
+// in this module is the arithmetic itself plus the proleptic Gregorian whole-day
+// kernel (`daysFromCivil`/`civilFromDays`/`daysInMonth`/`isLeapYear`), which the
+// registered Gregorian family calls and nothing else may.
 export function formatCivil(value, includeTime = false) {
   const year = levelValue(value, "year", "1970");
   const month = levelValue(value, "month", "1").padStart(2, "0");

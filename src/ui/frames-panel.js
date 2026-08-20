@@ -1,5 +1,13 @@
 import { Rational } from "../exact.js";
-import { buildFixedCalendarStructure, editableFixedCalendarStructure } from "../calendar-structure.js";
+import { coordinateLaw } from "../coordinate-law.js";
+import {
+  buildCoordinateStructure,
+  buildFixedCalendarStructure,
+  coordinateStructureSummary,
+  editableCoordinateStructure,
+  editableFixedCalendarStructure,
+  transitionChoices
+} from "../calendar-structure.js";
 import { additiveFrameTraits, frameAuthoringCapabilities, preservedFrameSchema } from "../frame-edit.js";
 import { addFrame, addPattern, clone, createId } from "../model.js";
 import { mapSnapshot, opsFromMaps } from "../ops.js";
@@ -118,6 +126,38 @@ export function createFramesPanel(app) {
     }
   }
 
+  // --- The calendar-structure section ---------------------------------------
+  //
+  // Levels, radices, transitions, names and cycles, edited as the DECLARATION
+  // the coordinate engine executes (src/coordinate-law.js). Wall Time gets this
+  // section because Wall Time is what every derived calendar inherits, and a
+  // frame that only inherits gets it too -- behind an explicit override toggle,
+  // so opening the form on a derived calendar never silently detaches it from
+  // its basis.
+  function structureLevelRow(level = {}, index = 0, choices = []) {
+    const transition = String(level.transition || "");
+    return `<div class="structure-level-row" data-structure-level>
+      <input aria-label="Level ${index + 1} name" name="structureLevelName" value="${escapeHTML(level.name || "")}" placeholder="hour">
+      ${index === 0
+        ? "<span class=\"calendar-root-note\">top-level unit</span>"
+        : `<select aria-label="${escapeHTML(level.name || `Level ${index + 1}`)} counting rule" name="structureLevelTransition">${choices.map((choice) =>
+            `<option value="${escapeHTML(choice.value)}" ${choice.value === transition ? "selected" : ""}>${escapeHTML(choice.label)}</option>`).join("")}</select>`}
+      ${index === 0 ? "" : `<input aria-label="${escapeHTML(level.name || `Level ${index + 1}`)} count" name="structureLevelCount" inputmode="numeric" value="${escapeHTML(level.count || "")}" placeholder="24">`}
+      <input aria-label="${escapeHTML(level.name || `Level ${index + 1}`)} names" name="structureLevelNames" value="${escapeHTML(level.names || "")}" placeholder="Optional names, comma-separated">
+      <span class="structure-row-buttons"><button type="button" aria-label="Move level ${index + 1} up" title="Move up" data-move-level-up>↑</button><button type="button" aria-label="Move level ${index + 1} down" title="Move down" data-move-level-down>↓</button><button type="button" aria-label="Remove level ${index + 1}" title="Remove" data-remove-level>×</button></span>
+    </div>`;
+  }
+
+  function structureCycleRow(cycle = {}, index = 0) {
+    return `<div class="structure-cycle-row" data-structure-cycle>
+      <input aria-label="Cycle ${index + 1} name" name="structureCycleName" value="${escapeHTML(cycle.name || "")}" placeholder="weekday">
+      <input aria-label="Cycle ${index + 1} length" name="structureCycleLength" inputmode="numeric" value="${escapeHTML(cycle.length || "")}" placeholder="7">
+      <input aria-label="Cycle ${index + 1} phase" name="structureCyclePhase" inputmode="numeric" value="${escapeHTML(cycle.phase ?? "0")}" placeholder="0">
+      <input aria-label="Cycle ${index + 1} names" name="structureCycleNames" value="${escapeHTML(cycle.names || "")}" placeholder="Sunday, Monday, …">
+      <span class="structure-row-buttons"><button type="button" aria-label="Remove cycle ${index + 1}" title="Remove" data-remove-cycle>×</button></span>
+    </div>`;
+  }
+
   function frameForm(frame = null, presetKind = "group", embedded = false) {
     const { chronolog } = app;
     const isNew = !frame;
@@ -141,6 +181,22 @@ export function createFramesPanel(app) {
     const visibleFrameLenses = new Set(value.display?.lenses || frameLenses);
     const fixedCalendar = editableFixedCalendarStructure(value);
     const observedCalendar = value.period?.kind === "event-defined" ? value.period : null;
+    // The law in force, whether written on this frame or inherited through its
+    // basis, plus whether this frame authored it. Showing the effective values
+    // is the point: an author overriding weekday names needs to see the names
+    // actually in use, not an empty grid.
+    const ownsStructure = Array.isArray(value.coordinate?.levels) && value.coordinate.levels.length > 0;
+    let structureLaw = null;
+    let structureError = null;
+    try {
+      structureLaw = value.id && chronolog.frames[value.id]
+        ? coordinateLaw(chronolog, value.id)
+        : null;
+    } catch (error) {
+      structureError = error.message;
+    }
+    const structure = structureLaw ? editableCoordinateStructure(structureLaw) : null;
+    const structureChoices = transitionChoices();
     const calendarUnits = fixedCalendar?.units || [
       { name: "year" }, { name: "month", perParent: "12" }, { name: "week", perParent: "4" }, { name: "day", perParent: "7" }
     ];
@@ -188,6 +244,23 @@ export function createFramesPanel(app) {
     <p class="field-note">Choose what appears together from Frames while viewing a calendar. This editor changes the frame itself; group membership and cross-frame mappings are separate authored objects.</p>
     ${capabilities.basis ? `<label class="field"><span>Basis frame</span><select name="basis"><option value="">None</option>${Object.values(chronolog.frames)
       .filter((item) => item.id !== value.id).map((item) => `<option value="${escapeHTML(item.id)}" ${item.id === value.basis ? "selected" : ""}>${escapeHTML(item.title)} · ${frameKind(item)}</option>`).join("")}</select></label>` : `<p class="field-note capability-boundary-note">Groups and importance sets organize membership and display priority; they do not own coordinates, basis frames, or cycle periods.</p>`}
+    ${capabilities.calendarStructure ? `<details class="calendar-structure coordinate-structure" ${ownsStructure || structureError ? "open" : ""}>
+      <summary>Calendar structure</summary>
+      <p class="field-note">The levels, counting rules, names and cycles below <em>are</em> the coordinate law: this is what the engine executes, so an hour count changed here changes how long an hour is everywhere. A level counts a fixed number of its children, or defers to a named transition for a count that varies. Names are optional and go one per child.</p>
+      ${structureError ? `<output class="calendar-period-preview structure-error">${escapeHTML(structureError)}</output>` : ""}
+      ${ownsStructure ? "" : `<label class="check-chip calendar-structure-toggle"><input type="checkbox" name="useOwnStructure">Author this structure on this frame</label>
+      <small>${value.basis ? `This frame inherits its structure. Turning this on copies the inherited law onto this frame so it can be changed here; the frame keeps its basis for everything else.` : "This frame has no structure of its own yet."}</small>`}
+      <div class="structure-fields" data-structure-fields>
+        <div class="structure-level-heading"><span>Level</span><span>Counting rule</span><span>Count</span><span>Names of each child</span><span></span></div>
+        <div class="structure-levels" data-structure-levels>${(structure?.levels || []).map((level, index) => structureLevelRow(level, index, structureChoices)).join("")}</div>
+        <div class="inline-actions"><button class="instrument-button" type="button" data-add-level>Add level</button></div>
+        <p class="field-note">A <strong>cycle</strong> repeats over the base unit without nesting in anything: seven weekdays run straight through month and year boundaries, so weekday names belong here rather than on a level. <em>Phase</em> is which name lands on day zero.</p>
+        <div class="structure-cycle-heading"><span>Cycle</span><span>Length</span><span>Phase</span><span>Names in order</span><span></span></div>
+        <div class="structure-cycles" data-structure-cycles>${(structure?.cycles || []).map((cycle, index) => structureCycleRow(cycle, index)).join("")}</div>
+        <div class="inline-actions"><button class="instrument-button" type="button" data-add-cycle>Add cycle</button></div>
+        <output class="calendar-period-preview" data-structure-preview></output>
+      </div>
+    </details>` : ""}
     ${capabilities.fixedCalendar ? `<details class="calendar-structure" ${fixedCalendar ? "open" : ""}>
       <summary>Fixed calendar structure</summary>
       <label class="check-chip calendar-structure-toggle"><input type="checkbox" name="useFixedCalendar" ${fixedCalendar ? "checked" : ""}>Use a regular unit hierarchy</label>
@@ -197,7 +270,7 @@ export function createFramesPanel(app) {
         ${fixedRows}
         <label class="field"><span>Smallest unit length in Earth days</span><input name="smallestUnitDays" value="${escapeHTML(fixedCalendar?.smallestUnitDays || "1")}" placeholder="1"></label>
         <label class="field"><span>Epoch in Earth days</span><input name="fixedCalendarEpoch" value="${escapeHTML(fixedCalendar?.epochDays || "0")}" placeholder="0"></label>
-        <output class="calendar-period-preview">${fixedCalendar ? `One ${escapeHTML(fixedCalendar.units[0].name)} = ${escapeHTML(fixedCalendar.totalDays)} Earth days.` : "Turn this on to replace the coordinate JSON with a regular hierarchy."}</output>
+        <output class="calendar-period-preview" data-fixed-calendar-preview>${fixedCalendar ? `One ${escapeHTML(fixedCalendar.units[0].name)} = ${escapeHTML(fixedCalendar.totalDays)} Earth days.` : "Turn this on to replace the coordinate JSON with a regular hierarchy."}</output>
       </div>
     </details>` : ""}
     ${capabilities.observedBoundaries ? `<details class="calendar-structure observed-calendar-structure" ${observedCalendar ? "open" : ""}>
@@ -220,13 +293,94 @@ export function createFramesPanel(app) {
     <details class="advanced-fields"><summary>Advanced frame data</summary>
       ${capabilities.periodData ? `<label class="field"><span>Cycle period data (JSON)</span><textarea name="period" class="code" placeholder="Leave blank to preserve existing period">${escapeHTML(value.period ? JSON.stringify(value.period, null, 2) : "")}</textarea></label>` : ""}
       <label class="field"><span>Traits</span><input name="traits" value="${escapeHTML(value.traits.join(", "))}"></label>
-      ${capabilities.coordinate ? `<label class="field"><span>Coordinate nesting (JSON)</span><textarea name="coordinate" class="code">${escapeHTML(value.coordinate ? JSON.stringify(value.coordinate, null, 2) : "")}</textarea></label>` : ""}
+      ${capabilities.coordinate ? `<label class="field"><span>Coordinate nesting (JSON)</span><textarea name="coordinate" class="code">${escapeHTML(value.coordinate ? JSON.stringify(value.coordinate, null, 2) : "")}</textarea><small>The escape hatch for shapes the Calendar structure grid cannot express. Typing here overrides the grid on apply.</small></label>` : ""}
     </details>
     <div class="inspector-actions"><button class="instrument-button primary" type="submit">${isNew ? "Create" : "Apply"}</button>
       ${isNew ? "" : `<button class="instrument-button" id="duplicate-object" type="button">Duplicate</button><button class="instrument-button danger" id="delete-object" type="button">Remove</button>`}</div>`;
+    const initialCoordinateText = value.coordinate ? JSON.stringify(value.coordinate, null, 2) : "";
+    function coordinateTextEdited(data) {
+      return String(data.get("coordinate") ?? "").trim() !== initialCoordinateText.trim();
+    }
+    const structureFields = wrapper.querySelector("[data-structure-fields]");
+    const structureLevels = wrapper.querySelector("[data-structure-levels]");
+    const structureCycles = wrapper.querySelector("[data-structure-cycles]");
+    const structurePreview = wrapper.querySelector("[data-structure-preview]");
+    const ownStructureToggle = wrapper.elements.useOwnStructure;
+    function readRows(container, selector, fields) {
+      if (!container) return [];
+      return [...container.querySelectorAll(selector)].map((row) => Object.fromEntries(
+        Object.entries(fields).map(([key, name]) => [key, String(row.querySelector(`[name="${name}"]`)?.value ?? "").trim()])
+      ));
+    }
+    function structureDraft() {
+      return {
+        kind: value.coordinate?.kind || (value.traits?.includes("gregorian") ? "gregorian" : "nested"),
+        previous: value.coordinate || null,
+        levels: readRows(structureLevels, "[data-structure-level]", {
+          name: "structureLevelName",
+          transition: "structureLevelTransition",
+          count: "structureLevelCount",
+          names: "structureLevelNames"
+        }),
+        cycles: readRows(structureCycles, "[data-structure-cycle]", {
+          name: "structureCycleName",
+          length: "structureCycleLength",
+          phase: "structureCyclePhase",
+          names: "structureCycleNames"
+        })
+      };
+    }
+    // Authoring the structure is only in force when this frame owns it, so a
+    // derived calendar whose form was merely opened is never silently detached
+    // from its basis.
+    function structureAuthored() {
+      return Boolean(structureFields) && (ownsStructure || Boolean(ownStructureToggle?.checked));
+    }
+    function refreshStructurePreview() {
+      if (!structureFields || !structurePreview) return;
+      const enabled = structureAuthored();
+      for (const field of structureFields.querySelectorAll("input, select, button")) field.disabled = !enabled;
+      if (!enabled) {
+        structurePreview.textContent = "This frame inherits the structure shown above. Turn on authoring to change it here.";
+        return;
+      }
+      try {
+        structurePreview.textContent = coordinateStructureSummary(buildCoordinateStructure(structureDraft()));
+      } catch (error) {
+        structurePreview.textContent = error.message;
+      }
+    }
+    ownStructureToggle?.addEventListener("change", refreshStructurePreview);
+    structureFields?.addEventListener("input", refreshStructurePreview);
+    structureFields?.addEventListener("change", refreshStructurePreview);
+    structureLevels?.addEventListener("click", (click) => {
+      const row = click.target.closest("[data-structure-level]");
+      if (!row) return;
+      if (click.target.matches("[data-remove-level]")) row.remove();
+      if (click.target.matches("[data-move-level-up]") && row.previousElementSibling) structureLevels.insertBefore(row, row.previousElementSibling);
+      if (click.target.matches("[data-move-level-down]") && row.nextElementSibling) structureLevels.insertBefore(row.nextElementSibling, row);
+      refreshStructurePreview();
+    });
+    structureCycles?.addEventListener("click", (click) => {
+      const row = click.target.closest("[data-structure-cycle]");
+      if (row && click.target.matches("[data-remove-cycle]")) row.remove();
+      refreshStructurePreview();
+    });
+    wrapper.querySelector("[data-add-level]")?.addEventListener("click", () => {
+      structureLevels?.insertAdjacentHTML("beforeend", structureLevelRow({}, structureLevels.children.length, structureChoices));
+      refreshStructurePreview();
+    });
+    wrapper.querySelector("[data-add-cycle]")?.addEventListener("click", () => {
+      structureCycles?.insertAdjacentHTML("beforeend", structureCycleRow({}, structureCycles.children.length));
+      refreshStructurePreview();
+    });
+    refreshStructurePreview();
     const fixedCalendarToggle = wrapper.elements.useFixedCalendar;
     const fixedCalendarFields = wrapper.querySelector("[data-fixed-calendar-fields]");
-    const fixedCalendarPreview = wrapper.querySelector(".calendar-period-preview");
+    // Addressed by its own data key, not by the shared preview class: three
+    // sections now render a `.calendar-period-preview`, and a class selector
+    // would silently bind whichever one happens to come first in the markup.
+    const fixedCalendarPreview = wrapper.querySelector("[data-fixed-calendar-preview]");
     function fixedCalendarDraft(data = new FormData(wrapper)) {
       const names = data.getAll("calendarUnitName");
       const radices = data.getAll("calendarUnitRadix");
@@ -373,6 +527,22 @@ export function createFramesPanel(app) {
                 const built = buildFixedCalendarStructure({ ...fixedCalendarDraft(data), periodFrame: existing.period?.frame || "measure:human-time" });
                 return { coordinate: built.coordinate, period: built.period };
               })()
+            // A hand edit to the raw JSON escape hatch outranks the structure
+            // grid: the grid cannot express a formula law or a builder block, so
+            // whoever typed JSON meant it. Without this the grid would silently
+            // discard the typed text, which is the same class of failure as an
+            // editor that accepts an edit and ignores it.
+            : coordinateTextEdited(data)
+            ? preservedFrameSchema(existing, data.get("coordinate"), data.get("period"))
+            : structureAuthored()
+            ? {
+                // Validated before it is stored, so a malformed ladder never
+                // replaces a working one, and the period is left exactly as it
+                // was -- editing how a day divides says nothing about a cycle's
+                // length.
+                coordinate: buildCoordinateStructure({ ...structureDraft(), previous: existing.coordinate || null }),
+                period: preservedFrameSchema(existing, "", data.get("period")).period
+              }
             : preservedFrameSchema(existing, data.get("coordinate"), data.get("period"));
           const payload = {
             ...existing, id: recordId,
