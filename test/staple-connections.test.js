@@ -372,8 +372,16 @@ test("a correspondence connects two frames, each end a coordinate under its OWN 
   const wallLaw = coordinateLaw(document, "frame:wall-time");
 
   // Two different laws, and neither coordinate is readable through the other.
-  assert.equal(bearimyLaw.positional, false);
+  // BOTH are positional: a uniform custom ladder is fully computable from its
+  // own radices under bottom-up composition, so the Bearimy frame has a real
+  // axis of its own. What it does NOT have is any relation to Earth days --
+  // its atom is a pen stroke, which no standard unit shares -- and that is the
+  // property that keeps the two ends unreadable through each other.
+  assert.equal(bearimyLaw.positional, true);
+  assert.equal(bearimyLaw.sharesStandardAtom(), false);
+  assert.equal(bearimyLaw.mapsToClock(), false, "a curve of handwriting has no now");
   assert.equal(wallLaw.positional, true);
+  assert.equal(wallLaw.mapsToClock(), true);
   assert.deepEqual(bearimyLaw.levelNames(), ["stroke", "step"]);
 
   const bearimyEnd = ends.find((end) => end.frame === "frame:bearimy");

@@ -7,7 +7,7 @@ import {
   floorDiv,
   floorMod
 } from "./exact.js";
-import { coordinateLaw, lawForCalendar } from "./coordinate-law.js";
+import { coordinateDaysOrNull, coordinateLaw, coordinateValueError, lawForCalendar } from "./coordinate-law.js";
 import { coordinateEntryDepth } from "./coordinate-entry.js";
 import {
   applyVirtualOverrides,
@@ -39,9 +39,39 @@ function within(value, start, end) {
   return point.compare(start) >= 0 && point.compare(end) <= 0;
 }
 
+// D3 (field report): a record whose coordinate cannot resolve under its
+// frame's law -- an unknown transition, a coordinate naming levels the law
+// does not declare, a non-countable era frame with no metric ladder at all
+// -- must drop only THIS record, never abort the whole query. Returns the
+// resolved day, or null plus the reason in the author's own words so the
+// caller can report it instead of silently dropping the record.
+//
+// `coordinateDaysOrNull` is the shared refusal seam for a declarative law
+// (src/coordinate-law.js); `coordinateValueError` runs the identical
+// resolution and hands back why, asked only once resolution has already
+// failed, so the common (successful) path never pays for it. A frame
+// governed by a compiled coordinate-law PATTERN (`frame.law.pattern`, a
+// FormulaRuntime program -- see `ChronologEngine#coordinateDays`'s own other
+// branch) is a different resolution path entirely and is asked directly,
+// still guarded the same way, so a broken formula law is refused instead of
+// aborting the query too.
 function attachmentDay(engine, relation) {
-  if (!relation.coordinate) return null;
-  return engine.coordinateDays(relation.frame, relation.coordinate);
+  if (!relation.coordinate) return { day: null, reason: null };
+  const frame = engine.document.frames[relation.frame];
+  if (frame?.law?.pattern && frame.law.toDays) {
+    try {
+      return { day: engine.coordinateDays(relation.frame, relation.coordinate), reason: null };
+    } catch (error) {
+      return { day: null, reason: error.message };
+    }
+  }
+  const day = coordinateDaysOrNull(engine.document, relation.frame, relation.coordinate);
+  if (day) return { day, reason: null };
+  return {
+    day: null,
+    reason: coordinateValueError(engine.document, relation.frame, relation.coordinate)
+      || `Frame ${relation.frame} could not resolve this coordinate.`
+  };
 }
 
 // This block through `ruleOccurrenceDays`'s BYMONTH/BYMONTHDAY/BYDAY handling
@@ -466,6 +496,7 @@ export class ChronologEngine {
     this.calendarFrameByEvent = new Map();
     this.explicitFactsByFrame = new Map();
     this.explicitMaxDurationByFrame = new Map();
+    this.explicitErrorsByFrame = new Map();
     if (!preserveRecurrence) {
       this.recurrenceSeries = new Map();
       this.recurrenceSeriesFacts = 0;
@@ -623,6 +654,17 @@ export class ChronologEngine {
     for (const group of groups) {
       for (const match of this.queryGroupMembers(group, isGroup)) add(group.id, match.member, match.provenance);
     }
+    // A snapshot of ONE authored hop -- taken before the fixed point below
+    // flattens nested groups into `members` -- for `groupUnionFacts` (a group
+    // frame's query unions its members) to recurse over itself, one frame at a
+    // time with its own cycle guard. Consuming the ALREADY-flattened `members`
+    // instead would make every nested member reachable through more than one
+    // ancestor get its own facts recomputed once per path that reaches it;
+    // this keeps the recursion at exactly one visit per direct edge. `add`
+    // never mutates an existing provenance array in place (it always writes a
+    // new one), so mutating `members` afterward cannot reach back into this
+    // copy.
+    const directMembers = new Map([...members].map(([groupId, inGroup]) => [groupId, new Map(inGroup)]));
     // Positive nesting is monotonic, so repeatedly adding inherited members reaches
     // the finite graph's least fixed point. A self-edge therefore becomes a no-op.
     let changed = true;
@@ -655,7 +697,7 @@ export class ChronologEngine {
       const first = [...memberships.keys()].sort()[0];
       if (first) frameByEvent.set(eventId, first);
     }
-    return { membersByGroup: members, membershipsByMember, frameByEvent };
+    return { membersByGroup: members, membershipsByMember, frameByEvent, directMembersByGroup: directMembers };
   }
 
   rebuildGroupMemberships() {
@@ -663,6 +705,11 @@ export class ChronologEngine {
     this.groupMembersByGroup = persisted.membersByGroup;
     this.groupMembershipsByMember = persisted.membershipsByMember;
     this.groupFrameByEvent = persisted.frameByEvent;
+    // Query-facing only: a group frame's query unions this (see
+    // `groupUnionFacts`), never anything importance-only, so it is built from
+    // the SAME `isOrdinaryGroup` index the persisted membership above uses,
+    // not the display union below.
+    this.groupDirectMembersByGroup = persisted.directMembersByGroup;
 
     const display = this.buildGroupIndex((frameId) => this.isDisplayGroup(frameId));
     this.displayGroupMembersByGroup = display.membersByGroup;
@@ -698,6 +745,16 @@ export class ChronologEngine {
 
   groupMembers(groupId) {
     return [...(this.groupMembersByGroup.get(groupId) || new Map())]
+      .map(([member, provenance]) => ({ member, provenance }));
+  }
+
+  // One authored hop only -- not the transitively-flattened membership
+  // `groupMembers` returns. `groupUnionFacts` is the one caller: it does its
+  // own recursion (with its own cycle guard) over this edge, so it must see a
+  // group's nested member frames exactly once, not once per already-flattened
+  // appearance.
+  groupDirectMembers(groupId) {
+    return [...(this.groupDirectMembersByGroup?.get(groupId) || new Map())]
       .map(([member, provenance]) => ({ member, provenance }));
   }
 
@@ -757,8 +814,13 @@ export class ChronologEngine {
     if (frame?.traits.includes("calendar")) {
       for (const eventId of affectedEvents) this.calendarFrameByEvent.set(eventId, frameId);
     }
+    // A group frame's own union is never cached here (see `groupUnionFacts`),
+    // so nothing extra needs invalidating up an ancestor chain when a member
+    // changes -- only this one frame's own leaf-level cache entries, exactly
+    // as before group queries existed.
     this.explicitFactsByFrame.delete(frameId);
     this.explicitMaxDurationByFrame.delete(frameId);
+    this.explicitErrorsByFrame.delete(frameId);
     this.rebuildGroupMemberships();
   }
 
@@ -809,9 +871,17 @@ export class ChronologEngine {
     }
   }
 
-  indexedExplicitFacts(frameId) {
-    const cached = this.explicitFactsByFrame.get(frameId);
-    if (cached) return cached;
+  // The events placed directly on `frameId`'s own coordinate axis by a plain
+  // attachment relation (`relation.frame === frameId`) -- everything this
+  // method did before a group frame's query learned to union its members,
+  // unchanged, and reused AS-IS for a group frame's own directly-attached
+  // events (a group frame can double as a plain calendar; that half of a
+  // group's facts is not a member-frame union at all and must keep working
+  // exactly as it always has). D3: a record whose extent or coordinate
+  // cannot resolve is skipped rather than aborting the rest of the frame,
+  // and `error` carries the FIRST reason encountered so a frame with many
+  // broken records reports once, not once per record.
+  directExplicitEntries(frameId) {
     const templateRelations = new Set(
       this.matchingPatterns(frameId)
         .filter((pattern) => pattern.kind === "ics-rrule")
@@ -820,15 +890,27 @@ export class ChronologEngine {
     const entries = [];
     let maxDuration = Rational.parse(0);
     const extentByEvent = new Map();
+    let error = null;
+    const recordSkip = (message) => { if (!error) error = message; };
     for (const relation of this.relationsByFrame.get(frameId) || []) {
       if (templateRelations.has(relation.id)) continue;
       const event = this.document.events[relation.event];
       if (!event) continue;
       let extent = extentByEvent.get(event.id);
       if (extent === undefined) {
-        extent = resolveObjectExtent(this.document, this, event.id);
+        try {
+          extent = resolveObjectExtent(this.document, this, event.id);
+        } catch (extentError) {
+          // src/staples.js resolves an anchor chain through `engine.coordinateDays`
+          // directly and throws on the same three unresolvable-law conditions
+          // `attachmentDay` guards below; caught here since that file is not this
+          // fix's to change.
+          recordSkip(extentError.message);
+          extent = null;
+        }
         extentByEvent.set(event.id, extent);
       }
+      if (!extent) continue;
       const anchored = relation.role !== "completed"
         && extent.startDays !== null
         && (extent.source === "anchors" || extent.source === "anchor+magnitude");
@@ -842,7 +924,14 @@ export class ChronologEngine {
       // are coordinate-less too, and without it every anchored event would also
       // draw itself on each of its groups.
       if (!relation.coordinate && !(anchored && extent.frame === relation.frame)) continue;
-      const day = anchored ? extent.startDays : attachmentDay(this, relation);
+      let day = null;
+      if (anchored) {
+        day = extent.startDays;
+      } else {
+        const resolved = attachmentDay(this, relation);
+        day = resolved.day;
+        if (!day && resolved.reason) recordSkip(resolved.reason);
+      }
       if (!day) continue;
       const duration = anchored ? extent.magnitudeDays : this.eventDurationDays(event);
       if (duration.compare(maxDuration) > 0) maxDuration = duration;
@@ -868,9 +957,115 @@ export class ChronologEngine {
         }
       });
     }
+    return { entries, maxDuration, error };
+  }
+
+  // A group frame is not a coordinate space (AGENTS.md's frame model: the
+  // four concepts stay distinct, and selecting or displaying a frame never
+  // creates a mapping) -- so its facts are the UNION of its own direct
+  // members, each resolved under that member's OWN law, never re-resolved
+  // under the group's. Two shapes of member both count (`groupDirectMembers`,
+  // one authored hop -- see its own doc comment for why not the flattened
+  // index): a member FRAME contributes its own facts recursively (through
+  // `indexedExplicitFacts`, so a nested member frame that is itself a group
+  // unions again the same way); a member EVENT contributes nothing extra
+  // here, because an event's placement lives on whatever frame it is
+  // actually attached to -- if that frame is this group itself, plain
+  // `directExplicitEntries` above already has it, exactly as before groups
+  // could be queried at all.
+  //
+  // DEDUPE IDENTITY is the relation, not the event: two relations placing one
+  // event on two different member frames are two real placements (both
+  // survive); the identical relation reached twice -- once directly and once
+  // through a nested member frame that also lists it, or through two
+  // different nested paths -- is the same fact and collapses to one. Merge
+  // order does not matter: whichever copy is kept is structurally identical.
+  //
+  // `seen` is the cycle guard, carrying every group id already on the CURRENT
+  // recursion path (not a document-wide "visited" set, so the same group
+  // reachable via two independent, non-cyclic paths is still unioned twice
+  // over -- see the dedupe above for why that is still exactly one fact). A
+  // group that (transitively) contains itself stops at the repeat and reports
+  // once through `errorsByFrame`, the same per-frame-per-query channel D3's
+  // unresolvable-coordinate errors use.
+  //
+  // NOT cached in `explicitFactsByFrame`: this file's one invalidation seam,
+  // `refreshFrame(frameId)`, is keyed to a single changed frame. A correct
+  // cache would have to walk every ancestor group whenever any transitively-
+  // nested member changes, and proving that holds across every call site that
+  // can mutate a member's own relations (most of them outside this file,
+  // per this task's own file ownership) is exactly the guarantee a wrong
+  // cache would silently violate -- on the very field-measured defect this
+  // exists to fix. Recomputing costs O(sum of each direct member's own fact
+  // count) per query: every member that is an ORDINARY calendar frame (not
+  // itself a group) still hits its own existing `explicitFactsByFrame` entry,
+  // so a shallow group over a handful of calendars stays cheap; only the
+  // union's own merge/sort/dedupe work is unconditionally redone, which is
+  // the honest tradeoff overscale doctrine asks for here: a slow-but-correct
+  // query beats a fast-but-wrong one.
+  groupUnionFacts(groupId, seen) {
+    if (seen.has(groupId)) {
+      return {
+        entries: [],
+        maxDuration: Rational.parse(0),
+        errorsByFrame: new Map([[
+          groupId,
+          `Group ${groupId} contains itself; the cycle was broken here rather than unioned forever.`
+        ]])
+      };
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(groupId);
+
+    const own = this.directExplicitEntries(groupId);
+    const byRelation = new Map(own.entries.map((entry) => [entry.fact.relation.id, entry]));
+    let maxDuration = own.maxDuration;
+    const errorsByFrame = new Map();
+    if (own.error) errorsByFrame.set(groupId, own.error);
+
+    for (const { member } of this.groupDirectMembers(groupId)) {
+      if (!this.document.frames[member]) continue; // a member EVENT: see doc comment above.
+      const result = this.isOrdinaryGroup(member)
+        ? this.groupUnionFacts(member, nextSeen)
+        : {
+            entries: this.indexedExplicitFacts(member),
+            maxDuration: this.explicitMaxDurationByFrame.get(member) || Rational.parse(0),
+            errorsByFrame: (() => {
+              const memberErrors = this.explicitErrorsByFrame.get(member) || [];
+              return new Map(memberErrors.map((entry) => [entry.frame, entry.message]));
+            })()
+          };
+      for (const entry of result.entries) {
+        const key = entry.fact.relation.id;
+        if (!byRelation.has(key)) byRelation.set(key, entry);
+      }
+      if (result.maxDuration.compare(maxDuration) > 0) maxDuration = result.maxDuration;
+      for (const [frame, message] of result.errorsByFrame) {
+        if (!errorsByFrame.has(frame)) errorsByFrame.set(frame, message);
+      }
+    }
+
+    const entries = [...byRelation.values()].sort((left, right) => left.day.compare(right.day));
+    return { entries, maxDuration, errorsByFrame };
+  }
+
+  indexedExplicitFacts(frameId) {
+    if (this.isOrdinaryGroup(frameId)) {
+      const { entries, maxDuration, errorsByFrame } = this.groupUnionFacts(frameId, new Set());
+      this.explicitMaxDurationByFrame.set(frameId, maxDuration);
+      this.explicitErrorsByFrame.set(
+        frameId,
+        [...errorsByFrame].map(([frame, message]) => ({ frame, message }))
+      );
+      return entries;
+    }
+    const cached = this.explicitFactsByFrame.get(frameId);
+    if (cached) return cached;
+    const { entries, maxDuration, error } = this.directExplicitEntries(frameId);
     entries.sort((left, right) => left.day.compare(right.day));
     this.explicitFactsByFrame.set(frameId, entries);
     this.explicitMaxDurationByFrame.set(frameId, maxDuration);
+    this.explicitErrorsByFrame.set(frameId, error ? [{ frame: frameId, message: error }] : []);
     return entries;
   }
 
@@ -1062,6 +1257,17 @@ export class ChronologEngine {
     const errors = [];
     let truncated = false;
     const explicit = this.indexedExplicitFacts(frame);
+    // D3: one entry per broken frame reaches the author here, through the same
+    // channel `renderErrors` already displays for a broken pattern -- reusing
+    // its `{pattern, message}` shape (with the offending FRAME id in `pattern`)
+    // rather than a shape src/projections.js's `renderErrors` does not read,
+    // since that file is not this fix's to change. Deduped per frame already,
+    // by `indexedExplicitFacts`/`groupUnionFacts` above -- a broken frame with
+    // thousands of records, or one reachable through several member paths,
+    // still names itself exactly once per query.
+    for (const skipped of this.explicitErrorsByFrame.get(frame) || []) {
+      errors.push({ pattern: skipped.frame, message: skipped.message });
+    }
     const explicitLookback = includeOverlaps
       ? this.explicitMaxDurationByFrame.get(frame) || Rational.parse(0)
       : Rational.parse(0);

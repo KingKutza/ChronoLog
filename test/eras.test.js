@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { coordinate } from "../src/exact.js";
+import { Rational, coordinate } from "../src/exact.js";
 import { EraTable } from "../src/eras.js";
 import { CoordinateLaw, GREGORIAN_DECLARATION, coordinateLaw, invalidateCoordinateLaws } from "../src/coordinate-law.js";
 import { civilCoordinateToDays } from "../src/coordinate-law.js";
@@ -17,21 +17,13 @@ import { civilCoordinateToDays } from "../src/coordinate-law.js";
 const BCE_CE_DECLARATION = Object.freeze({
   kind: "gregorian",
   levels: Object.freeze([
-    Object.freeze({ name: "era" }),
-    Object.freeze({ name: "year", within: "era" }),
+    Object.freeze({ name: "year" }),
     Object.freeze({ name: "month", within: "year", transition: "gregorian.months" }),
     Object.freeze({ name: "day", within: "month", transition: "gregorian.days" }),
     Object.freeze({ name: "hour", within: "day", radix: "24" }),
     Object.freeze({ name: "minute", within: "hour", radix: "60" }),
     Object.freeze({ name: "second", within: "minute", radix: "60" })
   ]),
-  eras: Object.freeze({
-    anchor: { era: "Common Era", year: "1", properYear: "1" },
-    entries: Object.freeze([
-      Object.freeze({ name: "Before Common Era", abbrev: "BCE", direction: "descending", affix: "suffix" }),
-      Object.freeze({ name: "Common Era", abbrev: "CE", direction: "ascending", affix: "suffix" })
-    ])
-  })
 });
 
 // Tamriel: a uniform 365-day year (12 months of 30 days plus a 5-day span is
@@ -46,21 +38,24 @@ const TAMRIEL_DECLARATION = Object.freeze({
   // its own levels IS the day.
   baseLevel: "day",
   levels: Object.freeze([
-    Object.freeze({ name: "era" }),
-    Object.freeze({ name: "year", within: "era" }),
+    Object.freeze({ name: "year" }),
     Object.freeze({ name: "day", within: "year", radix: "365" }),
     Object.freeze({ name: "hour", within: "day", radix: "24" })
   ]),
-  eras: Object.freeze({
-    anchor: { era: "First Era", year: "1", properYear: "1" },
-    entries: Object.freeze([
-      Object.freeze({ name: "Merethic Era", abbrev: "ME", direction: "descending" }),
-      Object.freeze({ name: "First Era", abbrev: "1E", direction: "ascending", years: "2920" }),
-      Object.freeze({ name: "Second Era", abbrev: "2E", direction: "ascending", years: "896" }),
-      Object.freeze({ name: "Third Era", abbrev: "3E", direction: "ascending", years: "433" }),
-      Object.freeze({ name: "Fourth Era", abbrev: "4E", direction: "ascending" })
-    ])
-  })
+});
+
+// The era table is no longer a declaration key -- eras are frames stapled
+// together (test/era-frames.test.js) -- but its range arithmetic IS the chain's
+// kernel, so it stays tested directly against the fixture's own spelling.
+const TAMRIEL_ERAS = Object.freeze({
+  anchor: { era: "1E", year: "1", properYear: "1" },
+  entries: Object.freeze([
+    Object.freeze({ key: "ME", name: "Merethic Era", direction: "descending", firstYear: "1", years: "open" }),
+    Object.freeze({ key: "1E", name: "First Era", direction: "ascending", firstYear: "1", years: "2920" }),
+    Object.freeze({ key: "2E", name: "Second Era", direction: "ascending", firstYear: "1", years: "896" }),
+    Object.freeze({ key: "3E", name: "Third Era", direction: "ascending", firstYear: "1", years: "433" }),
+    Object.freeze({ key: "4E", name: "Fourth Era", direction: "ascending", firstYear: "1", years: "open" })
+  ])
 });
 
 function lawFor(declaration, id = "calendar:test") {
@@ -69,18 +64,11 @@ function lawFor(declaration, id = "calendar:test") {
   }, id);
 }
 
-function eraCoordinate(era, year, rest = []) {
-  return coordinate([
-    { level: "era", value: era },
-    { level: "year", value: String(year) },
-    ...rest
-  ]);
-}
 
 // --- The era table itself --------------------------------------------------
 
 test("one anchor plus the bounded spans derives every era's range exactly", () => {
-  const table = new EraTable(TAMRIEL_DECLARATION.eras);
+  const table = new EraTable(TAMRIEL_ERAS);
   const ranges = Object.fromEntries(table.entries.map((entry) => [entry.abbrev, [entry.firstProper, entry.lastProper]]));
   assert.deepEqual(ranges["1E"], [1n, 2920n]);
   assert.deepEqual(ranges["2E"], [2921n, 3816n]);
@@ -92,7 +80,7 @@ test("one anchor plus the bounded spans derives every era's range exactly", () =
 });
 
 test("a descending era's higher number is the older year", () => {
-  const table = new EraTable(TAMRIEL_DECLARATION.eras);
+  const table = new EraTable(TAMRIEL_ERAS);
   assert.equal(table.toProperYear("ME", "1"), 0n);
   assert.equal(table.toProperYear("ME", "2500"), -2499n);
   assert.ok(table.toProperYear("ME", "2500") < table.toProperYear("ME", "1"));
@@ -103,98 +91,10 @@ test("a descending era's higher number is the older year", () => {
   );
 });
 
-test("era ordering follows day order across the whole ladder", () => {
-  const law = lawFor(TAMRIEL_DECLARATION);
-  const days = (era, year) => law.toDays(eraCoordinate(era, year)).toNumber();
-  // The mission's acceptance ordering, asserted as a chain.
-  const chain = [
-    ["ME", 2500], ["ME", 1], ["1E", 1], ["1E", 2920], ["2E", 1]
-  ].map(([era, year]) => days(era, year));
-  for (const [index, value] of chain.slice(1).entries()) {
-    assert.ok(chain[index] < value, `${chain[index]} < ${value}`);
-  }
-  // Adjacent eras meet with no gap: 1E 2920 and 2E 1 are consecutive years.
-  assert.equal(days("2E", 1) - days("1E", 2920), 365);
-});
-
-test("a Tamriel-law frame round-trips an era-qualified coordinate exactly", () => {
-  const law = lawFor(TAMRIEL_DECLARATION);
-  const written = eraCoordinate("Third Era", 433);
-  const days = law.toDays(written);
-  const back = law.fromDays(days);
-  // The stored coordinate carries the ERA and the year WITHIN it -- 433, never
-  // the linearized 4249.
-  // The stored value is the era's KEY, so renaming "Third Era" never rewrites a record.
-  assert.equal(back.levels.find((level) => level.level === "era").value, "3E");
-  assert.equal(back.levels.find((level) => level.level === "year").value, "433");
-  assert.equal(law.toDays(back).compare(days), 0);
-  // And it renders the way it was written.
-  assert.equal(law.formatYear(back), "3E 433");
-  assert.equal(law.formatYearAtDays(days), "3E 433");
-  // The abbreviation is accepted on the way in too.
-  assert.equal(law.toDays(eraCoordinate("3E", 433)).compare(days), 0);
-});
-
-test("BCE crosses to CE with no year zero", () => {
-  const law = lawFor(BCE_CE_DECLARATION, "line:history");
-  const at = (era, year, month = 1, day = 1) => law.toDays(eraCoordinate(era, year, [
-    { level: "month", value: String(month) },
-    { level: "day", value: String(day) }
-  ]));
-
-  // 1 BCE is the year immediately before 1 CE: ADJACENT proper years, 0 and 1.
-  // The gap between their January firsts is therefore exactly one year and not
-  // two -- and that one year is 366 days, because proleptic year 0 is divisible
-  // by 400 and so is a leap year. Asserting 366 rather than 365 is the point:
-  // the fencepost is real, and getting it wrong by a year would show up here.
-  const oneBce = at("BCE", 1);
-  const oneCe = at("CE", 1);
-  assert.ok(oneBce.compare(oneCe) < 0);
-  assert.equal(oneCe.sub(oneBce).toJSON(), "366", "1 BCE runs straight into 1 CE with no year zero between them");
-  const table = new EraTable(BCE_CE_DECLARATION.eras);
-  assert.equal(table.toProperYear("BCE", "1") + 1n, table.toProperYear("CE", "1"));
-
-  // 44 BCE resolves to proleptic year -43 -- the fencepost, asserted against the
-  // registered standard conversion rather than restated as a literal.
-  assert.equal(
-    at("BCE", 44, 3, 15).toJSON(),
-    civilCoordinateToDays(coordinate([
-      { level: "year", value: "-43" }, { level: "month", value: "3" }, { level: "day", value: "15" }
-    ])).toJSON()
-  );
-
-  // Round trip, both sides of the boundary, including the affix this era authored.
-  for (const [era, year] of [["BCE", 44], ["BCE", 1], ["CE", 1], ["CE", 2026]]) {
-    const days = at(era, year);
-    const back = law.fromDays(days);
-    assert.equal(back.levels.find((level) => level.level === "era").value, era);
-    assert.equal(law.formatYear(back), `${year} ${era}`);
-    assert.equal(law.toDays(back).compare(days), 0);
-  }
-});
-
-test("era-qualified text parses from either side of the number", () => {
-  const law = lawFor(TAMRIEL_DECLARATION);
-  // Every spelling resolves to the era's KEY, which is what a coordinate stores.
-  assert.deepEqual(law.parseYear("3E 433"), { era: "3E", year: "433" });
-  assert.deepEqual(law.parseYear("ME 2500"), { era: "ME", year: "2500" });
-  assert.deepEqual(law.parseYear("Third Era 433"), { era: "3E", year: "433" });
-  // A reader who types the number first means the same date.
-  assert.deepEqual(law.parseYear("433 3E"), { era: "3E", year: "433" });
-  assert.deepEqual(law.parseYear("3E433"), { era: "3E", year: "433" });
-  // Text naming no era at all is distinguishable from text naming an unknown one.
-  assert.equal(law.parseYear("433"), null);
-  assert.equal(law.parseYear("9Z 12"), null);
-
-  const bce = lawFor(BCE_CE_DECLARATION, "line:history");
-  assert.deepEqual(bce.parseYear("44 BCE"), { era: "BCE", year: "44" });
-  assert.deepEqual(bce.parseYear("BCE 44"), { era: "BCE", year: "44" });
-});
-
 // --- Refusals: an era table that cannot be resolved is not stored ----------
 
 test("an era table whose spans contradict its neighbours is refused", () => {
-  const base = TAMRIEL_DECLARATION.eras;
+  const base = TAMRIEL_ERAS;
   const withEntries = (entries) => () => new EraTable({ anchor: base.anchor, entries });
 
   // An open era in the middle leaves both neighbours unresolvable.
@@ -248,32 +148,6 @@ test("an era table whose spans contradict its neighbours is refused", () => {
   assert.throws(() => closed.fromProperYear(200n), /falls outside every declared era/);
   assert.throws(() => closed.toProperYear("OE", "101"), /only 100 years long/);
   assert.throws(() => closed.toProperYear("OE", "0"), /numbers its years from 1/);
-});
-
-test("a coordinate on an era calendar must name its era", () => {
-  const law = lawFor(TAMRIEL_DECLARATION);
-  assert.throws(
-    () => law.toDays(coordinate([{ level: "year", value: "433" }])),
-    /numbers years within eras/
-  );
-  assert.throws(() => law.toDays(eraCoordinate("9Z", 1)), /is not one of this calendar's eras/);
-});
-
-test("an era table needs a year ladder its family can execute", () => {
-  // No origin and no transitions: nothing says which day this calendar starts
-  // on, so the era table has nothing to anchor against and says so.
-  assert.throws(() => new CoordinateLaw({
-    kind: "nested",
-    baseLevel: "day",
-    levels: [{ name: "era" }, { name: "year", within: "era" }, { name: "day", within: "year", radix: "365" }],
-    eras: TAMRIEL_DECLARATION.eras
-  }, { frameId: "frame:unanchored" }), /needs a year ladder its family can execute/);
-
-  // The era level is governed by the table, so it takes no count of its own.
-  assert.throws(() => new CoordinateLaw({
-    ...TAMRIEL_DECLARATION,
-    levels: [{ name: "era", radix: "4" }, ...TAMRIEL_DECLARATION.levels.slice(1)]
-  }, { frameId: "frame:counted-era" }), /governed by the era table, so it takes no count/);
 });
 
 // --- The acceptance fixture's own declarative shape ------------------------
@@ -441,29 +315,8 @@ test("a uniform ladder with an authored origin converts positionally, and is no 
   assert.equal(law.unitDays("day").toJSON(), "1");
   assert.equal(law.unitDays("hour").toJSON(), "1/24");
   // Day-in-year is 1-based and lands where it says.
-  const first = law.toDays(eraCoordinate("1E", 1, [{ level: "day", value: "1" }]));
-  const second = law.toDays(eraCoordinate("1E", 1, [{ level: "day", value: "2" }]));
+  const first = law.toDays(coordinate([{ level: "year", value: "1" }, { level: "day", value: "1" }]));
+  const second = law.toDays(coordinate([{ level: "year", value: "1" }, { level: "day", value: "2" }]));
   assert.equal(second.sub(first).toJSON(), "1");
-  assert.equal(first.toJSON(), "0", "1E 1 day 1 sits on the authored origin day");
-});
-
-test("an era table survives the memoized-law cache the way any declaration does", () => {
-  const id = "calendar:tamriel";
-  const document = {
-    frames: { [id]: { id, traits: ["set", "calendar"], coordinate: TAMRIEL_DECLARATION } }
-  };
-  assert.equal(coordinateLaw(document, id).formatYearAtDays(0), "1E 1");
-  document.frames[id] = {
-    ...document.frames[id],
-    coordinate: {
-      ...TAMRIEL_DECLARATION,
-      eras: {
-        anchor: TAMRIEL_DECLARATION.eras.anchor,
-        entries: TAMRIEL_DECLARATION.eras.entries.map((entry) =>
-          entry.abbrev === "1E" ? { ...entry, abbrev: "IE" } : entry)
-      }
-    }
-  };
-  invalidateCoordinateLaws(document);
-  assert.equal(coordinateLaw(document, id).formatYearAtDays(0), "IE 1");
+  assert.equal(first.toJSON(), "0", "year 1 day 1 sits on the authored origin day");
 });

@@ -9,7 +9,7 @@ import {
   isLeapYear,
   levelValue
 } from "./exact.js";
-import { EraTable } from "./eras.js";
+import { frameEraContext, isEraFrame } from "./era-chain.js";
 
 // The one coordinate-arithmetic engine. Every unit relationship in ChronoLog --
 // how many hours are in a day, how long a month is, how a nested coordinate
@@ -446,7 +446,7 @@ export class CoordinateLaw {
   // days). It defaults to "positional if a family can execute the ladder", and
   // `coordinateLaw` passes it explicitly so a measure frame keeps reading its
   // own base level rather than being reinterpreted as a date.
-  constructor(declaration = null, { frameId = null, positional = undefined } = {}) {
+  constructor(declaration = null, { frameId = null, positional = undefined, era = null } = {}) {
     const frameLabel = frameId ? `Frame ${frameId}` : "This coordinate declaration";
     this.frameId = frameId;
     this.declaration = declaration || null;
@@ -530,34 +530,22 @@ export class CoordinateLaw {
     // (era, year) to the PROPER YEAR the ladder already counts in, and the family
     // takes it from there. That composition is what keeps eras first-class
     // instead of a label over a linearized year.
-    if (declaration?.eras) {
-      if (levels.length < 2) {
-        throw new TypeError(`${frameLabel}: an era table needs an era level and a year level beneath it.`);
-      }
-      try {
-        this.eraTable = new EraTable(declaration.eras);
-      } catch (error) {
-        throw new TypeError(`${frameLabel}: ${error.message}`);
-      }
-      this.eraLevel = levels[0].name;
-      this.yearLevel = levels[1].name;
-      if (levels[0].radix || levels[0].transition) {
-        throw new TypeError(
-          `${frameLabel}: level "${this.eraLevel}" is governed by the era table, so it takes no count or transition.`
-        );
-      }
-      if (this.eraLevel === this.baseLevel) {
-        throw new TypeError(`${frameLabel}: the era level cannot also be the base unit.`);
-      }
-    } else {
-      this.eraTable = null;
-      this.eraLevel = null;
-      this.yearLevel = null;
-    }
+    // THE ERA IS THE FRAME. `era` is injected by `coordinateLaw`, which resolves
+    // it from the frame's own `era` block and its position in the succession
+    // chain (src/era-chain.js). Nothing about an era is read from the coordinate
+    // declaration: the declaration describes the year ladder this era counts in,
+    // inherited from its basis, and the era supplies only where its own year 1
+    // falls. A coordinate on an era frame therefore carries a plain year -- the
+    // frame it is attached to is which era it means.
+    this.era = era || null;
+    this.eraTable = era?.countable ? era.table : null;
+    this.eraEntry = era?.countable ? era.entry : null;
+    // An era with no year axis at all: ordered and connected, never acquiring
+    // day ordinals. Its law refuses conversion rather than computing one.
+    this.uncountableEra = Boolean(era && era.countable === false);
+    this.yearLevel = this.eraTable ? (levels[0]?.name || null) : null;
 
-    // What the family actually executes: the above-base ladder minus the era
-    // level, whose job the table has already done.
-    this.familyLadder = this.eraTable ? Object.freeze(this.aboveLadder.slice(1)) : this.aboveLadder;
+    this.familyLadder = this.aboveLadder;
 
     // Every transition above the base must belong to one family: half a
     // Gregorian ladder spliced onto half of something else is not a calendar.
@@ -574,10 +562,17 @@ export class CoordinateLaw {
     // inventing one would place every date in the document by guess.
     const origin = declaration?.origin;
     let family = families.size ? FAMILIES.get([...families][0]) : null;
-    // An era table renumbers YEARS; it says nothing about which day the calendar
-    // starts on, so it never substitutes for an origin. Anchoring at day zero by
-    // default would place every date in the document by an invented convention.
-    if (!family && this.familyLadder.length && UNIFORM_FAMILY.supports(this.familyLadder) && origin) {
+    // A uniform ladder is FULLY COMPUTABLE from its own radices under bottom-up
+    // composition, so it converts without waiting for an origin: positions on
+    // the frame's OWN axis need no external anchor, and refusing to compute them
+    // is what silently collapsed every Jeremy Bearimy event onto position 1.
+    //
+    // What an origin (or a shared atom) adds is the separate, stronger claim that
+    // those positions are comparable to standard days -- see `mapsToClock`. A
+    // frame's own axis being real and its relation to Earth days being unstated
+    // are not in tension: the first is arithmetic, the second is a fact about the
+    // world that only an author can supply.
+    if (!family && this.familyLadder.length && UNIFORM_FAMILY.supports(this.familyLadder)) {
       family = UNIFORM_FAMILY;
     }
     if (family && !family.supports(this.familyLadder)) {
@@ -604,18 +599,28 @@ export class CoordinateLaw {
     // not magnitudes -- there is no such thing as a duration of "3E 433".
     const declaredPositional = positional === undefined
       ? Boolean(family)
-      : Boolean((positional || this.eraTable || origin) && family);
-    this.positional = declaredPositional;
+      : Boolean((positional || origin) && family);
+    // An era with no year axis is never positional, whatever ladder it may have
+    // inherited: "ordered, connected, never acquiring day ordinals" is the whole
+    // of what it claims.
+    this.positional = this.uncountableEra ? false : declaredPositional;
     this.family = this.positional ? family : null;
     if (this.eraTable && !this.family) {
       throw new TypeError(
-        `${frameLabel}: an era table needs a year ladder its family can execute; `
-        + `declare an origin day for a uniform ladder, or use a registered transition.`
+        `${frameLabel}: this era counts years, so it needs a year ladder its family `
+        + `can execute -- inherit one from a basis calendar.`
       );
     }
     // Retained even when this law is not positional, so an authoring surface can
     // still describe a measure frame's variable levels ("365 or 366 days").
     this.declaredFamily = family;
+    // Inheriting the registered calendar's NAMES and CYCLES is a claim about
+    // counting in that calendar, so it is gated on the family naming a CLDR
+    // calendar scale -- not merely on there being a family at all. The `uniform`
+    // family executes any constant-radix ladder and names no calendar, so an
+    // invented calendar gets no Gregorian months and no seven-day week unless it
+    // declares them.
+    this.inheritsRegistered = Boolean(family?.calendar);
   }
 
   // --- Structure --------------------------------------------------------
@@ -655,7 +660,7 @@ export class CoordinateLaw {
   namesFor(name) {
     const level = this.level(name);
     if (level?.names) return level.names;
-    if (!this.declaredFamily) return null;
+    if (!this.inheritsRegistered) return null;
     const standard = GREGORIAN_DECLARATION.levels.find((entry) => entry.name === String(name));
     return standard?.names || null;
   }
@@ -674,8 +679,8 @@ export class CoordinateLaw {
       || this.level("month");
     const authored = monthLevel && this.namesFor(monthLevel.name);
     if (authored) return authored;
-    if (monthLevel && this.declaredFamily) return STANDARD_MONTH_NAMES;
-    return this.declaredFamily && !this.levels.length ? STANDARD_MONTH_NAMES : null;
+    if (monthLevel && this.inheritsRegistered) return STANDARD_MONTH_NAMES;
+    return this.inheritsRegistered && !this.levels.length ? STANDARD_MONTH_NAMES : null;
   }
 
   hasMonths() {
@@ -856,7 +861,7 @@ export class CoordinateLaw {
     if (declared) return declared;
     // Same rule as `namesFor`: only a law that counts in the registered calendar
     // inherits its cycles. A law that does not has no week unless it says so.
-    if (!this.declaredFamily) return null;
+    if (!this.inheritsRegistered) return null;
     const standard = GREGORIAN_DECLARATION.cycles.find((entry) => entry.name === String(name));
     if (!standard) return null;
     return {
@@ -877,7 +882,7 @@ export class CoordinateLaw {
   cycles() {
     const effective = new Map();
     for (const standard of GREGORIAN_DECLARATION.cycles) {
-      if (this.declaredFamily) effective.set(standard.name, this.cycle(standard.name));
+      if (this.inheritsRegistered) effective.set(standard.name, this.cycle(standard.name));
     }
     for (const [name, cycle] of this._cycles) effective.set(name, cycle);
     return [...effective.values()];
@@ -904,7 +909,7 @@ export class CoordinateLaw {
   weekdayNames() {
     const authored = this.cycleNames("weekday");
     if (authored) return authored;
-    return this.declaredFamily ? STANDARD_WEEKDAY_NAMES : null;
+    return this.inheritsRegistered ? STANDARD_WEEKDAY_NAMES : null;
   }
 
   hasWeekdays() {
@@ -921,6 +926,11 @@ export class CoordinateLaw {
     return this.eraTable !== null;
   }
 
+  /** This era's stored key, or null for a frame that is not an era. */
+  eraKey() {
+    return this.eraEntry?.key || this.era?.key || null;
+  }
+
   eras() {
     return this.eraTable ? this.eraTable.entries : [];
   }
@@ -935,9 +945,7 @@ export class CoordinateLaw {
       const level = this.familyLadder[0]?.name || this.levels[0]?.name;
       return level ? String(levelValue(value, level, "")) : "";
     }
-    const era = value?.levels?.find((entry) => entry.level === this.eraLevel);
-    if (!era) return "";
-    return this.eraTable.format(era.value, levelValue(value, this.yearLevel, "1"));
+    return this.eraTable.format(this.eraEntry.key, levelValue(value, this.yearLevel, "1"));
   }
 
   /** The era-qualified year at a day ordinal, or the plain year without eras. */
@@ -961,7 +969,29 @@ export class CoordinateLaw {
    * line on a calendar with no now-mapping").
    */
   mapsToClock() {
-    return this.positional && this.declaration?.clock !== false;
+    if (this.uncountableEra) return false;
+    return this.positional && this.sharesStandardAtom() && this.declaration?.clock !== false;
+  }
+
+  /**
+   * Does this law's atom resolve to a standard duration?
+   *
+   * The atom is the shared denominator for absolute comparison, so this is the
+   * question "are this frame's positions commensurable with Earth days at all?".
+   * A ladder whose finest unit is a `letter` of a handwritten phrase has a
+   * perfectly good axis of its own and no answer here -- and an authored
+   * `atomDays` or `origin` IS that answer, which is why either one counts.
+   *
+   * Without it, `toDays` still returns exact, ordered positions, but they are
+   * positions on THIS frame's axis and comparing them to another frame's is
+   * meaningless. That is what correspondence staples exist to state.
+   */
+  sharesStandardAtom() {
+    if (this.declaration?.atomDays !== undefined && this.declaration?.atomDays !== null) return true;
+    if (this.declaration?.baseUnitDays !== undefined && this.declaration?.baseUnitDays !== null) return true;
+    if (this.declaration?.fixed?.smallestUnitDays !== undefined) return true;
+    if (this.declaration?.origin !== undefined && this.declaration?.origin !== null) return true;
+    return Boolean(this.atomLevel && STANDARD_UNIT_DAYS[this.atomLevel]);
   }
 
   // --- Conversion -------------------------------------------------------
@@ -977,6 +1007,12 @@ export class CoordinateLaw {
   // frames and it stays that way; positional conversion for a fully custom
   // ladder is the next stage of ROADMAP #6, not something to guess at here.
   toDays(value) {
+    if (this.uncountableEra) {
+      throw new TypeError(
+        `${this.era.name} has no year axis, so nothing in it has a date. `
+        + `Its events are ordered by their place in the era chain and nothing else.`
+      );
+    }
     if (this.family) {
       const parts = new Map();
       for (const [index, level] of this.familyLadder.entries()) {
@@ -1032,15 +1068,20 @@ export class CoordinateLaw {
   // defaulting it to "the era the anchor happens to sit in" would be exactly the
   // invented meaning this model refuses.
   _properYear(value) {
-    const era = value?.levels?.find((entry) => entry.level === this.eraLevel);
-    if (!era) {
-      throw new TypeError(
-        `This calendar numbers years within eras, so a coordinate needs one of `
-        + `${this.eraTable.eraKeys().join(", ")} in its "${this.eraLevel}" level.`
+    return this.eraTable.toProperYear(
+      this.eraEntry.key,
+      levelValue(value, this.yearLevel, "1")
+    );
+  }
+
+  _localYear(properYear) {
+    const resolved = this.eraTable.fromProperYear(properYear);
+    if (resolved.key !== this.eraEntry.key) {
+      throw new RangeError(
+        `That position falls in ${resolved.name}, not ${this.eraEntry.name}.`
       );
     }
-    const year = levelValue(value, this.yearLevel, "1");
-    return this.eraTable.toProperYear(era.value, year);
+    return resolved.year;
   }
 
   _belowAtoms(value) {
@@ -1057,6 +1098,9 @@ export class CoordinateLaw {
   // appear when at least one of them is non-zero, so midnight stays a bare
   // date -- the shape every existing consumer and every stored document expects.
   fromDays(days, fractionPlaces = 12) {
+    if (this.uncountableEra) {
+      throw new TypeError(`${this.era.name} has no year axis, so no position in it has a date.`);
+    }
     const value = Rational.parse(days);
     if (!this.family) {
       return coordinate([{
@@ -1074,16 +1118,14 @@ export class CoordinateLaw {
     // The era table turns the proper year back into an era plus a year within
     // it, and BOTH land in the coordinate -- the round trip preserves what the
     // author wrote, not a linearized equivalent of it.
+    // Under an era law the year that comes back is the era-LOCAL year, because
+    // the frame is already the era. A proper year outside this era's own range
+    // means the ordinal does not belong to this era at all, and that refuses
+    // rather than silently renumbering into a neighbour.
     const levels = this.eraTable
-      ? (() => {
-          const properYear = resolved.find(([name]) => name === this.yearLevel)?.[1];
-          const era = this.eraTable.fromProperYear(properYear);
-          return [
-            { level: this.eraLevel, value: era.era },
-            ...resolved.map(([level, amount]) =>
-              level === this.yearLevel ? { level, value: era.year } : { level, value: amount })
-          ];
-        })()
+      ? resolved.map(([level, amount]) => level === this.yearLevel
+        ? { level, value: this._localYear(amount) }
+        : { level, value: amount })
       : resolved.map(([level, amount]) => ({ level, value: amount }));
     const below = [];
     let significant = false;
@@ -1165,11 +1207,10 @@ function resolveDeclaration(documentValue, frameId, seen) {
     // as this default-ladder shorthand, never as the positionality answer.
     return { declaration: authored ? declaration : GREGORIAN_DECLARATION, frameId, positional };
   }
-  // An ERA TABLE or an authored ORIGIN is a frame stating that its own levels
-  // name positions -- an era is not a magnitude, and an origin is precisely the
-  // statement of which day the ladder starts on. Such a frame owns its
-  // coordinates outright and does not defer to a basis for them.
-  if (authored && (declaration.eras || declaration.origin)) {
+  // An authored ORIGIN is a frame stating that its own levels name positions:
+  // an origin is precisely the statement of which day the ladder starts on, so
+  // such a frame owns its coordinates outright and does not defer to a basis.
+  if (authored && declaration.origin) {
     return { declaration, frameId, positional };
   }
   if (frame.basis) return resolveDeclaration(documentValue, frame.basis, seen);
@@ -1183,13 +1224,24 @@ export function coordinateLaw(documentValue, frameId) {
     perDocument = new Map();
     LAW_CACHE.set(documentValue, perDocument);
   }
+  // An era frame's law is its BASIS ladder plus its own place in the succession
+  // chain. The chain is derived from relation records, not from the declaration,
+  // so the cache key has to include it -- a staple edit changes this law without
+  // changing the declaration object at all. `invalidateCoordinateLaws` is called
+  // by every committed change, which is what keeps that honest; the era key is
+  // carried here as well so a stale entry cannot survive a re-pinned chain.
+  const era = isEraFrame(documentValue?.frames?.[frameId])
+    ? frameEraContext(documentValue, frameId)
+    : null;
+  const eraKey = era ? `${era.countable ? era.entry.key : era.key}:${era.countable}` : "";
   const cached = perDocument.get(frameId);
-  if (cached && cached.declaration === resolved.declaration) return cached.law;
+  if (cached && cached.declaration === resolved.declaration && cached.eraKey === eraKey) return cached.law;
   const law = new CoordinateLaw(resolved.declaration, {
     frameId: resolved.frameId,
-    positional: resolved.positional
+    positional: resolved.positional,
+    era
   });
-  perDocument.set(frameId, { declaration: resolved.declaration, law });
+  perDocument.set(frameId, { declaration: resolved.declaration, eraKey, law });
   return law;
 }
 

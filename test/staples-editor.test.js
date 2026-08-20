@@ -286,7 +286,11 @@ test("stapleRowModel reports the registry label, near/far, single coordinate tex
 
 test("adding a staple of each registered kind is one journalled, undoable change, and undo removes it", () => {
   for (const kindName of Object.keys(STAPLE_KINDS)) {
-    if (kindName === "correspondence") continue; // frame+frame only; never authored on this card
+    // A kind that ONLY connects frame to frame is never authored on this card,
+    // which edits an object's or a series' own staples. Derived from the
+    // registry rather than named, so a new frame-to-frame kind needs no edit
+    // here -- `succession` (era boundaries) is the second such kind.
+    if (STAPLE_KINDS[kindName].connects.every((pair) => pair === "frame+frame")) continue;
     const definition = STAPLE_KINDS[kindName];
     const scope = stapleKindScopes(kindName).includes("object") ? "object" : "series";
     const fixture = scope === "series" ? documentWithSeries() : documentWithEvent();

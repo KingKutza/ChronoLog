@@ -61,6 +61,7 @@ import { durationMagnitudeDays } from "./model.js";
 //               spaces directly.
 //   partitions  does this kind divide a series' rules into segments
 //   carriesRule may this kind carry a following rule (`payload.rule`)
+//   positions   do this kind's ends carry a position at all (default true)
 //   anchors     does this kind anchor a named point of an object's extent
 export const STAPLE_KINDS = Object.freeze({
   end: Object.freeze({
@@ -117,6 +118,33 @@ export const STAPLE_KINDS = Object.freeze({
     partitions: false,
     carriesRule: false,
     anchors: false
+  }),
+  // Frame to frame, and deliberately WITHOUT a coordinate on either end.
+  //
+  // Owner ruling: eras are frames stapled together. An era owns its own year
+  // numbering and extent; the boundary between two consecutive eras is this
+  // staple, and the roles carry the whole of its meaning -- the `end` end names
+  // the era that finishes and the `start` end names the era that begins. There
+  // is no coordinate to author because there is nothing to author: the boundary
+  // IS wherever the earlier era's extent runs out, and stating it twice would
+  // create two facts that can disagree.
+  //
+  // Distinct from `correspondence`, which claims a bare touch point between two
+  // frames and nothing about the space around it. A succession claims adjacency
+  // and ORDER: the two eras meet exactly, with no gap and no overlap, which is
+  // what lets a chain of them derive every era's range from one authored pin.
+  succession: Object.freeze({
+    label: "Precedes the next era",
+    connects: Object.freeze(["frame+frame"]),
+    partitions: false,
+    carriesRule: false,
+    anchors: false,
+    // The only kind whose ends carry NO POSITION. Every other kind names a place
+    // on a frame; a succession names an adjacency, and the boundary IS wherever
+    // the earlier era's extent runs out. Authoring it as a coordinate would
+    // create a second fact that can disagree with the extent, and authoring it
+    // as a `void` would say "deliberately nowhere" when the truth is "derived".
+    positions: false
   })
 });
 
