@@ -566,6 +566,17 @@ function validateStaple(document, relation, errors) {
     errors.push(`Staple ${relation.id} connects two series, which is not defined`);
   }
 
+  // A staple's roles live on its ends. Refused rather than ignored: a record
+  // that carries a claim nothing honours is unauditable, and the flat shape this
+  // replaced spelled the same idea `role`, so accepting one here would let a
+  // half-migrated record look correct. `compactDocument` strips it on load, so
+  // this only ever fires on something authored against the current shape.
+  if (relation.role !== undefined) {
+    errors.push(
+      `Staple ${relation.id} carries a top-level role; a staple's touch point is its end's "point"`
+    );
+  }
+
   const definition = stapleKind(relation.kind);
   if (!definition) {
     errors.push(
@@ -687,10 +698,22 @@ export function addPattern(document, input) {
   return pattern;
 }
 
+// The default `role` per relation type, and ONLY for the types that have one.
+// A helper that injects one kind's defaults onto every kind writes fields the
+// record has no meaning for: a staple's roles live on its ENDS (`point`), so a
+// top-level `role: "member"` on one is dead data that reads like a claim, and the
+// next anchor derivation to grow a top-level role lookup would silently honour
+// it. A type absent from this map gets no role at all.
+const RELATION_ROLE_DEFAULTS = Object.freeze({
+  attachment: "member",
+  composition: "segment"
+});
+
 export function addRelation(document, input) {
+  const defaultRole = RELATION_ROLE_DEFAULTS[input.type];
   const relation = {
     id: input.id || createId("relation"),
-    role: input.role || (input.type === "composition" ? "segment" : "member"),
+    ...(defaultRole ? { role: input.role || defaultRole } : {}),
     provenance: input.provenance || { kind: "explicit" },
     ...clone(input)
   };
