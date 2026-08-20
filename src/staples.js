@@ -544,11 +544,25 @@ export function describeCorrespondence(chronologDocument, frameA, frameB, engine
     pairs.push({ from, to });
   }
   const total = pairs.length;
-  const cardinality = total === 0 ? "empty"
-    : sources.size === total && targets.size === total ? "one-to-one"
-      : sources.size < total && targets.size === total ? "one-to-many"
-        : sources.size === total && targets.size < total ? "many-to-one"
-          : "many-to-many";
+  // A DERIVATION THAT NARROWS ITS DOMAIN MUST NARROW ITS CLAIM. The four
+  // point-to-point cardinalities are computed over `pairs`, which deliberately
+  // excludes every position that is not one instant -- so they may only be
+  // reported when nothing was excluded. Reporting "one-to-one" for a set whose
+  // other members are selectors would describe the subset this function chose to
+  // look at and call it the set, and "empty" for a set of three authored
+  // statements would deny they exist.
+  //
+  //   empty        nothing is authored at all
+  //   many-valued  some position is itself many-valued (a selector, a span), so
+  //                the set maps one position to many and cannot be one-to-one
+  //   void         every authored statement says "nothing corresponds here"
+  const cardinality = entries.length === 0 ? "empty"
+    : manyValued > 0 ? "many-valued"
+      : total === 0 ? "void"
+        : sources.size === total && targets.size === total ? "one-to-one"
+          : sources.size < total && targets.size === total ? "one-to-many"
+            : sources.size === total && targets.size < total ? "many-to-one"
+              : "many-to-many";
   let monotonic = null;
   if (!manyValued && !voids && total > 1 && sources.size === total) {
     const ordered = [...pairs].sort((left, right) => left.from.compare(right.from));

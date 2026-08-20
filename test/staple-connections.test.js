@@ -7,6 +7,7 @@ import {
   addEvent,
   addPattern,
   addRelation,
+  CommandHistory,
   createId,
   durationMagnitude,
   frameEnd,
@@ -19,6 +20,7 @@ import {
   voidEnd
 } from "../src/model.js";
 import { compactDocument } from "../src/store.js";
+import { createTransactions } from "../src/ui/transactions.js";
 import {
   describeCorrespondence,
   endPosition,
@@ -27,6 +29,7 @@ import {
   frameCorrespondences,
   frameEndDays,
   frameEndMatches,
+  resolveObjectExtent,
   STAPLE_KINDS,
   stapleEnds,
   stapleKindScopes,
@@ -670,7 +673,10 @@ test("'sometimes never' is authored as a VOID end, which is a different claim fr
   const described = describeCorrespondence(document, "frame:bearimy", "frame:wall-time", engine);
   assert.equal(described.voids, 1);
   assert.equal(described.points, 0);
-  assert.equal(described.cardinality, "empty");
+  // "empty" would deny the authored statement exists. A set whose only members
+  // say "nothing corresponds here" is a void correspondence, not an absent one.
+  assert.equal(described.cardinality, "void");
+  assert.equal(described.count, 1);
 });
 
 // ---------------------------------------------------------------------------
