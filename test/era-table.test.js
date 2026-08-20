@@ -5,7 +5,12 @@ import { EraTable } from "../src/eras.js";
 import { CoordinateLaw, GREGORIAN_DECLARATION, coordinateLaw, invalidateCoordinateLaws } from "../src/coordinate-law.js";
 import { civilCoordinateToDays } from "../src/coordinate-law.js";
 
-// Owner ruling: "Hard No. Epochs, true epochs no faking." An era is a level of
+// Owner ruling: "Hard No. Epochs, true epochs no faking." The era TABLE is no
+// longer a declaration key -- eras are frames stapled together
+// (test/era-frames.test.js) -- but its range arithmetic is that chain's kernel,
+// so it is still pinned directly here. What follows is that arithmetic plus the
+// coordinate-law rules it composes with.
+// An era may number its years descending: a level of
 // the coordinate, not a label over a linearized year, and an era may count DOWN.
 // These pin both, plus the two fenceposts that make the difference visible: BCE's
 // missing year zero, and a descending era's oldest year being its highest number.

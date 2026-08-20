@@ -77,7 +77,13 @@ function successionEdges(documentValue) {
  * cycle is refused rather than resolved by precedence -- both mean the author
  * has said two contradictory things about what follows what.
  */
-export function eraChainFrames(documentValue, frameId) {
+/**
+ * Every era frame connected to `frameId` by succession staples, in no particular
+ * order, WITHOUT deriving an order. Deliberately incapable of failing: a caller
+ * that has just been refused an ordering still needs to know which frames the
+ * refusal covers, so it can report the chain once instead of once per era.
+ */
+export function eraChainMembers(documentValue, frameId) {
   const edges = successionEdges(documentValue);
   const reachable = new Set();
   const queue = [String(frameId)];
@@ -90,7 +96,13 @@ export function eraChainFrames(documentValue, frameId) {
       if (edge.to === current) queue.push(edge.from);
     }
   }
-  const members = [...reachable].filter((id) => isEraFrame(documentValue?.frames?.[id]));
+  return [...reachable].filter((id) => isEraFrame(documentValue?.frames?.[id]));
+}
+
+export function eraChainFrames(documentValue, frameId) {
+  const edges = successionEdges(documentValue);
+  const members = eraChainMembers(documentValue, frameId);
+  const reachable = new Set(members);
   if (!members.length) return [];
 
   const next = new Map();

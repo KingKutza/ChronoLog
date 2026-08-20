@@ -452,6 +452,42 @@ collects the reason instead of aborting. `coordinateLawError` (per frame) and
 refuse-before-store discipline extends to `validateDocument`, because a document
 whose coordinates only fail at query time is not a valid document.
 
+**Cross-frame projection exists only through staples.** Owner ruling: *"For
+Tamriel, there is no staple between earth and Tamriel, thus no way to project one
+to the other. The moment we place a staple, wherever it is everything projects
+around that, we place 8 that is where lines shows us the warp."*
+
+Three claims, separate, and none implying another:
+
+| claim | asked by | means |
+| --- | --- | --- |
+| units are comparable in LENGTH | `law.sharesStandardAtom()` | a Tamrielic hour and an Earth hour are both hours |
+| the frame has a now at all | `law.mapsToClock()` | a Now line may be drawn |
+| positions CORRESPOND | a staple path (`src/frame-projection.js`) | one frame may be drawn on the other's axis |
+
+An authored `origin` is **chain-internal**: it anchors a calendar's own eras
+relative to each other so the chain resolves exact internal ordinals, and it
+makes no claim on any shared axis. With no staple path between two frames,
+neither projects onto the other — an overlay renders **nothing** of the far frame
+and reports why. It must never place that frame's events at origin-derived day
+ordinals; dropping Tamriel's Third Era beside 1970 because both count from an
+internal zero is a correspondence nobody authored, which is the class of error
+this program refuses everywhere else.
+
+`framesProject(document, from, onto)` answers it: same frame, same coordinate
+space (every era frame of one calendar), or a chain of frame-to-frame staples.
+`projectableFrames` returns the drawable set plus the refusals, and a refusal is
+reported rather than dropped — a frame that renders nothing because nothing
+relates it to the view is a fact the author needs told.
+
+**Multiple staples define the correspondence exactly at each stapled point** and
+are never averaged, never reconciled into a single rigid offset — the same rule
+overdetermined anchors follow, for the same reason: an average of two true
+answers is a third answer nobody authored. Between two stapled points the mapping
+**stretches**, and that stretch is authored meaning — the warp. Drawing it is the
+Lines lens's work (ROADMAP #4); the substrate's job is to keep every stapled point
+exact and to claim nothing about the space between them.
+
 **No artificial Now.** `law.mapsToClock()` is false for a law that places nothing
 on the running clock — a non-positional law, or one whose declaration says
 `clock: false`. A lens must not draw a Now line on a calendar with no

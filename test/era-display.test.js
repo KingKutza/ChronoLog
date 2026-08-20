@@ -13,7 +13,7 @@ import { ViewSession } from "../src/session.js";
 // and a Now-related control is disabled rather than lying about a "today"
 // on a calendar that maps to no running clock.
 //
-// The two example laws are copied verbatim from test/eras.test.js's fixtures
+// The two example laws are copied verbatim from test/era-table.test.js's fixtures
 // (per the wave brief -- copy, do not import, so this file stands alone).
 
 // Gregorian with eras: BCE descending and open below, CE ascending and open
@@ -64,7 +64,7 @@ const TAMRIEL_DECLARATION = Object.freeze({
   })
 });
 
-// A calendar closed at BOTH ends -- the fixture the eras.test.js suite does
+// A calendar closed at BOTH ends -- the fixture the era-table.test.js suite does
 // not need but this one does: a day genuinely outside every declared era, so
 // `formatYearAtDays` throws and the render path must omit rather than crash.
 const CLOSED_ERA_DECLARATION = Object.freeze({

@@ -1,5 +1,12 @@
 import { Rational, coordinate } from "./exact.js";
-import { GREGORIAN_DECLARATION, coordinateLaw, durationMagnitudeDays } from "./coordinate-law.js";
+import {
+  GREGORIAN_DECLARATION,
+  coordinateLaw,
+  coordinateLawError,
+  coordinateValueError,
+  durationMagnitudeDays
+} from "./coordinate-law.js";
+import { eraChain, eraChainFrames, eraChainMembers, isEraFrame } from "./era-chain.js";
 import { mapSnapshot, opsFromMaps, putOp } from "./ops.js";
 import {
   DEFAULT_POINT,
@@ -124,6 +131,30 @@ export function validateDocument(document) {
       errors.push(`Event ${id} must have zero duration for its task/terminator trait`);
     }
   }
+  // SUCCESSION CHAINS VALIDATE AT STORE TIME, and each chain reports ONCE.
+  // A forked, looped, unpinned or doubly-pinned chain used to be refused only
+  // when some law happened to be built from it -- at the first render that asked.
+  // This runs BEFORE the frame loop so the chain is the single reporter: every
+  // era frame's own law would otherwise rediscover the same broken chain and
+  // repeat it, six eras giving six copies of one problem.
+  const chainsSeen = new Set();
+  const chainFailed = new Set();
+  for (const [id, frame] of Object.entries(document.frames || {})) {
+    if (!frame || typeof frame !== "object" || !isEraFrame(frame)) continue;
+    if (chainsSeen.has(id)) continue;
+    const members = eraChainMembers(document, id);
+    for (const member of members) chainsSeen.add(member);
+    chainsSeen.add(id);
+    try {
+      eraChainFrames(document, id);
+      eraChain(document, id);
+    } catch (chainError) {
+      errors.push(`Era chain at ${id}: ${chainError.message}`);
+      for (const member of members) chainFailed.add(member);
+      chainFailed.add(id);
+    }
+  }
+
   for (const [id, frame] of Object.entries(document.frames || {})) {
     if (!frame || typeof frame !== "object") {
       errors.push(`Frame ${id} must be an object`);
@@ -131,6 +162,18 @@ export function validateDocument(document) {
     }
     if (frame.id !== id) errors.push(`Frame map key ${id} does not match its id`);
     if (!Array.isArray(frame.traits)) errors.push(`Frame ${id} requires traits`);
+    // The refuse-before-store discipline reaches coordinate law itself: a frame
+    // whose declaration, era numbering, or succession chain cannot be resolved is
+    // not a valid frame, and reporting it as one defers a certain failure to
+    // whichever render first asks. A frame that owns no coordinate at all is
+    // silent here, because `coordinateLawError` only speaks when something is
+    // actually written and wrong.
+    // A frame whose chain already failed above is not asked again: the chain is
+    // the one reporter for that class of defect.
+    if (!chainFailed.has(id)) {
+      const lawError = coordinateLawError(document, id);
+      if (lawError) errors.push(lawError);
+    }
     if (frame.basis && !document.frames?.[frame.basis]) errors.push(`Frame ${id} has a missing basis`);
     if (frame.coordinateDefinition && !document.frames?.[frame.coordinateDefinition]) {
       errors.push(`Frame ${id} has a missing coordinate definition`);
@@ -169,6 +212,12 @@ export function validateDocument(document) {
     if (relation.type === "attachment") {
       if (!document.events?.[relation.event]) errors.push(`Attachment ${id} references a missing event`);
       if (!document.frames?.[relation.frame]) errors.push(`Attachment ${id} references a missing frame`);
+      // A coordinate its own frame's law cannot read places nothing, and would
+      // vanish at query time with no explanation attached to the record.
+      if (relation.coordinate && document.frames?.[relation.frame]) {
+        const valueError = coordinateValueError(document, relation.frame, relation.coordinate);
+        if (valueError) errors.push(`Attachment ${id}: ${valueError}`);
+      }
       const event = document.events?.[relation.event];
       const frame = document.frames?.[relation.frame];
       if (

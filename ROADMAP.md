@@ -66,7 +66,14 @@ the archive.
    passes beat by beat, end-anchored events place from where they stop,
    and the editor authors the whole collection including the rule that
    follows an inflection. What remains is display and one unruled
-   shape. **Fuzzy rendering**: uncertainty reaches the renderer as data
+   shape. **The warp**: cross-frame projection exists only through staples,
+   and multiple staples between two frames define the correspondence exactly at
+   each stapled point without ever averaging into a rigid offset (see AGENTS.md,
+   "Coordinate law"). Between stapled points the mapping stretches, and that
+   stretch is authored meaning — "we place 8 that is where lines shows us the
+   warp." The substrate keeps every point exact and claims nothing about the
+   space between them; DRAWING the stretch is Lines-lens work and is undesigned.
+   **Fuzzy rendering**: uncertainty reaches the renderer as data
    and is marked, but the display language for it is undesigned — a
    spread wants sigils and zones that read at a glance without piling
    information on the eye, the same problem #2's decay work faces, and
