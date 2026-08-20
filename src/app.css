@@ -1173,6 +1173,44 @@ svg [data-selected="true"] {
   .observed-boundary-row .observed-boundary-buttons { grid-column: 1 / -1; }
 }
 .calendar-root-note { grid-column: 2 / span 2; color: var(--faint); }
+.coordinate-structure { border-color: color-mix(in srgb, var(--accent) 30%, var(--strong)); }
+.structure-fields { display: grid; gap: 7px; }
+.structure-levels,
+.structure-cycles { display: grid; gap: 6px; }
+.structure-level-heading,
+.structure-level-row,
+.structure-cycle-heading,
+.structure-cycle-row {
+  display: grid;
+  grid-template-columns: minmax(80px, .6fr) minmax(96px, .7fr) minmax(60px, .35fr) minmax(0, 1.3fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+.structure-level-heading,
+.structure-cycle-heading { color: var(--faint); font-size: 10px; }
+.structure-level-heading span,
+.structure-cycle-heading span { white-space: nowrap; }
+.structure-level-row input,
+.structure-level-row select,
+.structure-cycle-row input {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid var(--strong);
+  border-radius: 6px;
+  font: 12px/1.2 var(--data);
+}
+.structure-row-buttons { display: inline-flex; gap: 2px; }
+.structure-row-buttons button { min-width: 25px; min-height: 28px; border: 1px solid var(--strong); border-radius: 5px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.structure-error { color: var(--now); }
+@media (max-width: 620px) {
+  .structure-level-heading,
+  .structure-cycle-heading { display: none; }
+  .structure-level-row,
+  .structure-cycle-row { grid-template-columns: 1fr 1fr; }
+  .structure-level-row .structure-row-buttons,
+  .structure-cycle-row .structure-row-buttons { grid-column: 1 / -1; }
+}
 .calendar-period-preview { color: var(--muted); font: 11px/1.4 var(--data); }
 .event-form:not(.has-recurrence) .recurrence-options { display: none; }
 

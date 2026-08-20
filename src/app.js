@@ -1,4 +1,5 @@
 import { ChronologEngine } from "./engine.js";
+import { coordinateLawError, displayLaw, invalidateCoordinateLaws } from "./coordinate-law.js";
 import { CommandHistory, createEmptyWorkspaceDocument, validateDocument } from "./model.js";
 import { calendarFrames } from "./projections.js";
 import { ViewSession, sanitizeSessionParameters } from "./session.js";
@@ -64,6 +65,7 @@ app.engine = new ChronologEngine(app.chronolog);
 // the document as it was before the edit. Reuses the one engine rather than building
 // a throwaway, because the post-change render path calls setDocument again anyway.
 app.refreshEngine = (documentValue) => {
+  invalidateCoordinateLaws(documentValue || app.chronolog);
   app.engine.setDocument(documentValue || app.chronolog);
   return app.engine;
 };
@@ -82,6 +84,7 @@ app.pendingIntimateZoom = null;
 app.intimateScrollGuard = 0;
 app.documentLoading = true;
 app.framesReturnTarget = null;
+app.reportedLawError = null;
 
 let toastTimer = null;
 function toast(message, error = false) {
@@ -107,6 +110,7 @@ app.store = new JournalStore({
   // download/reload decision to make any more — the merge already happened at
   // record level, so the engine just needs rebuilding around the new state.
   onRebase(missed) {
+    invalidateCoordinateLaws(app.chronolog);
     app.engine.setDocument(app.chronolog);
     reconcileSession();
     app.scheduleRender();
@@ -117,6 +121,12 @@ app.store.attach(app.chronolog, WORKSPACE_TARGET);
 
 function makeHistory() {
   return new CommandHistory(app.chronolog, (change) => {
+    // A committed change may have rewritten a frame's coordinate declaration,
+    // and every memoized law derived from it is now a lie. Dropping the cache
+    // before the engine re-indexes is what makes an applied ladder edit LIVE:
+    // the owner's report was an editor that accepted "Hour:Day:23" and then
+    // still drew 24 hours, because nothing downstream was told to look again.
+    invalidateCoordinateLaws(app.chronolog);
     if (change.frameOnly) app.engine.refreshFrame(change.frameOnly);
     else if (!change.viewOnly) app.engine.setDocument(app.chronolog, { preserveRecurrence: change.preserveRecurrence });
     reconcileSession();
@@ -135,6 +145,7 @@ app.history = makeHistory();
 
 function replaceDocument(next, storageTarget = {}) {
   app.clearProvisionalDraft();
+  invalidateCoordinateLaws(app.chronolog);
   app.chronolog = next;
   app.engine = new ChronologEngine(app.chronolog);
   app.history = makeHistory();
@@ -154,6 +165,14 @@ function reconcileSession() {
     ? app.session.activeFrame
     : calendarFrames(app.chronolog)[0]?.id || "";
   app.session.setLeadingFrame(leadingFrame);
+  // The primary frame owns the coordinate law for display (src/frame-selection.js),
+  // so reassigning the primary or editing its declaration re-derives every view
+  // bound that depends on it. An unresolvable declaration is reported rather
+  // than swallowed -- an unknown transition string must reach the author.
+  app.session.setCoordinateLaw(displayLaw(app.chronolog, app.session));
+  const lawError = leadingFrame ? coordinateLawError(app.chronolog, leadingFrame) : null;
+  if (lawError && lawError !== app.reportedLawError) app.toast(lawError, true);
+  app.reportedLawError = lawError;
   // One-time bridge off a document that still carries the retired
   // frames[leading].display.overlays field (see session.js's
   // seedOverlaysOnce) — a no-op once the session has its own companions,

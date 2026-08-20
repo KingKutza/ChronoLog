@@ -400,7 +400,18 @@ export function createDock(app, dom) {
   resize.addEventListener("pointercancel", endResize);
 
   resize.addEventListener("keydown", (event) => {
-    const step = event.shiftKey ? 1 / 24 : 1 / 48;
+    // A nudge of one hour, or half an hour, of a day's worth of screen width
+    // -- expressed as a fraction of one day under the primary frame's own
+    // law, so an hour is genuinely 1/23 of the day on a 23-hour frame rather
+    // than the bare civil 1/24 this used to hardcode. `unitDays("hour")` is
+    // null only for a declaration that gives "hour" a transition instead of a
+    // radix, which no authored frame does; `meanUnitDays` is the fallback for
+    // that theoretical case rather than a silent throw.
+    const law = app.session.law;
+    const hourDays = law.unitDays("hour") ?? law.meanUnitDays("hour");
+    const step = hourDays
+      ? (event.shiftKey ? hourDays.toNumber() : hourDays.div(2).toNumber())
+      : (event.shiftKey ? 1 / 24 : 1 / 48);
     const side = normalizeDockSide(app.session.dockSide);
     // Left and Right always mean "narrower" and "wider" relative to the dock's
     // own edge, so the keys agree with what the user sees rather than with the

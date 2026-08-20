@@ -14,6 +14,13 @@ character when you touch adjacent code or docs.
 
 ### `src/`
 
+- `coordinate-law.js` — the single coordinate-arithmetic engine: the transition
+  registry, the registered CLDR calendar families, and the `CoordinateLaw` that
+  answers every unit question from a frame's own declaration. See the
+  "Coordinate law" contract.
+- `calendar-structure.js` — the authoring side of that declaration: the regular
+  fixed-hierarchy builder, the editable level/cycle rows, and the one parser and
+  one count check for every authored name list.
 - `app.js` — the bootstrap: constructs the document/session/store/history,
   wires every `src/ui/` module onto the shared `app` object, and kicks the
   first render.
@@ -237,6 +244,146 @@ against their authored, strictly ordered boundary series — no averaging and
 no extrapolation past the series. Approximate fixed periods must carry
 `provenance.kind: "approximation"` and are never presented as observed or
 computed.
+
+### Coordinate law
+
+A frame's `coordinate` declaration is the **executed law**, not documentation of
+one. `src/coordinate-law.js` is the single coordinate-arithmetic engine: every
+unit relationship in the program — how many hours are in a day, how long a month
+is, what a duration magnitude is worth, how a nested coordinate becomes a day
+ordinal — is computed from the governing frame's own declared ladder. Nothing
+else may carry a unit relationship as a literal. Setting hours-per-day to 23 on a
+frame changes engine occurrence math, projection layout, minimap strides,
+duration magnitudes, drag snapping, and the editor's own fields, because all of
+them ask the same object.
+
+A declaration is a list of **levels** plus optional **cycles**:
+
+```
+coordinate: {
+  kind: "gregorian" | "nested",
+  levels: [ { name, within?, radix? | transition?, names? } ],
+  cycles: [ { name, radix, offset?, names? } ],
+  fixed?: { ... }          // src/calendar-structure.js's regular-hierarchy builder
+}
+```
+
+A level declares **exactly one** of `radix` (a constant count of children) or
+`transition` (a named rule for a count that varies); the root declares neither,
+and a trailing level may declare neither, which makes it its parent subdivided
+continuously (`subsecond`). Exactly one level is the **base level** — the level
+whose unit is one day of the base measure, the unit every `days` number counts.
+It is the deepest level reached by a transition, or the finest level of a `fixed`
+block scaled by `smallestUnitDays`, or the root when there is neither.
+Everything above the base is measured by transitions; everything below divides
+down by radix. `names` on a level names its children one apiece.
+
+A **cycle** repeats over the base unit without nesting in anything. Weekdays are
+a cycle, not a level: seven days run straight through month and year boundaries,
+so a seven-name list belongs to a cycle whose `radix` is 7 and whose `offset` is
+which name lands on day zero. Modelling a weekday as a level is what made a
+seven-name weekday list get measured against the number of days in a month.
+
+**The transition registry.** A `transition` string resolves through
+`registerTransition`; a transition belongs to a **calendar family**, which is
+also a CLDR calendar scale, and a family owns the closed-form conversion for the
+whole-unit part of its ladder. `daysFromCivil`/`civilFromDays`/`daysInMonth`/
+`isLeapYear` in `src/exact.js` are the registered Gregorian family's whole-day
+kernel. **Coordinate conversion reaches them only through the family** — never as
+a bypass. The remaining direct importers are the places that still walk Gregorian
+month/year *boundaries* rather than convert coordinates (the minimap's label
+strides, Radial's month windows, the toolbar's date fields) plus RFC 5545's own
+recurrence machinery in the engine; each carries a comment saying so, and the
+first group is what ROADMAP #6's positional-conversion stage removes. Gregorian
+is the first entry, not a privileged branch: adding
+Hebrew, Islamic, Indian or any other CLDR calendar is one
+`registerCalendarFamily` call plus its transitions, and nothing else in the
+program changes.
+
+**An unresolvable declaration is an error surfaced to the author.** A transition
+string nothing implements, a radix that is not a positive whole number, a level
+nesting inside a level that does not exist, a ladder no family can execute — each
+throws with the frame and the offending name in the message. `coordinateLawError`
+is how a surface asks; `app.js` reports it on reconcile and the frame editor shows
+it in place. A law that quietly means something other than what is written is
+unauditable, and silence is what let a dead ladder look alive.
+
+**How a call site asks for arithmetic.**
+
+- `coordinateLaw(document, frameId)` — the law governing that frame, memoized per
+  document. Resolution follows `coordinateDefinition`, then the `gregorian`
+  kind/trait, then `basis`: a calendar whose basis is Wall Time inherits Wall
+  Time's law, including a radix edited there, without restating the ladder.
+- `displayLaw(document, session)` — the **primary** frame's law (see the frame
+  model: the explicit primary marker owns axis, labels, and coordinate law).
+  `session.law` carries it, assigned on every reconcile; a render pass reads that
+  rather than re-deriving per helper.
+- `law.unitDays(name)` for an exact unit length, `null` when it varies;
+  `law.meanUnitDays(name)` for the exact mean, defined for every level;
+  `law.unitsPerDay(name)` for "how many minutes in a day". The named
+  conveniences — `hoursPerDay`, `minutesPerDay`, `secondsPerDay`,
+  `minutesPerHour`, `secondsPerMinute`, `daysPerWeek`, `meanMonthDays` — resolve
+  through the declaration and fall back to the registered standard only for a
+  level this calendar never authored.
+- `law.magnitudeDays(magnitude)` / `durationMagnitudeDays(magnitude, governing)`
+  for a duration's worth in days. `governing` is a document (the magnitude's own
+  `frame` names the law) or a law. **A call site that has the document passes
+  it**; the standard fallback exists for genuinely law-free contexts, not as a
+  convenience.
+- `law.toDays` / `law.fromDays` for conversion; `law.monthNames`,
+  `law.weekdayNames`, `law.weekdayLabel`, `law.cycleIndex`, `law.namesFor` for
+  authored names.
+
+Everything is exact (`Rational`, BigInt). Pixels and layout may be floats; unit
+law may not. A memoized law is dropped when its declaration changes — by object
+identity on every lookup, and by the explicit `invalidateCoordinateLaws` the edit
+path calls, because identity alone misses an in-place mutation and the explicit
+call alone misses an undo that swaps whole records. Both together are what make
+an applied ladder edit live on the next render.
+
+**Boundaries that deliberately stay civil.** Three things speak the outside
+world's standard civil Gregorian and convert once, at the edge:
+`nowDays`'s host `Date` read; RFC 5545's own wire units and RRULE evaluation; and
+`setCivilFocus`'s "go to this calendar date" entry. Each carries a comment saying
+so. `civilCoordinateToDays`/`daysToCivilCoordinate` are the named aliases for the
+registered-standard conversion, and the name is the assertion.
+
+**ICS is an explicitly lossy boundary.** The contract:
+
+1. **Import** is always parsed as standard civil Gregorian, mapped through the
+   registered Gregorian entries. An edited or custom coordinate law never
+   reinterprets an incoming ICS time. Additionally, RFC 7529 `RSCALE` recurrence
+   rules import: `RSCALE` changes only the calendar the recurrence *counts* in,
+   never the concrete times (which RFC 7529 keeps Gregorian), so it is exactly a
+   registry lookup — `lawForCalendar(id)`, which returns null for a calendar
+   nothing implements.
+2. An `RSCALE` naming an **unregistered** calendar preserves the rule verbatim in
+   the pattern/residuals and **refuses projection honestly**, surfaced to the
+   author. It is never silently computed as though it were Gregorian.
+3. **Export** of anything standard ICS can express — Gregorian rules,
+   `UNTIL`/`COUNT` — exports as rules and round-trips. A series whose coordinate
+   law counts in a registered CLDR calendar exports as a spec-correct `RSCALE`
+   rule. Gregorian is `RSCALE`'s default, so a Gregorian rule omits the
+   parameter entirely and every existing byte is unchanged.
+4. **Export** of anything ICS cannot express — a series under a truly custom or
+   user-defined law, arbitrary-unit durations — exports as **projections**:
+   concrete occurrences, correct in wall time, rule discarded. There is no
+   X-CHRONOLOG semantic dialect for it; foreign-residual preservation is
+   unaffected. A series whose law ICS cannot express must never export its
+   coordinates as if they were Gregorian.
+5. Durations cross in **wall seconds**. A document magnitude converts to exact
+   days under its own frame's law, then to seconds through the registered
+   standard, and back the same way — so a wall hour stays a wall hour, and under
+   the registered standard law the conversion is byte-identical to what it always
+   was. `law.calendarScale()` is the question the boundary asks: it stays
+   `gregory` for a frame that merely redefined its hours (`RSCALE` governs the
+   date ladder and nothing below the base unit), and is null for a law counting in
+   no registered calendar.
+
+Positional conversion for a fully custom ladder — a `fixed`-block calendar
+converting its own year/month/day to a day ordinal — is the next stage of
+ROADMAP #6, not something to guess at. A non-positional law reads its base
+level's value as a count of days, which is what a measure frame means.
 
 ### Staples
 

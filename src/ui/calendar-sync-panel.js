@@ -1,4 +1,4 @@
-import { daysToCivilCoordinate } from "../exact.js";
+import { daysToCivilCoordinate } from "../coordinate-law.js";
 import { applyICSSnapshot, calendarSyncConnections } from "../calendar-sync.js";
 import { exportICS, importICS } from "../ics.js";
 import { clone, stapleEvents } from "../model.js";

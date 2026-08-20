@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createStructuralDocument } from "./helpers/sample-document.js";
 import { ChronologEngine } from "../src/engine.js";
-import { daysFromCivil, daysToCivilCoordinate, Rational } from "../src/exact.js";
+import { daysFromCivil, Rational } from "../src/exact.js";
+import { daysToCivilCoordinate } from "../src/coordinate-law.js";
 import { importICS } from "../src/ics.js";
 
 function calendar(count, recurring = false) {

@@ -55,7 +55,9 @@ export function createWorkspace(app, dom) {
       if (nextScroll.dataset.scrollKey === "intimate" && app.pendingIntimateRebase) saved = app.pendingIntimateRebase;
       if (nextScroll.dataset.scrollKey === "intimate" && app.pendingIntimateZoom) {
         const hourPixels = Number(nextScroll.dataset.hourPixels || 28);
-        const bufferHours = Number(nextScroll.dataset.bufferHours || 24);
+        // The governing frame's own hours-per-day, never the bare civil 24 --
+        // see src/ui/drag.js's frameHoursPerDay for the same rule.
+        const bufferHours = Number(nextScroll.dataset.bufferHours || app.session.hoursPerDay().toNumber());
         const headerPixels = Number(nextScroll.dataset.headerPixels || 70);
         saved = {
           top: headerPixels + (bufferHours + app.pendingIntimateZoom.localHour) * hourPixels - app.pendingIntimateZoom.offset,

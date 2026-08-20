@@ -1,13 +1,6 @@
 import { Rational, civilFromDays, daysFromCivil } from "./exact.js";
+import { CoordinateLaw, GREGORIAN_LAW, magnitudeLaw } from "./coordinate-law.js";
 import { eventCycleWindow, resolveEventCycle } from "./event-cycle.js";
-
-const FIXED_LEVEL_DAYS = {
-  week: "7",
-  day: "1",
-  hour: "1/24",
-  minute: "1/1440",
-  second: "1/86400"
-};
 
 export const FIXED_RADIAL_CYCLES = Object.freeze([
   { id: "fixed:day", title: "Day", days: "1" },
@@ -15,14 +8,30 @@ export const FIXED_RADIAL_CYCLES = Object.freeze([
   { id: "fixed:week", title: "Week", days: "7" }
 ]);
 
-export function cyclePeriodHint(magnitude) {
+// `governing` is the document a cycle's period is authored against (its own
+// `magnitude.frame`, normally `measure:human-time`), a CoordinateLaw
+// directly, or nothing -- resolving to the registered standard, exactly the
+// FIXED_LEVEL_DAYS table this replaces ({week:"7", day:"1", hour:"1/24", ...}
+// was a second, duplicate copy of the same factors src/exact.js used to
+// carry). `magnitudeLaw` (coordinate-law.js) does the resolution.
+//
+// Radial's contract is stricter than a plain duration
+// (`law.magnitudeDays`, which is tolerant and returns a mean-based 0/total):
+// this must refuse to draw a cycle it cannot resolve EXACTLY. `law.unitDays`
+// is null for precisely the levels whose length varies under this law (a
+// Gregorian month) or that this law does not declare and has no standard
+// fallback for, so checking each level's `unitDays` individually -- rather
+// than delegating to `magnitudeDays` -- is what keeps a month-only magnitude
+// unsupported here while still being a legitimate duration elsewhere.
+export function cyclePeriodHint(magnitude, governing = null) {
   const levels = magnitude?.value?.levels;
   if (!Array.isArray(levels) || levels.length === 0) return null;
+  const law = magnitudeLaw(magnitude, governing);
   let total = Rational.parse(0);
   try {
     for (const part of levels) {
-      const factor = FIXED_LEVEL_DAYS[part.level];
-      if (factor === undefined) return null;
+      const factor = law.unitDays(part.level);
+      if (factor === null) return null;
       total = total.add(Rational.parse(part.value).mul(factor));
     }
   } catch {
@@ -31,6 +40,13 @@ export function cyclePeriodHint(magnitude) {
   return total.compare(0) > 0 ? total : null;
 }
 
+// This walk and the `daysFromCivil` boundary lookups below it are the
+// registered Gregorian ladder's OWN month-boundary arithmetic (the 400-year
+// era formula), not something a generic positional conversion can derive
+// from per-level counts. Generic positional conversion for a custom,
+// non-Gregorian ladder (a frame authoring its own multi-level calendar with
+// variable-length units) is explicitly out of scope for this wave -- see
+// CoordinateLaw.toDays's own comment on the same limitation.
 function addGregorianMonths(civil, count) {
   const index = civil.year * 12n + civil.month - 1n + BigInt(count);
   return { year: index / 12n, month: index % 12n + 1n };
@@ -44,10 +60,10 @@ function addGregorianMonths(civil, count) {
  * month has a mean number of days.  Formula- and event-defined cycles remain
  * intentionally unsupported until the schema exposes their boundaries.
  */
-export function resolveRadialCycle(options, activeCycle, focus = null) {
+export function resolveRadialCycle(options, activeCycle, focus = null, governing = null) {
   const choice = options.find((cycle) => cycle.id === activeCycle) || options[0] || null;
   if (!choice) return null;
-  const fixed = cyclePeriodHint(choice.period || { value: choice.value?.levels })
+  const fixed = cyclePeriodHint(choice.period || { value: choice.value?.levels }, governing)
     || (choice.days ? positiveRadialCycle(choice.days) : null);
   if (fixed) return { id: choice.id, period: fixed, dynamic: false, unsupported: false };
 
@@ -111,11 +127,21 @@ export function positiveRadialCycle(value, fallback = "29.530588853") {
 }
 
 export function radialGuideSettings(session) {
+  // `session` is usually a live ViewSession (`session.law` always set), but
+  // this also runs against a bare persisted-values object (see
+  // normalizeRadialGuideValues below and this module's own tests) that
+  // carries no law at all -- falls back to the registered standard rather
+  // than throwing on `session.law.hoursPerDay`.
+  const law = session?.law instanceof CoordinateLaw ? session.law : GREGORIAN_LAW;
+  const hoursPerDay = Math.max(1, Math.min(64, Math.round(law.hoursPerDay().toNumber())));
   const cycleDays = positiveRadialCycle(session.radialCycle).toNumber();
   const requestedDivisions = Math.floor(Number(session.radialDivisions));
   const divisions = Number.isFinite(requestedDivisions) && requestedDivisions > 0
     ? Math.min(64, requestedDivisions)
-    : cycleDays >= 5 ? Math.max(1, Math.min(64, Math.round(cycleDays))) : 24;
+    // One tick per hour when the cycle is about a day long, in THIS law's
+    // hours -- a 23-hour day gets 23 ticks around the ring, not 24 with one
+    // that marks nothing.
+    : cycleDays >= 5 ? Math.max(1, Math.min(64, Math.round(cycleDays))) : hoursPerDay;
   const requestedMajor = Math.floor(Number(session.radialMajorEvery));
   const majorEvery = Number.isFinite(requestedMajor) && requestedMajor > 0
     ? Math.min(divisions, requestedMajor)

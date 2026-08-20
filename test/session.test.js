@@ -58,10 +58,15 @@ test("seven explicit lenses retain their own useful window sizes", () => {
   assert.equal(session.visibleSpan(), 7);
   session.setLens("tactical");
   assert.equal(session.visibleSpan(), 20);
+  // A month-sized window is now exactly as long as the governing law says a
+  // month is, and an unconfigured session's law is the registered Gregorian one:
+  // 146097/4800 days per month, so twelve of them are 365.2425 days. The old
+  // 365.25 came from the literal 30.4375, which is the JULIAN mean year over
+  // twelve -- a month length no calendar in this program actually uses.
   session.setLens("strategic");
-  assert.equal(session.visibleSpan(), 365.25);
+  assert.equal(session.visibleSpan(), 365.2425);
   session.setLens("wall");
-  assert.equal(session.visibleSpan(), 182.625);
+  assert.equal(session.visibleSpan(), 182.62125);
   session.setLens("lines");
   assert.equal(session.visibleSpan(), 14);
   session.setLens("spiral");

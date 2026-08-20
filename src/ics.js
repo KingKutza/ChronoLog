@@ -1,10 +1,18 @@
 import {
   Rational,
-  civilCoordinateToDays,
   coordinate,
-  daysToCivilCoordinate,
   levelValue
 } from "./exact.js";
+import {
+  civilCoordinateToDays,
+  coordinateLaw,
+  daysToCivilCoordinate,
+  durationMagnitudeDays,
+  GREGORIAN_LAW,
+  GREGORY,
+  lawForCalendar,
+  magnitudeLaw
+} from "./coordinate-law.js";
 import { seriesEffectiveUntilDays } from "./engine.js";
 import {
   addEvent,
@@ -198,6 +206,12 @@ export function parseICSDate(propertyValue) {
   };
 }
 
+// RFC 5545's own DURATION value type: a week is always 7*86400 wall seconds,
+// a day always 86400, an hour always 3600, a minute always 60 -- these are the
+// WIRE FORMAT's units, fixed by the spec, never this document's own coordinate
+// law. Melting them onto a document law would corrupt every import (an
+// imported "PT2H" always means 7200 wall seconds, even into a frame whose own
+// hour is not 1/24 of its own day).
 function parseDuration(value) {
   const match = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(value || "");
   if (!match) return null;
@@ -218,6 +232,33 @@ export function parseRRule(value = "") {
       return [part.slice(0, index).toUpperCase(), part.slice(index + 1)];
     })
   );
+}
+
+// RFC 7529: RSCALE is a key inside the RRULE value text itself
+// (`RRULE:RSCALE=CHINESE;FREQ=YEARLY`), so `parseRRule` above already captures
+// it as an ordinary entry -- no separate parsing is needed on import, and the
+// rule's own text (`pattern.rawRule`) already preserves it verbatim regardless
+// of whether the calendar it names is registered. This is the one place the
+// value gets NORMALIZED for export: a rule that counts in the registered
+// `gregory` scale omits the parameter entirely (RSCALE's own default, and the
+// reason a plain, RSCALE-free import re-exports byte-identical), a rule in
+// some OTHER registered scale re-emits it in RFC 7529's canonical uppercase
+// spelling, and a rule naming a calendar nothing here implements is passed
+// through exactly as authored -- this module cannot assert a spelling is
+// spec-correct for a calendar it does not know, and the projection refusal
+// (src/engine.js's `unsupportedCalendarScale`) is what tells the author it
+// could not be rendered, not this function silently rewriting their text.
+function normalizedRuleForExport(rrule) {
+  const requested = rrule?.RSCALE;
+  if (!requested) return rrule;
+  const law = lawForCalendar(requested);
+  if (!law) return rrule;
+  const scale = law.calendarScale();
+  if (scale === GREGORY) {
+    const { RSCALE, ...rest } = rrule;
+    return rest;
+  }
+  return { ...rrule, RSCALE: scale.toUpperCase() };
 }
 
 function recurrencePatternSource() {
@@ -294,11 +335,32 @@ function entryDurationSeconds(entry, warnings) {
         `Event ${entry.uid}: DTSTART and DTEND use different time zones; duration is their wall-clock difference`
       );
     }
+    // DTSTART/DTEND are both parsed as standard civil Gregorian (the ICS
+    // ruling's import boundary), so their difference is a genuine wall-clock
+    // span; this is the STANDARD boundary's days-to-seconds conversion, named
+    // rather than a bare 86400 so it reads as "the wire format's day", not
+    // this document's own law.
     return civilCoordinateToDays(entry.end.coordinate)
       .sub(civilCoordinateToDays(entry.start.coordinate))
-      .mul(86400);
+      .mul(GREGORIAN_LAW.secondsPerDay());
   }
   return parseDuration(property(entry.component, "DURATION")?.value) || Rational.parse(0);
+}
+
+// Wall seconds (always RFC 5545's own 86400/day, from DTSTART/DTEND or a
+// DURATION value -- see `entryDurationSeconds` and `parseDuration`) converted
+// into the STORING frame's own magnitude, mirroring `magnitudeSecondsFromMagnitude`'s
+// export direction. Two exact steps, never combined into one literal: wall
+// seconds -> exact days through the REGISTERED Gregorian boundary, then days ->
+// a count of the storing frame's own "second" unit -- so a wall hour survives
+// as a wall hour even when that frame's own second is not 1/86400 of its own
+// day. Under an unedited law this frame's own second already is 1/86400, so
+// the round trip returns the exact same wall-second count unchanged (the
+// invariant the existing round-trip tests pin).
+function magnitudeFromWallSeconds(wallSeconds, governing, frame = "measure:human-time") {
+  const days = wallSeconds.div(GREGORIAN_LAW.secondsPerDay());
+  const law = magnitudeLaw({ frame }, governing);
+  return durationMagnitude(days.mul(law.unitsPerDay("second")).toJSON(), "second", frame);
 }
 
 // A day-fraction magnitude, exact throughout (Rational text, never a float) --
@@ -365,7 +427,7 @@ function eventFromEntry(document, entry, warnings) {
   const event = addEvent(document, {
     traits: ["event", ...(entry.task ? ["task"] : [])],
     magnitudes: {
-      duration: durationMagnitude(duration.toJSON(), "second")
+      duration: magnitudeFromWallSeconds(duration, document)
     },
     payload: {
       title: entry.title,
@@ -613,7 +675,7 @@ function importFollowingSegmentStaple(document, segmentEntry, pattern, frame, wa
         rrule: segmentEntry.rrule ? parseRRule(segmentEntry.rrule.value) : {},
         coordinate: segmentEntry.start?.coordinate,
         frame: frame.id,
-        magnitude: durationMagnitude(seconds.toJSON(), "second"),
+        magnitude: magnitudeFromWallSeconds(seconds, document),
         exdates: segmentEntry.exdates.map((date) => occurrenceKey(date, segmentEntry.start).toJSON())
       }
     }
@@ -702,27 +764,52 @@ function coordinateToICS(value, dateOnly = false, utc = false) {
   return `${year}${month}${day}T${hour}${minute}${second}${utc ? "Z" : ""}`;
 }
 
-function magnitudeSecondsFromMagnitude(magnitude) {
-  const levels = magnitude?.value?.levels || [];
-  let seconds = Rational.parse(0);
-  const factors = {
-    week: 604800,
-    day: 86400,
-    hour: 3600,
-    minute: 60,
-    second: 1,
-    subsecond: 1
-  };
-  for (const level of levels) {
-    if (factors[level.level] !== undefined) {
-      seconds = seconds.add(Rational.parse(level.value).mul(factors[level.level]));
-    }
-  }
-  return seconds;
+// Point 4 of the ICS ruling: a coordinate is only safe to format straight into
+// ICS text when its OWN governing law reads year/month/day/hour/minute/second
+// exactly as RFC 5545 does -- the same calendar family, a month+day ladder
+// (not year+day-of-year, which `coordinateToICS` would misread as day-of-
+// month), and standard 24/60/60 radices below the date. Anything else -- an
+// edited hour radix (the owner's Hour:Day:23), a `fixed` block, a formula law
+// -- must be converted at the boundary instead of emitted as though its level
+// values already meant what ICS expects.
+function isIcsNativeLaw(law) {
+  return law.calendarScale() === GREGORY
+    && law.has("month") && law.has("day")
+    && law.hoursPerDay().compare(24) === 0
+    && law.minutesPerHour().compare(60) === 0
+    && law.secondsPerMinute().compare(60) === 0;
 }
 
-function magnitudeSeconds(event) {
-  return magnitudeSecondsFromMagnitude(event?.magnitudes?.duration);
+// The one place a coordinate crosses from "governed by some frame's own law"
+// to "ICS text": a coordinate under the registered standard passes through
+// unchanged (it already IS ICS's own language, and existing round-trips stay
+// byte-identical), and any other law is resolved to an exact day ordinal
+// through ITS OWN law and re-expressed through the registered boundary --
+// never formatted as though its own level values were already Gregorian.
+function icsBoundaryCoordinate(document, frameId, value) {
+  if (!value || !frameId) return value;
+  let law;
+  try {
+    law = coordinateLaw(document, frameId);
+  } catch {
+    return value;
+  }
+  return isIcsNativeLaw(law) ? value : daysToCivilCoordinate(law.toDays(value));
+}
+
+// A document magnitude's worth in WALL SECONDS for the ICS wire -- two exact
+// steps, never combined: the magnitude's OWN frame law resolves it to exact
+// days first (a duration under an edited law, e.g. "2 hours" on a 23-hour-day
+// frame, is 2/23 of a day, not 7200 seconds), then the REGISTERED Gregorian
+// boundary turns those days into the standard seconds RFC 5545's DURATION and
+// DTEND expect. Under the registered standard law this is byte-identical to
+// the old {week:604800,...} factor table: 2 hours -> 7200 either way.
+function magnitudeSecondsFromMagnitude(magnitude, governing) {
+  return durationMagnitudeDays(magnitude, governing).mul(GREGORIAN_LAW.secondsPerDay());
+}
+
+function magnitudeSeconds(document, event) {
+  return magnitudeSecondsFromMagnitude(event?.magnitudes?.duration, document);
 }
 
 function startParams(relation) {
@@ -770,13 +857,13 @@ function eventComponent(document, event, relation, now, componentName = "VEVENT"
     const completed = taskRelations.find((item) => item.role === "completed");
     if (observed?.coordinate) {
       if (observed.parameters?.stamp) {
-        setProperty(component, "DTSTAMP", coordinateToICS(observed.coordinate, false, true));
+        setProperty(component, "DTSTAMP", coordinateToICS(icsBoundaryCoordinate(document, observed.frame, observed.coordinate), false, true));
       } else {
         setProperty(
           component,
           "DTSTART",
           coordinateToICS(
-            observed.coordinate,
+            icsBoundaryCoordinate(document, observed.frame, observed.coordinate),
             Boolean(observed.parameters?.dateOnly),
             Boolean(observed.parameters?.utc)
           ),
@@ -788,7 +875,7 @@ function eventComponent(document, event, relation, now, componentName = "VEVENT"
       setProperty(
         component,
         "COMPLETED",
-        coordinateToICS(completed.coordinate, false, completed.parameters?.utc !== false)
+        coordinateToICS(icsBoundaryCoordinate(document, completed.frame, completed.coordinate), false, completed.parameters?.utc !== false)
       );
     } else {
       removeProperty(component, "COMPLETED");
@@ -797,10 +884,17 @@ function eventComponent(document, event, relation, now, componentName = "VEVENT"
     const dateOnly = Boolean(relation.parameters?.dateOnly);
     const utc = Boolean(relation.parameters?.utc);
     const params = startParams(relation);
-    setProperty(component, "DTSTART", coordinateToICS(relation.coordinate, dateOnly, utc), params);
-    const seconds = magnitudeSeconds(event);
+    setProperty(component, "DTSTART", coordinateToICS(icsBoundaryCoordinate(document, relation.frame, relation.coordinate), dateOnly, utc), params);
+    const seconds = magnitudeSeconds(document, event);
     if (seconds.compare(0) > 0) {
-      const end = civilCoordinateToDays(relation.coordinate).add(seconds.div(86400));
+      // `relation.coordinate` is read through ITS OWN governing law here, not
+      // the standard boundary -- an edited Wall Time (the owner's Hour:Day:23)
+      // must not have its hour value reinterpreted as a standard hour before
+      // DTEND is derived from it. The result is an exact day ordinal, which
+      // IS law-agnostic, so re-expressing it through the registered boundary
+      // afterward is correct regardless of which law produced it.
+      const startDays = coordinateLaw(document, relation.frame).toDays(relation.coordinate);
+      const end = startDays.add(seconds.div(GREGORIAN_LAW.secondsPerDay()));
       setProperty(component, "DTEND", coordinateToICS(daysToCivilCoordinate(end), dateOnly, utc), params);
       removeProperty(component, "DURATION");
     }
@@ -843,11 +937,16 @@ function applyAnchorAnnotations(component, document, engine, event) {
   const extent = resolveObjectExtent(document, engine, event.id);
   if (extent.anchors.length && extent.frame && extent.startDays !== null && extent.endDays !== null) {
     try {
-      const startCoordinate = engine.daysCoordinate(extent.frame, extent.startDays);
-      setProperty(component, "DTSTART", coordinateToICS(startCoordinate, false, false));
+      // `extent.startDays`/`extent.endDays` are already exact day ordinals --
+      // law-agnostic by construction -- so this goes straight through the
+      // registered boundary rather than round-tripping through `extent.frame`'s
+      // own law only to reformat as ICS text anyway (point 4 of the ICS
+      // ruling: never emit a non-standard law's raw level values as if they
+      // were already Gregorian).
+      setProperty(component, "DTSTART", coordinateToICS(daysToCivilCoordinate(extent.startDays), false, false));
       const durationDays = extent.endDays.sub(extent.startDays);
       if (durationDays.compare(0) > 0) {
-        setProperty(component, "DTEND", coordinateToICS(engine.daysCoordinate(extent.frame, extent.endDays), false, false));
+        setProperty(component, "DTEND", coordinateToICS(daysToCivilCoordinate(extent.endDays), false, false));
       } else {
         removeProperty(component, "DTEND");
       }
@@ -860,18 +959,18 @@ function applyAnchorAnnotations(component, document, engine, event) {
     appendProperty(
       component,
       "X-CHRONOLOG-ANCHOR",
-      coordinateToICS(staple.coordinate, false, false),
+      coordinateToICS(icsBoundaryCoordinate(document, staple.frame, staple.coordinate), false, false),
       [
         { name: "ID", values: [staple.id] },
         { name: "ROLE", values: [staple.role || "start"] },
         ...(staple.payload?.offset
-          ? [{ name: "OFFSET", values: [durationMagnitudeSecondsAsDays(staple.payload.offset)] }]
+          ? [{ name: "OFFSET", values: [durationMagnitudeAsDays(staple.payload.offset, document)] }]
           : [])
       ]
     );
     if (staple.spread) {
-      const before = staple.spread.before ? durationMagnitudeSecondsAsDays(staple.spread.before) : null;
-      const after = staple.spread.after ? durationMagnitudeSecondsAsDays(staple.spread.after) : null;
+      const before = staple.spread.before ? durationMagnitudeAsDays(staple.spread.before, document) : null;
+      const after = staple.spread.after ? durationMagnitudeAsDays(staple.spread.after, document) : null;
       if (before || after) {
         appendProperty(component, "X-CHRONOLOG-SPREAD", staple.role || "start", [
           { name: "ID", values: [staple.id] },
@@ -883,11 +982,14 @@ function applyAnchorAnnotations(component, document, engine, event) {
   }
 }
 
-// The exact day-fraction text a magnitude resolves to (`Rational.toJSON`,
-// never a float) -- what `dayFractionMagnitude` on the import side parses
-// straight back with no rounding.
-function durationMagnitudeSecondsAsDays(magnitude) {
-  return magnitudeSecondsFromMagnitude(magnitude).div(86400).toJSON();
+// The exact day-fraction text a magnitude resolves to under ITS OWN frame's
+// law (`Rational.toJSON`, never a float) -- what `dayFractionMagnitude` on the
+// import side parses straight back with no rounding. Reads through
+// `durationMagnitudeDays` directly rather than a private seconds conversion:
+// an OFFSET/SPREAD magnitude on an edited human-time law must resolve to the
+// same days here as everywhere else that reads it.
+function durationMagnitudeAsDays(magnitude, governing) {
+  return durationMagnitudeDays(magnitude, governing).toJSON();
 }
 
 // The ICS text an RRULE's own UNTIL parses to, in exact Rational days -- the
@@ -1005,6 +1107,7 @@ function followingSegmentRuleText(engine, pattern, segment) {
       }
     }
   }
+  rrule = normalizedRuleForExport(rrule);
   return Object.keys(rrule).length ? Object.entries(rrule).map(([key, value]) => `${key}=${value}`).join(";") : "";
 }
 
@@ -1036,12 +1139,15 @@ function followingSegmentComponent(document, engine, pattern, segment, index, ba
     : templateRelation?.parameters?.timeZone
       ? [{ name: "TZID", values: [templateRelation.parameters.timeZone] }]
       : [];
-  setProperty(component, "DTSTART", coordinateToICS(segment.baseCoordinate, dateOnly, utc), params);
+  const segmentFrame = segment.frame || pattern.frame;
+  setProperty(component, "DTSTART", coordinateToICS(icsBoundaryCoordinate(document, segmentFrame, segment.baseCoordinate), dateOnly, utc), params);
   const magnitude = segment.magnitude || templateEvent?.magnitudes?.duration;
-  const seconds = magnitudeSecondsFromMagnitude(magnitude);
+  const seconds = magnitudeSecondsFromMagnitude(magnitude, document);
   if (seconds.compare(0) > 0) {
-    const startDays = civilCoordinateToDays(segment.baseCoordinate);
-    const endDays = startDays.add(seconds.div(86400));
+    // Read through the SEGMENT's own governing law, not the standard boundary
+    // -- same reasoning as `eventComponent`'s DTEND derivation above.
+    const startDays = coordinateLaw(document, segmentFrame).toDays(segment.baseCoordinate);
+    const endDays = startDays.add(seconds.div(GREGORIAN_LAW.secondsPerDay()));
     setProperty(component, "DTEND", coordinateToICS(daysToCivilCoordinate(endDays), dateOnly, utc), params);
   }
   setProperty(component, "RRULE", followingSegmentRuleText(engine, pattern, segment));
@@ -1059,7 +1165,7 @@ function followingSegmentComponent(document, engine, pattern, segment, index, ba
     setProperty(
       component,
       "X-CHRONOLOG-INFLECTION",
-      coordinateToICS(opener.coordinate, false, false),
+      coordinateToICS(icsBoundaryCoordinate(document, opener.frame, opener.coordinate), false, false),
       [{ name: "FRAME", values: [opener.frame] }]
     );
   }
@@ -1099,13 +1205,19 @@ export function exportICS(document, {
     (pattern) => pattern.kind === "ics-rrule" && pattern.frame === frame
   );
   const templateRelations = new Set(nativePatterns.map((pattern) => pattern.templateRelation));
-  const windowStart = start ? civilCoordinateToDays(start) : null;
-  const windowEnd = end ? civilCoordinateToDays(end) : null;
+  // `start`/`end`/every filtered relation's own coordinate are all governed by
+  // this same calendar frame (the filter below enforces `relation.frame ===
+  // frame`), so the window comparison reads all three through THIS frame's own
+  // law rather than the standard boundary -- an edited Wall Time must not have
+  // its own export window misread as standard civil time.
+  const frameLaw = coordinateLaw(document, frame);
+  const windowStart = start ? frameLaw.toDays(start) : null;
+  const windowEnd = end ? frameLaw.toDays(end) : null;
   const attachments = Object.values(document.relations).filter((relation) => {
     if (relation.type !== "attachment" || relation.frame !== frame) return false;
     if (templateRelations.has(relation.id)) return true;
     if (!windowStart || !windowEnd || !relation.coordinate) return true;
-    const day = civilCoordinateToDays(relation.coordinate);
+    const day = frameLaw.toDays(relation.coordinate);
     return day.compare(windowStart) >= 0 && day.compare(windowEnd) <= 0;
   });
 
@@ -1166,8 +1278,9 @@ export function exportICS(document, {
           }
         }
       }
-      const rule = effectiveRrule && Object.keys(effectiveRrule).length
-        ? Object.entries(effectiveRrule).map(([key, value]) => `${key}=${value}`).join(";")
+      const normalizedRrule = effectiveRrule ? normalizedRuleForExport(effectiveRrule) : effectiveRrule;
+      const rule = normalizedRrule && Object.keys(normalizedRrule).length
+        ? Object.entries(normalizedRrule).map(([key, value]) => `${key}=${value}`).join(";")
         : pattern.rawRule?.value || "";
       setProperty(component, "RRULE", rule);
       const exdateIndex = component.properties.findIndex((item) => item.name === "EXDATE");

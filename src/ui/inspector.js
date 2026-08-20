@@ -1,10 +1,10 @@
 import {
   Rational,
   coordinate,
-  daysToCivilCoordinate,
   formatCivil,
   levelValue
 } from "../exact.js";
+import { daysToCivilCoordinate, magnitudeLaw } from "../coordinate-law.js";
 import {
   addEvent,
   addPattern,
@@ -12,7 +12,6 @@ import {
   clone,
   createId,
   durationMagnitude,
-  durationMagnitudeDays,
   eventRelations,
   putStaple,
   removeStaple
@@ -214,7 +213,10 @@ export function buildStapleInput({
 // was fetched under ("series" or "object") -- so the list's markup is a dumb
 // map over this, traceable by hand, and this decision is what a test drives
 // directly instead of the DOM.
-export function stapleRowModel(staple, scope) {
+// `governing`, optional and trailing, is the document a spread magnitude's
+// days should resolve against -- absent (every existing direct test call),
+// this reads the registered standard, exactly as before.
+export function stapleRowModel(staple, scope, governing = null) {
   const definition = stapleKind(staple?.kind);
   const parts = relationDateParts(staple);
   return {
@@ -225,7 +227,7 @@ export function stapleRowModel(staple, scope) {
     role: staple?.role || null,
     date: parts.date,
     time: parts.time,
-    fuzzy: isFuzzyStaple(staple)
+    fuzzy: isFuzzyStaple(staple, governing)
   };
 }
 
@@ -475,14 +477,36 @@ export function createInspector(app) {
     });
   }
 
+  // What the user typed as "90 minutes" must mean 90 of THIS EVENT's OWN
+  // frame's minutes (normally `measure:human-time`, whose law an edit to
+  // Hour:Day:23 changes) -- so the whole/fractional check below reads through
+  // that law's own `unitsPerDay`, not the fixed {day:86400,hour:3600,
+  // minute:60} table it replaces. Under an unedited law this is
+  // byte-identical to before: a day is still 86400 seconds, an hour 3600.
   function friendlyDuration(event) {
-    const seconds = durationMagnitudeDays(event?.magnitudes?.duration).mul(86400).toNumber();
-    if (!Number.isFinite(seconds) || seconds <= 0) return { amount: "0", unit: "minute" };
-    for (const [unit, factor] of [["day", 86400], ["hour", 3600], ["minute", 60]]) {
-      const amount = seconds / factor;
-      if (Number.isInteger(amount)) return { amount: String(amount), unit };
+    const magnitude = event?.magnitudes?.duration;
+    const law = magnitudeLaw(magnitude, app.chronolog);
+    const days = law.magnitudeDays(magnitude);
+    if (days.compare(0) <= 0) return { amount: "0", unit: "minute" };
+    for (const unit of ["day", "hour", "minute"]) {
+      const perDay = law.unitsPerDay(unit);
+      if (perDay === null) continue;
+      const amount = days.mul(perDay);
+      if (amount.d === 1n) return { amount: amount.toJSON(), unit };
     }
-    return { amount: String(Math.round(seconds)), unit: "second" };
+    const totalSeconds = days.mul(law.secondsPerDay()).add(new Rational(1n, 2n)).floor();
+    return { amount: totalSeconds.toString(), unit: "second" };
+  }
+
+  // Every duration this editor freshly authors defaults to `measure:human-time`
+  // (`durationMagnitude`'s own default frame), so a newly created event's
+  // duration must round-trip through THAT frame's own law -- an edited
+  // human-time law (the owner's Hour:Day:23) has to apply to a value computed
+  // here, not only to display. `magnitudeLaw`'s own missing-frame fallback
+  // (the registered standard) keeps this safe for a document that has not
+  // authored the frame at all.
+  function humanTimeLaw() {
+    return magnitudeLaw({ frame: "measure:human-time" }, app.chronolog);
   }
 
   function temporalRelations(eventId) {
@@ -559,7 +583,11 @@ export function createInspector(app) {
       );
     }
     const day = Rational.parse(nearDay);
-    const slack = Rational.parse(1).div(86400);
+    // One nominal second of slack either side of the rendered day, under the
+    // SESSION's own display law (`app.session.law`, set by app.js) rather than
+    // a bare 86400 -- a query window built from the standard assumption would
+    // itself be the class of silent mismatch this fact-lookup exists to avoid.
+    const slack = Rational.parse(1).div(app.session.law.secondsPerDay());
     return engine.queryFacts({
       frame: session.activeFrame,
       start: daysToCivilCoordinate(day.sub(slack)),
@@ -1047,8 +1075,8 @@ export function createInspector(app) {
     function refreshStaplesSection() {
       const pattern = findRecurrencePattern(chronolog, eventId);
       const rows = [
-        ...(pattern ? staplesForSeries(chronolog, pattern.id).map((staple) => stapleRowModel(staple, "series")) : []),
-        ...staplesForObject(chronolog, eventId).map((staple) => stapleRowModel(staple, "object"))
+        ...(pattern ? staplesForSeries(chronolog, pattern.id).map((staple) => stapleRowModel(staple, "series", chronolog)) : []),
+        ...staplesForObject(chronolog, eventId).map((staple) => stapleRowModel(staple, "object", chronolog))
       ];
       stapleList.innerHTML = rows.map(stapleRowMarkup).join("") || `<li class="staple-list-empty">No staples yet.</li>`;
       stapleExtent.innerHTML = extentReadoutMarkup(extentReadoutModel(resolveObjectExtent(chronolog, engine, eventId)));
@@ -1384,7 +1412,7 @@ export function createInspector(app) {
     let orderedEnd = start.compare(end) <= 0 ? end : start;
     if (!definition.zeroDuration && orderedEnd.compare(orderedStart) === 0) {
       orderedEnd = orderedStart.add(session.currentLens() === "intimate"
-        ? Rational.parse(session.intimateGrain).div(1440)
+        ? Rational.parse(session.intimateGrain).div(app.session.law.minutesPerDay())
         : 1);
     }
     try {
@@ -1394,7 +1422,7 @@ export function createInspector(app) {
           traits: traitsForObjectKind([], objectKind),
           magnitudes: {
             duration: durationMagnitude(
-              definition.zeroDuration ? "0" : orderedEnd.sub(orderedStart).mul(86400).toJSON(),
+              definition.zeroDuration ? "0" : orderedEnd.sub(orderedStart).mul(humanTimeLaw().secondsPerDay()).toJSON(),
               "second"
             )
           },

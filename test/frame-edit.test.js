@@ -44,9 +44,12 @@ test("fixed calendar editor rejects ambiguous hierarchy input and leaves non-fix
   assert.throws(() => buildFixedCalendarStructure({
     units: [{ name: "year" }, { name: "month", perParent: "8.5" }]
   }), /positive whole number/);
+  // A count refusal states BOTH numbers and names the unit. The old wording
+  // ("must contain exactly one name for each month") told an author their list
+  // was wrong without ever showing them what it was measured against.
   assert.throws(() => buildFixedCalendarStructure({
     units: [{ name: "year" }, { name: "month", perParent: "8", labels: "one, two" }]
-  }), /exactly one name/);
+  }), /month names needs 8 names, one for each month; 2 were given\./);
   assert.equal(editableFixedCalendarStructure({ coordinate: { kind: "nested", levels: [{ name: "moon" }] } }), null);
 });
 
@@ -60,15 +63,20 @@ test("fixed calendar editor does not offer to overwrite an advanced period", () 
 
 test("frame authoring exposes temporal controls only to temporal capabilities", () => {
   assert.deepEqual(frameAuthoringCapabilities("group"), {
-    basis: false, fixedCalendar: false, observedBoundaries: false, coordinate: false, periodData: false
+    basis: false, calendarStructure: false, fixedCalendar: false, observedBoundaries: false, coordinate: false, periodData: false
   });
   assert.deepEqual(frameAuthoringCapabilities("importance"), {
-    basis: false, fixedCalendar: false, observedBoundaries: false, coordinate: false, periodData: false
+    basis: false, calendarStructure: false, fixedCalendar: false, observedBoundaries: false, coordinate: false, periodData: false
   });
   assert.deepEqual(frameAuthoringCapabilities("calendar"), {
-    basis: true, fixedCalendar: true, observedBoundaries: true, coordinate: true, periodData: true
+    basis: true, calendarStructure: true, fixedCalendar: true, observedBoundaries: true, coordinate: true, periodData: true
   });
   assert.equal(frameAuthoringCapabilities("cycle").observedBoundaries, true);
   assert.equal(frameAuthoringCapabilities("line").coordinate, true);
+  // Structure authoring follows the coordinate capability, not the "calendar"
+  // kind: `frame:wall-time` is a LINE and is also the frame every derived
+  // calendar inherits its structure from.
+  assert.equal(frameAuthoringCapabilities("line").calendarStructure, true);
+  assert.equal(frameAuthoringCapabilities("line").fixedCalendar, true);
   assert.equal(frameAuthoringCapabilities("group", ["set", "group", "cycle"]).observedBoundaries, true);
 });

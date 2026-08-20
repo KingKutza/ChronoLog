@@ -1,4 +1,5 @@
 import { Rational, civilFromDays, daysFromCivil, floorDiv, floorMod } from "./exact.js";
+import { GREGORIAN_LAW } from "./coordinate-law.js";
 
 // Minimap magnitude, dot-field geometry, and label granularity. No DOM code
 // lives here, so the whole visual contract is testable; `renderMinimap` in
@@ -141,9 +142,13 @@ export function minimapColumnReach(dots, rows, baseline) {
   return { above, below };
 }
 
-const MONTH_ABBREVIATIONS = Object.freeze([
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-]);
+// A three-letter month name is always derived from the law's own authored
+// name (`monthNames()`), never a parallel table -- an authored month name
+// unlike "January" must still be able to show up abbreviated here.
+function monthAbbreviation(monthOneBased, law) {
+  const name = law.monthNames()[Number(monthOneBased) - 1];
+  return name ? name.slice(0, 3) : "";
+}
 
 // The finest label level each lens may use. A lens never labels more finely
 // than this, and the ladder below coarsens from here until the labels fit:
@@ -199,7 +204,21 @@ const LABEL_LADDERS = Object.freeze({
 // characters and "Aug 18 12:00" is twelve.
 const LABEL_BUDGET = Object.freeze({ hour: 12, day: 16, month: 14, quarter: 18 });
 
-const STRIDE_DAYS = Object.freeze({ hour: 1 / 24, day: 1, month: 30.436875 });
+// The real day-length of one stride unit, under a law -- an hour is that
+// law's own `unitDays` (exact 1/23 on a 23-hour frame, not a fixed 1/24), a
+// day is always the base unit's own length, and a month is `meanMonthDays()`
+// (an exact 146097/4800 by default, not the float literal 30.436875 this
+// used to carry). This feeds only the analytic "would this rung even fit"
+// estimate below, so a float result here is a UI heuristic, never a stored
+// coordinate.
+function strideUnitDays(unit, law) {
+  if (unit === "hour") {
+    const exact = law.unitDays("hour") ?? law.meanUnitDays("hour");
+    return exact ? exact.toNumber() : 1 / law.hoursPerDay().toNumber();
+  }
+  if (unit === "month") return law.meanMonthDays().toNumber();
+  return 1;
+}
 
 // The format a stride produces. Only `quarter` outranks its own stride unit.
 function strideFormat(unit, level) {
@@ -207,6 +226,11 @@ function strideFormat(unit, level) {
   return unit;
 }
 
+// This is the registered Gregorian ladder's own month-boundary walk (12
+// months per year, civil year/month arithmetic). A declaration whose month
+// ladder is not Gregorian needs its own walk to land ticks on ITS month
+// boundaries; generic positional conversion for a custom ladder is out of
+// scope for this wave, so this stays literal rather than guessing one.
 function monthStarts(start, end, step) {
   const startCivil = civilFromDays(start.floor());
   const endCivil = civilFromDays(end.ceil());
@@ -235,24 +259,29 @@ function dayStarts(start, end, step) {
   return days;
 }
 
-function hourStarts(start, end, step) {
-  const perDay = 24 / step;
+function hourStarts(start, end, step, law) {
+  const hoursPerDay = law.hoursPerDay();
+  // `step` is chosen from LABEL_LADDERS.hour, tuned to divide 24 evenly; a
+  // governing law whose day holds a different number of hours may leave a
+  // shorter last slot rather than an exact division, which `ceil` here
+  // guarantees still reaches the end of the day instead of falling short.
+  const perDay = Math.max(1, Math.ceil(hoursPerDay.toNumber() / step));
   const first = start.floor();
   const last = end.ceil();
   const days = [];
   for (let day = first; day <= last; day += 1n) {
     for (let slot = 0; slot < perDay; slot += 1) {
-      days.push(new Rational(day).add(Rational.parse(slot * step).div(24)));
+      days.push(new Rational(day).add(Rational.parse(slot * step).div(hoursPerDay)));
     }
   }
   return days;
 }
 
-function strideTicks(start, end, unit, step) {
+function strideTicks(start, end, unit, step, law) {
   const all = unit === "month"
     ? monthStarts(start, end, step)
     : unit === "hour"
-      ? hourStarts(start, end, step)
+      ? hourStarts(start, end, step, law)
       : dayStarts(start, end, step);
   return all.filter((value) => value.compare(start) >= 0 && value.compare(end) <= 0);
 }
@@ -262,7 +291,11 @@ function strideTicks(start, end, unit, step) {
 // decoration rather than a coordinate. The ladder is walked coarsest-fitting
 // first; the analytic estimate skips rungs that cannot possibly fit so a wide
 // range never materializes tens of thousands of boundaries to throw away.
-export function minimapLabelTicks(startDays, endDays, level, maxLabels = 0) {
+//
+// `law` defaults to the registered standard so every existing caller (this
+// module has no document to resolve one from) keeps working unchanged;
+// `renderMinimap` in src/projections.js passes the render pass's active law.
+export function minimapLabelTicks(startDays, endDays, level, maxLabels = 0, law = GREGORIAN_LAW) {
   const start = Rational.parse(startDays);
   const end = Rational.parse(endDays);
   if (end.compare(start) <= 0) return [];
@@ -274,8 +307,8 @@ export function minimapLabelTicks(startDays, endDays, level, maxLabels = 0) {
   for (const [unit, step] of ladder) {
     const format = strideFormat(unit, level);
     const limit = Math.max(2, override || LABEL_BUDGET[format] || 12);
-    if (rangeDays / (STRIDE_DAYS[unit] * step) > limit * 2) continue;
-    const candidate = strideTicks(start, end, unit, step);
+    if (rangeDays / (strideUnitDays(unit, law) * step) > limit * 2) continue;
+    const candidate = strideTicks(start, end, unit, step, law);
     chosen = { format, limit };
     ticks = candidate;
     if (candidate.length <= limit) break;
@@ -283,16 +316,16 @@ export function minimapLabelTicks(startDays, endDays, level, maxLabels = 0) {
   if (!chosen) {
     const [unit, step] = ladder[ladder.length - 1];
     chosen = { format: strideFormat(unit, level), limit: Math.max(2, override || 12) };
-    ticks = strideTicks(start, end, unit, step);
+    ticks = strideTicks(start, end, unit, step, law);
   }
   if (ticks.length > chosen.limit) {
     const stride = Math.ceil(ticks.length / chosen.limit);
     ticks = ticks.filter((_, index) => index % stride === 0);
   }
-  return ticks.map((days) => ({ days, format: chosen.format, text: minimapLabelText(days, chosen.format) }));
+  return ticks.map((days) => ({ days, format: chosen.format, text: minimapLabelText(days, chosen.format, law) }));
 }
 
-export function minimapLabelText(days, granularity) {
+export function minimapLabelText(days, granularity, law = GREGORIAN_LAW) {
   const value = Rational.parse(days);
   const whole = value.floor();
   const civil = civilFromDays(whole);
@@ -300,12 +333,14 @@ export function minimapLabelText(days, granularity) {
   const year = ((Number(civil.year) % 100) + 100) % 100;
   const shortYear = String(year).padStart(2, "0");
   if (granularity === "quarter") return `Q${Math.floor((month - 1) / 3) + 1}-${shortYear}`;
-  if (granularity === "month") return `${MONTH_ABBREVIATIONS[month - 1]} '${shortYear}`;
+  if (granularity === "month") return `${monthAbbreviation(month, law)} '${shortYear}`;
   if (granularity === "hour") {
-    const minutes = Math.round(value.sub(new Rational(whole)).mul(1440).toNumber());
-    const hour = String(Math.floor(minutes / 60) % 24).padStart(2, "0");
-    const minute = String(minutes % 60).padStart(2, "0");
-    return `${MONTH_ABBREVIATIONS[month - 1]} ${civil.day} ${hour}:${minute}`;
+    const minutesPerHour = law.minutesPerHour().toNumber();
+    const hoursPerDay = law.hoursPerDay().toNumber();
+    const minutes = Math.round(value.sub(new Rational(whole)).mul(law.minutesPerDay()).toNumber());
+    const hour = String(Math.floor(minutes / minutesPerHour) % hoursPerDay).padStart(2, "0");
+    const minute = String(Math.round(minutes % minutesPerHour)).padStart(2, "0");
+    return `${monthAbbreviation(month, law)} ${civil.day} ${hour}:${minute}`;
   }
-  return `${MONTH_ABBREVIATIONS[month - 1]} ${civil.day}`;
+  return `${monthAbbreviation(month, law)} ${civil.day}`;
 }

@@ -24,6 +24,7 @@
 // one instant is silently wrong.
 
 import { Rational } from "./exact.js";
+import { GREGORIAN_LAW } from "./coordinate-law.js";
 import { durationMagnitudeDays } from "./model.js";
 
 // The kind registry. `kind` is validated against this rather than hardcoded,
@@ -168,23 +169,27 @@ export function stapleDays(engine, staple) {
 // two magnitudes so it reuses the magnitude shape the rest of the model already
 // speaks (`{frame, value: {levels}}`), which is also why durationMagnitudeDays
 // can read it directly.
-export function stapleSpreadDays(staple) {
+// `governing` is optional and trailing so every existing call keeps working --
+// but a caller that HAS the document should pass it, or a spread magnitude
+// authored under an edited human-time law resolves to the wrong days (the
+// same class of bug src/coordinate-law.js exists to make impossible).
+export function stapleSpreadDays(staple, governing = null) {
   const spread = staple?.spread;
   if (!spread) return null;
-  const before = durationMagnitudeDays(spread.before);
-  const after = durationMagnitudeDays(spread.after);
+  const before = durationMagnitudeDays(spread.before, governing);
+  const after = durationMagnitudeDays(spread.after, governing);
   if (before.isZero() && after.isZero()) return null;
   return { before, after };
 }
 
-export function isFuzzyStaple(staple) {
-  return stapleSpreadDays(staple) !== null;
+export function isFuzzyStaple(staple, governing = null) {
+  return stapleSpreadDays(staple, governing) !== null;
 }
 
 const ZERO_SPREAD = Object.freeze({ before: Rational.parse(0), after: Rational.parse(0) });
 
-function spreadOr(staple) {
-  return stapleSpreadDays(staple) || ZERO_SPREAD;
+function spreadOr(staple, governing) {
+  return stapleSpreadDays(staple, governing) || ZERO_SPREAD;
 }
 
 // Uncertainties ADD. When a magnitude is derived from two fuzzy anchors the
@@ -255,7 +260,7 @@ export function objectAnchors(chronologDocument, engine, objectId) {
       continue;
     }
     seenRoles.add(role);
-    resolved.push({ role, staple, days, spread: spreadOr(staple) });
+    resolved.push({ role, staple, days, spread: spreadOr(staple, chronologDocument) });
   }
   resolved.sort((left, right) =>
     anchorRolePrecedence(left.role) - anchorRolePrecedence(right.role)
@@ -267,8 +272,8 @@ export function objectAnchors(chronologDocument, engine, objectId) {
 // user invented ("shift handover") still resolves to an extent. Absent, a named
 // point behaves as a start anchor, which is the honest default: it says where
 // the object is without claiming to know which interior point it names.
-function namedOffsetDays(staple) {
-  return durationMagnitudeDays(staple?.payload?.offset);
+function namedOffsetDays(staple, governing) {
+  return durationMagnitudeDays(staple?.payload?.offset, governing);
 }
 
 // The object's own placement relation, read as an implicit `start` anchor.
@@ -296,7 +301,7 @@ function derivedMagnitude(first, second) {
   return null;
 }
 
-function extentFromAnchorAndMagnitude(anchor, magnitudeDays) {
+function extentFromAnchorAndMagnitude(anchor, magnitudeDays, governing) {
   const at = anchor.days;
   if (anchor.role === "end") {
     return { startDays: at.sub(magnitudeDays), endDays: at };
@@ -308,7 +313,7 @@ function extentFromAnchorAndMagnitude(anchor, magnitudeDays) {
   if (anchor.role === "start") {
     return { startDays: at, endDays: at.add(magnitudeDays) };
   }
-  const offset = namedOffsetDays(anchor.staple);
+  const offset = namedOffsetDays(anchor.staple, governing);
   const start = at.sub(offset);
   return { startDays: start, endDays: start.add(magnitudeDays) };
 }
@@ -340,7 +345,7 @@ function extentFromAnchorAndMagnitude(anchor, magnitudeDays) {
  */
 export function resolveObjectExtent(chronologDocument, engine, objectId) {
   const event = chronologDocument?.events?.[objectId] || null;
-  const magnitudeDays = durationMagnitudeDays(event?.magnitudes?.duration);
+  const magnitudeDays = durationMagnitudeDays(event?.magnitudes?.duration, chronologDocument);
   const { anchors, overdetermined } = objectAnchors(chronologDocument, engine, objectId);
 
   if (anchors.length >= 2) {
@@ -354,7 +359,7 @@ export function resolveObjectExtent(chronologDocument, engine, objectId) {
       // `end - magnitude` = 2*mid - end, which is EARLIER than either anchor.
       // Treating the earlier anchor as the start would put the start at the
       // midpoint and silently halve the event.
-      const extent = extentFromAnchorAndMagnitude(first, magnitudeFromAnchors);
+      const extent = extentFromAnchorAndMagnitude(first, magnitudeFromAnchors, chronologDocument);
       const spread = addSpread(first.spread, second.spread);
       return {
         ...extent,
@@ -379,7 +384,7 @@ export function resolveObjectExtent(chronologDocument, engine, objectId) {
 
   if (anchors.length >= 1) {
     const anchor = anchors[0];
-    const extent = extentFromAnchorAndMagnitude(anchor, magnitudeDays);
+    const extent = extentFromAnchorAndMagnitude(anchor, magnitudeDays, chronologDocument);
     return {
       ...extent,
       magnitudeDays,
@@ -606,13 +611,17 @@ export function liveExclusionDays(engine, exclude, lower, upper) {
     for (const entry of entries) {
       const start = entry.day;
       if (start === null || start === undefined) continue;
-      const duration = durationMagnitudeDays(entry.fact?.event?.magnitudes?.duration);
+      const duration = durationMagnitudeDays(entry.fact?.event?.magnitudes?.duration, engine.document);
       const first = start.floor();
       // An all-day event stored as a 1-day duration covers exactly its own
       // day, so the last covered day is derived from the final instant strictly
-      // inside the span rather than from the exclusive end.
+      // inside the span rather than from the exclusive end. The nudge only has
+      // to be smaller than one base day to land in the right whole day, so it
+      // reads through the REGISTERED standard's own finest unit rather than a
+      // bare 86400 -- any unit finer than one base unit gives the same answer,
+      // which is why this does not need the governing frame's own law.
       const endInstant = start.add(duration);
-      const last = duration.isZero() ? first : endInstant.sub(Rational.parse(1).div(86400)).floor();
+      const last = duration.isZero() ? first : endInstant.sub(Rational.parse(1).div(GREGORIAN_LAW.secondsPerDay())).floor();
       if (last < from || first > to) continue;
       const begin = first < from ? from : first;
       const finish = last > to ? to : last;

@@ -3,11 +3,10 @@ import {
   civilFromDays,
   daysFromCivil,
   daysInMonth,
-  daysToCivilCoordinate,
-  floorMod,
   formatCivil,
   nowDays
 } from "./exact.js";
+import { GREGORIAN_LAW, daysToCivilCoordinate, displayLaw } from "./coordinate-law.js";
 import { arcPath, polar, radialCycleWindow, radialGuideSettings, radialRenderState, spiralRibbonPath } from "./radial.js";
 import { objectKindForEvent } from "./object-kinds.js";
 import { factMatchesSelection } from "./session.js";
@@ -26,12 +25,41 @@ import {
 import { SIGIL_VOCABULARY, factImportance, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
-];
 // The minimap is an activity preview, not a second event list.
+
+// The law governing this render pass: every unit relationship below (hours per
+// day, minutes per day, month names, the weekday cycle) reads THIS, set exactly
+// once per pass by `renderProjection`/`renderMinimap`, so an edited coordinate
+// declaration (radix 23 for "hour", say) reaches every helper in the file
+// rather than the ~50 call sites that used to carry 24/1440/86400 as literals
+// no edit could touch. Defaults to the registered standard so a helper called
+// outside a render pass (a test invoking one of the `*ForTest` exports below)
+// still gets coherent Gregorian arithmetic rather than an unset law.
+let activeLaw = GREGORIAN_LAW;
+
+function minutesPerDayNumber() {
+  return activeLaw.minutesPerDay().toNumber();
+}
+
+function hoursPerDayNumber() {
+  return activeLaw.hoursPerDay().toNumber();
+}
+
+function minutesPerHourNumber() {
+  return activeLaw.minutesPerHour().toNumber();
+}
+
+// Short forms are always derived from the authored name, never a parallel
+// abbreviation table -- an authored weekday or month name unlike "Sunday" or
+// "January" must still be able to show up abbreviated.
+function weekdayShortLabel(day) {
+  return activeLaw.weekdayLabel(day).slice(0, 3).toUpperCase();
+}
+
+function monthShortName(monthOneBased) {
+  const name = activeLaw.monthNames()[Number(monthOneBased) - 1];
+  return name ? name.slice(0, 3) : "";
+}
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -220,9 +248,10 @@ function queryStrategicFacts(context, frame, start, end) {
 
 function factsByDay(facts, visibleStart, visibleEnd) {
   const map = new Map();
+  const dayMinutes = minutesPerDayNumber();
   for (const fact of facts) {
     const start = Rational.parse(fact.day);
-    const duration = Rational.parse(String(durationMinutes(fact.event))).div(1440);
+    const duration = Rational.parse(String(durationMinutes(fact.event))).div(activeLaw.minutesPerDay());
     const end = start.add(duration);
     const first = start.floor();
     const afterLast = duration.compare(0) > 0 ? end.ceil() : first + 1n;
@@ -237,7 +266,7 @@ function factsByDay(facts, visibleStart, visibleEnd) {
       const segmentStartMinute = day === first ? minuteOfDay(start) : 0;
       const segmentEndMinute = duration.compare(0) <= 0
         ? segmentStartMinute
-        : day === end.floor() ? minuteOfDay(end) : 1440;
+        : day === end.floor() ? minuteOfDay(end) : dayMinutes;
       list.push({
         ...fact,
         displayDay: key,
@@ -254,24 +283,29 @@ function factsByDay(facts, visibleStart, visibleEnd) {
 
 function minuteOfDay(day) {
   const value = Rational.parse(day);
-  return value.sub(value.floor()).mul(1440).toNumber();
+  return value.sub(value.floor()).mul(activeLaw.minutesPerDay()).toNumber();
 }
 
+// The one duration-in-minutes primitive: a magnitude's worth in days comes from
+// the governing law (`magnitudeDays` -- an hour is 1/23 of a day on a 23-hour
+// frame, not a fixed 1/24), then that day count becomes THIS display's
+// minutes. The old parallel factor table {week:10080, day:1440, hour:60, ...}
+// could not see an edited hour radix at all, which is the bug this melts away.
 function durationMinutes(event) {
-  const factors = { week: 10080, day: 1440, hour: 60, minute: 1, second: 1 / 60 };
-  let total = 0;
-  for (const part of event?.magnitudes?.duration?.value?.levels || []) {
-    if (factors[part.level] !== undefined) total += Number(part.value) * factors[part.level];
-  }
-  return Number.isFinite(total) ? Math.max(0, total) : 0;
+  const days = activeLaw.magnitudeDays(event?.magnitudes?.duration);
+  const minutes = days.mul(activeLaw.minutesPerDay()).toNumber();
+  return Number.isFinite(minutes) ? Math.max(0, minutes) : 0;
 }
 
 function clockLabel(minutes) {
+  const minutesPerHour = Math.max(1, minutesPerHourNumber());
+  const hoursPerDay = Math.max(1, hoursPerDayNumber());
   const whole = Math.max(0, Math.floor(minutes));
-  const hour = Math.floor(whole / 60) % 24;
-  const minute = whole % 60;
-  const suffix = hour < 12 ? "a" : "p";
-  const displayHour = hour % 12 || 12;
+  const hour = Math.floor(whole / minutesPerHour) % hoursPerDay;
+  const minute = Math.floor(whole % minutesPerHour);
+  const half = hoursPerDay / 2;
+  const suffix = hour < half ? "a" : "p";
+  const displayHour = Math.floor(hour % half) || Math.ceil(half);
   return `${displayHour}${minute ? `:${String(minute).padStart(2, "0")}` : ""}${suffix}`;
 }
 
@@ -292,7 +326,7 @@ function bindFact(node, fact) {
 }
 
 function applySigil(node, fact, context) {
-  const sigil = sigilForFact(fact, durationMinutes(fact.event), factImportance(context, fact));
+  const sigil = sigilForFact(fact, durationMinutes(fact.event), factImportance(context, fact), minutesPerDayNumber());
   const vocabulary = SIGIL_VOCABULARY[sigil];
   node.dataset.sigil = sigil;
   node.dataset.sigilGlyph = vocabulary.glyph;
@@ -301,7 +335,7 @@ function applySigil(node, fact, context) {
 }
 
 function eventChip(context, fact, compact = false) {
-  const spanning = durationMinutes(fact.event) >= 1440;
+  const spanning = durationMinutes(fact.event) >= minutesPerDayNumber();
   const lens = context.session.currentLens();
   const zone = Boolean(context.session[`${lens}ZoneFill`]) && spanning;
   const zoneClass = !zone ? "" : fact.continuation
@@ -321,7 +355,7 @@ function eventChip(context, fact, compact = false) {
 function applyZoneDay(context, cell, facts, labelTarget = null) {
   const lens = context.session.currentLens();
   if (!context.session[`${lens}ZoneFill`]) return null;
-  const fact = facts.find((item) => durationMinutes(item.event) >= 1440);
+  const fact = facts.find((item) => durationMinutes(item.event) >= minutesPerDayNumber());
   if (!fact) return null;
   cell.classList.add("zone-day");
   cell.style.setProperty("--zone-color", factColor(context, fact));
@@ -349,11 +383,16 @@ function renderIntimate(target, context) {
   const dayCount = context.session.intimateBack + context.session.intimateForward + 1;
   const lastDay = firstDay + BigInt(dayCount - 1);
   const hourPixels = context.session.intimateHourPixels;
+  // This frame's own hour/minute relationships -- a 23-hour day makes for a
+  // 23-slot rail, not a 24-slot one with an unreachable hour at the bottom.
+  const hoursPerDay = hoursPerDayNumber();
+  const minutesPerDay = minutesPerDayNumber();
+  const minutesPerHour = minutesPerHourNumber();
   const visibleHours = Math.max(1, (target.clientHeight - 70) / hourPixels);
   // Leave several complete days on either side of the viewport.  Rebuilding a
   // virtual rail is still necessary eventually, but keeping that seam well
   // away from the next midnight makes ordinary day-to-day scrolling continuous.
-  const bufferDays = BigInt(Math.max(3, Math.ceil(visibleHours / 24) + 1));
+  const bufferDays = BigInt(Math.max(3, Math.ceil(visibleHours / hoursPerDay) + 1));
   const queryStart = firstDay - bufferDays;
   const queryEnd = lastDay + bufferDays + 1n;
   const result = queryFacts(
@@ -374,11 +413,10 @@ function renderIntimate(target, context) {
     const dayHeader = element("div", `intimate-dayhead${day === today ? " today" : ""}`);
     dayHeader.dataset.createDay = day.toString();
     const allDay = (byDay.get(day.toString()) || []).filter((fact) => fact.relation.parameters?.dateOnly
-      || (context.session.intimateZoneFill && durationMinutes(fact.event) >= 1440));
+      || (context.session.intimateZoneFill && durationMinutes(fact.event) >= minutesPerDay));
     dayHeader.append(element("strong", "", fixedDayLabel(calendar, day) || (() => {
       const civil = civilFromDays(day);
-      const weekday = Number(floorMod(day + 4n, 7n));
-      return `${WEEKDAYS[weekday]} ${civil.month}/${civil.day}`;
+      return `${weekdayShortLabel(day)} ${civil.month}/${civil.day}`;
     })()));
     const allDayLane = element("div", "intimate-all-day-lane");
     const zoneFact = applyZoneDay(context, dayHeader, allDay, allDayLane);
@@ -388,32 +426,37 @@ function renderIntimate(target, context) {
     header.append(dayHeader);
   }
   const railDays = Number(bufferDays * 2n + 1n);
-  const railHours = railDays * 24;
+  const railHours = railDays * hoursPerDay;
   const railHeight = railHours * hourPixels;
   const scroll = element("div", "intimate-scroll");
   scroll.dataset.scrollKey = "intimate";
-  scroll.dataset.bufferHours = String(Number(bufferDays) * 24);
+  scroll.dataset.bufferHours = String(Number(bufferDays) * hoursPerDay);
   scroll.dataset.hourPixels = String(hourPixels);
+  // Published alongside hourPixels so src/ui/drag.js and src/ui/workspace.js
+  // (which count `dataset.timelineHours`/`dataset.bufferHours` in THIS frame's
+  // hours, per their own dataset contract) can agree on what one hour is
+  // without recomputing it from the document themselves.
+  scroll.dataset.hoursPerDay = String(hoursPerDay);
   scroll.dataset.headerPixels = "70";
   scroll.dataset.initialHour = String((context.session.intimateStartHour + context.session.intimateEndHour) / 2);
   const body = element("div", "intimate-body");
   const gutter = element("div", "intimate-gutter");
   gutter.style.height = `${railHeight}px`;
   for (let hour = 0; hour < railHours; hour += 1) {
-    const label = element("span", "intimate-hour-label", clockLabel((hour % 24) * 60));
+    const label = element("span", "intimate-hour-label", clockLabel((hour % hoursPerDay) * minutesPerHour));
     label.style.top = `${hour * hourPixels}px`;
     gutter.append(label);
   }
   for (let boundary = 1; boundary < railDays; boundary += 1) {
     const line = element("div", "intimate-midnight-line");
-    line.style.top = `${boundary * 24 * hourPixels}px`;
+    line.style.top = `${boundary * hoursPerDay * hourPixels}px`;
     gutter.append(line);
   }
   body.append(gutter);
   for (let day = firstDay; day <= lastDay; day += 1n) {
     const column = element("div", `intimate-day-column${day === today ? " today" : ""}`);
     column.style.height = `${railHeight}px`;
-    column.style.setProperty("--grain-px", `${hourPixels * context.session.intimateGrain / 60}px`);
+    column.style.setProperty("--grain-px", `${hourPixels * context.session.intimateGrain / minutesPerHour}px`);
     column.dataset.createDay = day.toString();
     column.dataset.timelineStart = (day - bufferDays).toString();
     column.dataset.timelineHours = String(railHours);
@@ -422,20 +465,20 @@ function renderIntimate(target, context) {
       const segmentDay = day + BigInt(offset);
       const segmentIndex = offset + Number(bufferDays);
       const dayFacts = byDay.get(segmentDay.toString()) || [];
-      const spanning = dayFacts.find((fact) => context.session.intimateZoneFill && durationMinutes(fact.event) >= 1440);
+      const spanning = dayFacts.find((fact) => context.session.intimateZoneFill && durationMinutes(fact.event) >= minutesPerDay);
       if (spanning) {
         const fill = element("div", "intimate-zone-segment");
-        fill.style.top = `${segmentIndex * 24 * hourPixels}px`;
-        fill.style.height = `${24 * hourPixels}px`;
+        fill.style.top = `${segmentIndex * hoursPerDay * hourPixels}px`;
+        fill.style.height = `${hoursPerDay * hourPixels}px`;
         fill.style.setProperty("--zone-color", factColor(context, spanning));
         column.append(fill);
       }
       timed.push(...dayFacts
         .filter((fact) => !fact.relation.parameters?.dateOnly
-          && !(context.session.intimateZoneFill && durationMinutes(fact.event) >= 1440))
+          && !(context.session.intimateZoneFill && durationMinutes(fact.event) >= minutesPerDay))
         .map((fact) => {
-          const start = segmentIndex * 1440 + Math.max(0, fact.segmentStartMinute);
-          const end = segmentIndex * 1440 + Math.min(1440, Math.max(
+          const start = segmentIndex * minutesPerDay + Math.max(0, fact.segmentStartMinute);
+          const end = segmentIndex * minutesPerDay + Math.min(minutesPerDay, Math.max(
             fact.segmentEndMinute,
             fact.segmentStartMinute + context.session.intimateGrain
           ));
@@ -480,15 +523,15 @@ function renderIntimate(target, context) {
     for (const item of timed.slice(0, 80)) {
       const included = item.fact.displayLayer === "included";
       const important = factImportance(context, item.fact) !== "standard";
-      const continuation = item.fact.continuation && durationMinutes(item.fact.event) < 1440;
+      const continuation = item.fact.continuation && durationMinutes(item.fact.event) < minutesPerDay;
       const float = isFloat(item);
       const button = element("button", `intimate-event${included ? " included-event" : ""}${float ? " float-event" : ""}${important ? " important-event" : ""}${continuation ? " continuation-event" : ""}`);
       button.type = "button";
       bindFact(button, item.fact);
       applySigil(button, item.fact, context);
       button.style.setProperty("--event-color", factColor(context, item.fact));
-      button.style.top = `${item.start / 60 * hourPixels}px`;
-      button.style.height = `${Math.max(13, (item.end - item.start) / 60 * hourPixels)}px`;
+      button.style.top = `${item.start / minutesPerHour * hourPixels}px`;
+      button.style.height = `${Math.max(13, (item.end - item.start) / minutesPerHour * hourPixels)}px`;
       if (float) {
         // Right-edge anchoring is the ruling (ROADMAP #9: floats read as
         // marginalia down the right of the day); it is not a reason to
@@ -505,7 +548,7 @@ function renderIntimate(target, context) {
       }
       button.append(
         element("strong", "", `${continuation ? "↳ " : ""}${item.fact.event.payload?.title || "(untitled)"}${continuation ? " · continued" : ""}`),
-        element("time", "", clockLabel(item.start % 1440)),
+        element("time", "", clockLabel(item.start % minutesPerDay)),
         ...(item.fact.event.payload?.location && item.end - item.start >= 30
           ? [element("span", "event-location", item.fact.event.payload.location)]
           : [])
@@ -517,7 +560,7 @@ function renderIntimate(target, context) {
       const previousCivil = civilFromDays(boundaryDay - 1n);
       const nextCivil = civilFromDays(boundaryDay);
       const marker = element("div", "intimate-midnight-marker");
-      marker.style.top = `${boundary * 24 * hourPixels}px`;
+      marker.style.top = `${boundary * hoursPerDay * hourPixels}px`;
       marker.append(
         element("span", "midnight-before", fixedDayLabel(calendar, boundaryDay - 1n, true) || `${previousCivil.month}/${previousCivil.day}`),
         element("strong", "", "MIDNIGHT"),
@@ -527,9 +570,13 @@ function renderIntimate(target, context) {
     }
     if (today >= day - bufferDays && today <= day + bufferDays) {
       const line = element("div", "intimate-now");
-      const nowMinute = now.getHours() * 60 + now.getMinutes();
+      // The fraction of a real day elapsed is frame-agnostic (a day is a day
+      // regardless of how many units it is divided into for display), so
+      // `minuteOfDay` under the governing law turns that fraction into THIS
+      // rail's minutes -- not a fixed 24/60 read off the host clock.
+      const nowMinute = minuteOfDay(nowDays());
       const segmentIndex = Number(today - (day - bufferDays));
-      line.style.top = `${(segmentIndex * 1440 + nowMinute) / 60 * hourPixels}px`;
+      line.style.top = `${(segmentIndex * minutesPerDay + nowMinute) / minutesPerHour * hourPixels}px`;
       column.append(line);
     }
     body.append(column);
@@ -580,16 +627,17 @@ function renderTactical(target, context) {
   const grid = element("div", "tactical-grid");
   grid.style.setProperty("--rows", String(context.session.tacticalRows));
   grid.style.setProperty("--columns", String(context.session.tacticalColumns));
+  const dayMinutes = minutesPerDayNumber();
   for (let offset = 0n; offset < BigInt(total); offset += 1n) {
     const day = start + offset;
     const civil = civilFromDays(day);
-    const weekday = Number(floorMod(day + 4n, 7n));
+    const weekday = activeLaw.cycleIndex("weekday", day);
     const fixed = fixedCalendarParts(calendar, day);
     const cell = element("section", `tactical-day${weekday === 0 || weekday === 6 ? " weekend" : ""}`);
     cell.dataset.createDay = day.toString();
     const header = element("header", "day-heading");
     header.append(
-      element("span", "weekday", fixed?.parts.at(-1)?.label || fixed?.parts.at(-1)?.name || WEEKDAYS[weekday]),
+      element("span", "weekday", fixed?.parts.at(-1)?.label || fixed?.parts.at(-1)?.name || weekdayShortLabel(day)),
       element("strong", "", fixedDayLabel(calendar, day, true) || `${civil.month}/${civil.day}`),
       element("small", "", fixed ? fixed.parts[0].value.toString() : civil.year.toString())
     );
@@ -597,7 +645,7 @@ function renderTactical(target, context) {
     const dayFacts = byDay.get(day.toString()) || [];
     const zoneFact = applyZoneDay(context, cell, dayFacts, header);
     const displayFacts = dayFacts.filter((item) => item !== zoneFact
-      && !(item.continuation && durationMinutes(item.event) < 1440));
+      && !(item.continuation && durationMinutes(item.event) < dayMinutes));
     for (const fact of displayFacts.slice(0, 12)) cell.append(eventChip(context, fact));
     if (displayFacts.length > 12) cell.append(element("div", "event-overflow", `+${displayFacts.length - 12} more`));
     grid.append(cell);
@@ -618,20 +666,34 @@ function monthCard(context, year, month, facts, detailed = false) {
   const card = element("section", detailed ? "wall-month" : "strategic-month");
   const heading = element("header", "month-heading");
   heading.append(
-    element("strong", "", MONTHS[Number(month) - 1]),
+    element("strong", "", activeLaw.monthNames()[Number(month) - 1]),
     element("span", "", year.toString())
   );
   card.append(heading);
   const weekdays = element("div", "month-weekdays");
-  for (const name of ["M", "T", "W", "T", "F", "S", "S"]) weekdays.append(element("span", "", name));
+  // The header initials are this frame's own weekday names, Monday-first to
+  // match the grid's column order below (`lead`). A hardcoded M-T-W-T-F-S-S row
+  // would silently disagree with an authored weekday list, which is exactly the
+  // divergence the law exists to prevent -- and it also assumed a seven-day
+  // week, which the cycle's own radix is free not to be.
+  const weekdayCycle = activeLaw.weekdayNames();
+  for (let index = 0; index < weekdayCycle.length; index += 1) {
+    const name = weekdayCycle[(index + 1) % weekdayCycle.length];
+    weekdays.append(element("span", "", name.slice(0, 1).toUpperCase()));
+  }
   card.append(weekdays);
   const grid = element("div", "month-days");
   const first = daysFromCivil(year, month, 1n);
   const now = new Date();
   const today = daysFromCivil(BigInt(now.getFullYear()), BigInt(now.getMonth() + 1), BigInt(now.getDate()));
-  const lead = Number(floorMod(first + 3n, 7n));
+  // Blank cells before the 1st, in this grid's Monday-first column order --
+  // derived from the law's own weekday cycle index (Sunday = 0) rather than a
+  // second, independent floorMod formula, so an edited weekday offset moves
+  // both together.
+  const lead = (activeLaw.cycleIndex("weekday", first) + 6) % 7;
   for (let index = 0; index < lead; index += 1) grid.append(element("div", "month-pad"));
   const totalDays = daysInMonth(year, month);
+  const dayMinutes = minutesPerDayNumber();
   for (let day = 1; day <= totalDays; day += 1) {
     const ordinal = daysFromCivil(year, month, BigInt(day));
     const cell = element("div", "month-day");
@@ -640,7 +702,7 @@ function monthCard(context, year, month, facts, detailed = false) {
     const dayLabel = element("b", "month-number", String(day));
     cell.append(dayLabel);
     const entries = (facts.get(ordinal.toString()) || [])
-      .filter((item) => !(item.continuation && durationMinutes(item.event) < 1440));
+      .filter((item) => !(item.continuation && durationMinutes(item.event) < dayMinutes));
     const zoneFact = applyZoneDay(context, cell, entries, dayLabel);
     if (detailed) {
       for (const fact of entries.filter((item) => item !== zoneFact).slice(0, 4)) cell.append(eventChip(context, fact, true));
@@ -697,7 +759,7 @@ function fixedMonthCard(context, frame, start, span, facts, detailed = false) {
     cell.dataset.createDay = ordinal.toString();
     const dayLabel = element("b", "month-number", parts.at(-1)?.label || parts.at(-1)?.value?.toString() || String(offset + 1n));
     cell.append(dayLabel);
-    const entries = (facts.get(ordinal.toString()) || []).filter((item) => !(item.continuation && durationMinutes(item.event) < 1440));
+    const entries = (facts.get(ordinal.toString()) || []).filter((item) => !(item.continuation && durationMinutes(item.event) < minutesPerDayNumber()));
     const zoneFact = applyZoneDay(context, cell, entries, dayLabel);
     if (detailed) {
       for (const fact of entries.filter((item) => item !== zoneFact).slice(0, 4)) cell.append(eventChip(context, fact, true));
@@ -768,10 +830,11 @@ function renderStrategic(target, context) {
   path.style.setProperty("--strategic-months", String(monthCount));
   const now = new Date();
   const today = daysFromCivil(BigInt(now.getFullYear()), BigInt(now.getMonth() + 1), BigInt(now.getDate()));
+  const dayMinutes = minutesPerDayNumber();
   for (let index = 0; index < monthCount; index += 1) {
     const current = addMonths(firstMonth.year, firstMonth.month, index);
     const row = element("section", "strategic-row");
-    const label = element("header", "strategic-label", MONTHS[Number(current.month) - 1].slice(0, 3));
+    const label = element("header", "strategic-label", monthShortName(current.month));
     label.append(element("small", "", current.year.toString()));
     row.append(label);
     const monthLength = daysInMonth(current.year, current.month);
@@ -781,7 +844,7 @@ function renderStrategic(target, context) {
         continue;
       }
       const ordinal = daysFromCivil(current.year, current.month, BigInt(day));
-      const weekday = Number(floorMod(ordinal + 4n, 7n));
+      const weekday = activeLaw.cycleIndex("weekday", ordinal);
       const classes = ["strategic-day"];
       if (weekday === 0 || weekday === 6) classes.push("weekend");
       if (ordinal < today) classes.push("past");
@@ -789,9 +852,9 @@ function renderStrategic(target, context) {
       if (context.session.strategicRecordSlashes && ordinal < today) classes.push("record-slash");
       const cell = element("div", classes.join(" "));
       cell.dataset.createDay = ordinal.toString();
-      cell.append(element("div", "strategic-day-number", `${day} ${WEEKDAYS[weekday].slice(0, 1)}`));
+      cell.append(element("div", "strategic-day-number", `${day} ${activeLaw.weekdayLabel(ordinal).slice(0, 1)}`));
       const facts = (byDay.get(ordinal.toString()) || [])
-        .filter((item) => !(item.continuation && durationMinutes(item.event) < 1440));
+        .filter((item) => !(item.continuation && durationMinutes(item.event) < dayMinutes));
       const zoneFact = applyZoneDay(context, cell, facts, cell.firstElementChild);
       const presented = facts.map((fact) => ({ fact, mode: strategicPresentation(context, fact) }))
         .filter((item) => item.mode !== "none" && item.fact !== zoneFact);
@@ -1034,7 +1097,7 @@ function renderTopologyLines(target, context, topology) {
     for (const point of positions) {
       const fact = { event: context.document.events[eventId], relation: point.attachment, coordinate: point.attachment.coordinate };
       const dot = svgElement("circle", { cx: xForEvent.get(eventId), cy: lane.get(point.attachment.frame) + point.offset, r: 6, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
-      bindFact(dot, fact); applySigil(dot, fact, context); const title = svgElement("title"); title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact))} · ${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
+      bindFact(dot, fact); applySigil(dot, fact, context); const title = svgElement("title"); title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact), minutesPerDayNumber())} · ${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
     }
   }
   const status = svgElement("text", { x: width / 2, y: height - 18, "text-anchor": "middle", class: "lines-state" });
@@ -1079,7 +1142,7 @@ function radialEventPath(context, fact, attributes) {
   const sigil = applySigil(path, fact, context);
   path.classList.add(`sigil-${sigil}`);
   const title = svgElement("title");
-  title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact))} · ${fact.event.payload?.title || "(untitled)"}`;
+  title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact), minutesPerDayNumber())} · ${fact.event.payload?.title || "(untitled)"}`;
   path.append(title);
   return path;
 }
@@ -1181,7 +1244,7 @@ function renderRadial(target, context) {
       const denomination = elapsedDays === 0
         ? "cycle start"
         : guide.cycleDays >= 20 && guide.majorEvery === 7 ? `Week ${Math.round(tick / 7)}`
-        : elapsedDays < 1 ? `+${(elapsedDays * 24).toFixed(1)}h` : `+${elapsedDays.toFixed(1)}d`;
+        : elapsedDays < 1 ? `+${(elapsedDays * hoursPerDayNumber()).toFixed(1)}h` : `+${elapsedDays.toFixed(1)}d`;
       const tickLabel = svgElement("text", {
         x: labelX, y: labelY + 3,
         "text-anchor": "middle",
@@ -1218,7 +1281,7 @@ function renderRadial(target, context) {
     radialNowLine(svg, start, end, turns);
     const items = result.facts.map((fact) => {
       const progress = Rational.parse(fact.day).sub(start).div(end.sub(start)).toNumber();
-      const duration = Math.max(durationMinutes(fact.event) / 1440 / end.sub(start).toNumber(), 0.0025);
+      const duration = Math.max(durationMinutes(fact.event) / minutesPerDayNumber() / end.sub(start).toNumber(), 0.0025);
       return { fact, progress, end: Math.min(1, progress + duration), lane: 0 };
     }).filter((item) => item.progress >= 0 && item.progress < 1)
       .sort((left, right) => left.progress - right.progress);
@@ -1315,7 +1378,7 @@ function renderRadial(target, context) {
       const band = bands[ring];
       const items = band.facts.map((fact) => {
         const progress = Math.max(0, Rational.parse(fact.day).sub(start).div(cycle).toNumber());
-        const duration = Math.max(durationMinutes(fact.event) / 1440 / cycle.toNumber(), 0.004);
+        const duration = Math.max(durationMinutes(fact.event) / minutesPerDayNumber() / cycle.toNumber(), 0.004);
         return { fact, progress, end: Math.min(0.9995, progress + duration), lane: 0 };
       }).filter((item) => item.progress < 0.9995)
         .sort((left, right) => left.progress - right.progress);
@@ -1362,6 +1425,7 @@ function renderRadial(target, context) {
 export function renderProjection(target, context) {
   target.replaceChildren();
   activeSelection = context.session.selection || null;
+  activeLaw = context.session.law ?? displayLaw(context.document, context.session);
   target.dataset.projection = context.session.projection;
   if (context.session.projection === "calendar") renderCalendar(target, context);
   else if (context.session.projection === "wall") renderWall(target, context);
@@ -1371,6 +1435,7 @@ export function renderProjection(target, context) {
 
 export function renderMinimap(target, context) {
   target.replaceChildren();
+  activeLaw = context.session.law ?? displayLaw(context.document, context.session);
   const span = Rational.parse(String(context.session.visibleSpan()));
   const drag = context.session.minimapDrag;
   const focus = context.session.currentFocus();
@@ -1442,7 +1507,7 @@ export function renderMinimap(target, context) {
       seenFacts.add(key);
       indexedFactCount += 1;
       const start = Rational.parse(fact.day);
-      const duration = Rational.parse(String(durationMinutes(fact.event))).div(1440);
+      const duration = Rational.parse(String(durationMinutes(fact.event))).div(activeLaw.minutesPerDay());
       const startFraction = start.sub(outerStart).div(rangeDays).toNumber();
       const endFraction = start.add(duration).sub(outerStart).div(rangeDays).toNumber();
       const firstBin = Math.max(0, Math.min(binCount - 1, Math.floor(startFraction * binCount)));
@@ -1556,7 +1621,7 @@ export function renderMinimap(target, context) {
   }
   const rangeSpan = outerEnd.sub(outerStart);
   const positionFor = (value) => 20 + value.sub(outerStart).div(rangeSpan).toNumber() * 960;
-  for (const tick of minimapLabelTicks(outerStart, outerEnd, granularity)) {
+  for (const tick of minimapLabelTicks(outerStart, outerEnd, granularity, 0, activeLaw)) {
     const tickX = positionFor(tick.days);
     svg.append(svgElement("line", { x1: tickX, y1: 13, x2: tickX, y2: gridTop + gridHeight, class: "minimap-tick" }));
     // Boundary labels sit just right of their own boundary rather than centred

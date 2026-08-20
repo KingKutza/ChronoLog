@@ -2,14 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   Rational,
-  civilCoordinateToDays,
   coordinate,
   daysFromCivil,
-  daysToCivilCoordinate,
   nowDays,
   sinExact,
   sqrtExact
 } from "../src/exact.js";
+import { civilCoordinateToDays, daysToCivilCoordinate } from "../src/coordinate-law.js";
 
 test("arbitrary-year civil coordinates retain a quarter millisecond exactly", () => {
   const input = coordinate([
