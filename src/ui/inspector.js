@@ -87,8 +87,13 @@ function parseDateText(text) {
 
 // A relation's date/time split into the two text fields the Completed field
 // alone still holds. Pure, so that field can format its value without a DOM.
-function relationDateParts(relation) {
-  if (!relation?.coordinate) return { date: "", time: "" };
+// `law` is the frame the relation is placed on; a native `<input type="date">`
+// can only ever hold a plain civil year, so an era-governed frame's stored
+// year (already the era-local one, per src/coordinate-law.js) is withheld
+// here rather than shown as a plausible-but-wrong civil number -- the field
+// itself is disabled for the same reason (see `syncCompletedField` below).
+function relationDateParts(relation, law = null) {
+  if (!relation?.coordinate || law?.hasEras()) return { date: "", time: "" };
   const value = relation.coordinate;
   const year = levelValue(value, "year", 0n).toString().padStart(4, "0");
   const month = levelValue(value, "month", 1n).toString().padStart(2, "0");
@@ -375,18 +380,34 @@ function farConnectionOptions(chronologDocument, excludeObjectId) {
   return { frames, objects };
 }
 
-// The law the extent's own coordinate space is read under, falling back to the
-// registered standard when there is no document or the frame's declaration cannot
-// be resolved -- a broken frame must not blank the readout, the same direction
-// `displayLaw` takes.
-function extentLaw(extent, governing) {
-  const frameId = extent?.frame || null;
+// The law a given frame id's coordinates are read under, falling back to the
+// registered standard when there is no document, no frame id, or the frame's
+// declaration cannot be resolved -- a broken frame must not blank a readout,
+// the same direction `displayLaw` takes. Shared by every place in this editor
+// that formats or gates a field against a SPECIFIC record's own frame, rather
+// than the session's currently active one.
+function frameLaw(frameId, governing) {
   if (!governing || !frameId || !governing.frames?.[frameId]) return GREGORIAN_LAW;
   try {
     return coordinateLaw(governing, frameId);
   } catch {
     return GREGORIAN_LAW;
   }
+}
+
+// The law the extent's own coordinate space is read under (see `frameLaw`).
+function extentLaw(extent, governing) {
+  return frameLaw(extent?.frame || null, governing);
+}
+
+// A record placed on an era-governed frame renders its year through the
+// law's own era table (`law.formatYear`, backed by `formatCoordinateEntry` --
+// src/coordinate-entry.js) rather than `formatCivil`'s bare proleptic read,
+// which knows nothing of an era table and would print the number WITHIN the
+// era with no era attached, or misread a non-Gregorian ladder's levels
+// (a day-of-year calendar with no month) as though they were civil month/day.
+function civilOrEraText(law, value) {
+  return law.hasEras() ? formatCoordinateEntry(value, law) : formatCivil(value, true);
 }
 
 // The derived-extent readout's display fields, pure over `resolveObjectExtent`'s
@@ -405,7 +426,7 @@ function extentLaw(extent, governing) {
 // standard, which is the honest answer for a caller that has no document.
 export function extentReadoutModel(extent, governing = null) {
   const law = extentLaw(extent, governing);
-  const civilText = (days) => (days === null || days === undefined ? null : formatCivil(law.fromDays(days), true));
+  const civilText = (days) => (days === null || days === undefined ? null : civilOrEraText(law, law.fromDays(days)));
   const describeItem = (item) => ({
     kind: item.staple?.kind || null,
     kindLabel: stapleKind(item.staple?.kind)?.label || item.staple?.kind || "Staple",
@@ -1015,7 +1036,15 @@ export function createInspector(app) {
     const recurrence = findRecurrencePattern(chronolog, eventId);
     const originalRecurrenceChoice = recurrenceFormChoice(recurrence);
     const recurrenceEnd = recurrenceEndMode(recurrence?.rrule);
-    const completedParts = relationDateParts(completed);
+    // The Completed field is a native `<input type="date">`, which can only
+    // ever hold a plain civil year -- there is no way to type "3E 433" into
+    // it. Under an era-governed frame that is an honest limitation of the
+    // field, not a reason to show a plausible-but-wrong civil number, so the
+    // field is disabled outright (see `syncCompletedField` below) rather than
+    // silently reading the era-local year as though it were proleptic.
+    const completedLaw = completed ? frameLaw(completed.frame, chronolog) : null;
+    const completedEraLocked = Boolean(completedLaw?.hasEras());
+    const completedParts = relationDateParts(completed, completedLaw);
     // The display-side union (engine.isDisplayGroup) already includes
     // importance-frame membership, direct or nested, so the manual union this
     // used to build by hand from `eventRelations` is gone -- this is the
@@ -1046,7 +1075,7 @@ export function createInspector(app) {
       ? "series"
       : event.provenance?.kind === "explicit" && event.provenance?.pattern ? "occurrence" : null;
     const occurrenceLabel = occurrence
-      ? `Only ${formatCivil(occurrence.coordinate, true)}`
+      ? `Only ${civilOrEraText(frameLaw(occurrence.relation?.frame, chronolog), occurrence.coordinate)}`
       : "Only this occurrence";
     wrapper.innerHTML = `
     ${seriesMode ? seriesModeToggle(seriesMode, occurrenceLabel) : ""}
@@ -1102,10 +1131,13 @@ export function createInspector(app) {
     </div>
     <div class="form-row" data-completed-field>
       <label class="field"><span>Completed date (optional)</span>
-        <input name="completedDate" type="date" value="${escapeHTML(completedParts.date)}">
+        <input name="completedDate" type="date" value="${escapeHTML(completedParts.date)}"
+          ${completedEraLocked ? "disabled" : ""}
+          title="${completedEraLocked ? escapeHTML(`This event's calendar numbers years within the ${completedLaw.eraKey()} era; a plain date field cannot type that yet.`) : ""}">
       </label>
       <label class="field"><span>Completed time</span>
-        <input name="completedTime" type="time" step="60" value="${escapeHTML(completedParts.time)}">
+        <input name="completedTime" type="time" step="60" value="${escapeHTML(completedParts.time)}"
+          ${completedEraLocked ? "disabled" : ""}>
       </label>
     </div>
     <label class="field"><span>Description</span>
@@ -1253,8 +1285,11 @@ export function createInspector(app) {
       wrapper.elements.duration.disabled = definition.zeroDuration;
       wrapper.elements.unit.disabled = definition.zeroDuration;
       wrapper.querySelector("[data-completed-field]").hidden = kind !== "todo";
-      wrapper.elements.completedDate.disabled = kind !== "todo";
-      wrapper.elements.completedTime.disabled = kind !== "todo";
+      // An era lock is sticky regardless of which kind is chosen -- the field
+      // is not merely irrelevant to a non-todo, it is honestly unable to
+      // express this record's own calendar at all.
+      wrapper.elements.completedDate.disabled = kind !== "todo" || completedEraLocked;
+      wrapper.elements.completedTime.disabled = kind !== "todo" || completedEraLocked;
     };
     wrapper.elements.repeat.addEventListener("change", syncRecurrenceFields);
     wrapper.elements.endMode.addEventListener("change", syncRecurrenceFields);

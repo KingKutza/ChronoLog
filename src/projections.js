@@ -577,7 +577,11 @@ function renderIntimate(target, context) {
       );
       column.append(marker);
     }
-    if (today >= day - bufferDays && today <= day + bufferDays) {
+    // Owner's field note: "no artificial Now line on a calendar with no
+    // now-mapping." A law that does not place its coordinates on the running
+    // clock at all has no "today" to draw a line through, so the whole marker
+    // (not merely its line) is withheld.
+    if (activeLaw.mapsToClock() && today >= day - bufferDays && today <= day + bufferDays) {
       const line = element("div", "intimate-now");
       // The fraction of a real day elapsed is frame-agnostic (a day is a day
       // regardless of how many units it is divided into for display), so
@@ -1171,6 +1175,11 @@ function radialEventLabel(layer, fact, x, y, labels, anchor = "start") {
 }
 
 function radialNowLine(svg, start, end, turns = 1) {
+  // Owner's field note: "no artificial Now line on a calendar with no
+  // now-mapping." A law that does not place its coordinates on the running
+  // clock has no "now" to mark, so the whole line is withheld rather than
+  // drawn at a guessed position.
+  if (!activeLaw.mapsToClock()) return;
   const now = nowDays();
   if (now.compare(start) < 0 || now.compare(end) > 0) return;
   const progress = now.sub(start).div(end.sub(start)).toNumber();
@@ -1660,8 +1669,12 @@ export function renderMinimap(target, context) {
     x1: focusX, y1: gridTop - 4, x2: focusX, y2: gridTop + gridHeight + 4,
     class: "minimap-focus-line"
   }));
+  // Owner's field note: "no artificial Now line on a calendar with no
+  // now-mapping." A law that does not place its coordinates on the running
+  // clock has no "now" to mark, so the whole line is withheld rather than
+  // drawn at a guessed position.
   const now = nowDays();
-  if (now.compare(outerStart) >= 0 && now.compare(outerEnd) <= 0) {
+  if (activeLaw.mapsToClock() && now.compare(outerStart) >= 0 && now.compare(outerEnd) <= 0) {
     const nowX = positionFor(now);
     svg.append(svgElement("line", {
       x1: nowX, y1: gridTop - 6, x2: nowX, y2: gridTop + gridHeight + 6,

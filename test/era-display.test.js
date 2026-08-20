@@ -83,6 +83,63 @@ const CLOSED_ERA_DECLARATION = Object.freeze({
   })
 });
 
+// Eras are FRAMES STAPLED TOGETHER, so a display test that needs an era law
+// builds the chain the model actually executes rather than a declaration key.
+// `entries` are oldest first; exactly one carries the pin.
+function chainLaw(entries, ladder, eraId) {
+  const frames = {
+    "frame:chain-calendar": {
+      id: "frame:chain-calendar",
+      title: "Chain calendar",
+      traits: ["line", "temporal", "calendar", "group"],
+      coordinate: ladder
+    }
+  };
+  const relations = {};
+  for (const entry of entries) {
+    frames[entry.id] = {
+      id: entry.id,
+      title: entry.era.name,
+      traits: ["line", "temporal", "era"],
+      basis: "frame:chain-calendar",
+      era: entry.era
+    };
+  }
+  for (const [index, entry] of entries.slice(0, -1).entries()) {
+    relations[`succession:${entry.id}`] = {
+      id: `succession:${entry.id}`,
+      type: "staple",
+      kind: "succession",
+      ends: [
+        { frame: entry.id, role: "end" },
+        { frame: entries[index + 1].id, role: "start" }
+      ]
+    };
+  }
+  return coordinateLaw({ frames, relations }, eraId);
+}
+
+const PLAIN_GREGORIAN_LADDER = Object.freeze({
+  kind: "gregorian",
+  levels: Object.freeze([
+    Object.freeze({ name: "year" }),
+    Object.freeze({ name: "month", within: "year", transition: "gregorian.months" }),
+    Object.freeze({ name: "day", within: "month", transition: "gregorian.days" }),
+    Object.freeze({ name: "hour", within: "day", radix: "24" }),
+    Object.freeze({ name: "minute", within: "hour", radix: "60" }),
+    Object.freeze({ name: "second", within: "minute", radix: "60" })
+  ])
+});
+
+const BCE_CE_CHAIN = Object.freeze([
+  Object.freeze({ id: "era:bce", era: Object.freeze({ key: "BCE", name: "Before Common Era", direction: "descending", firstYear: "1", years: "open", affix: "suffix" }) }),
+  Object.freeze({ id: "era:ce", era: Object.freeze({ key: "CE", name: "Common Era", direction: "ascending", firstYear: "1", years: "open", affix: "suffix", anchor: { year: "1", properYear: "1" } }) })
+]);
+
+const CLOSED_CHAIN = Object.freeze([
+  Object.freeze({ id: "era:only", era: Object.freeze({ key: "OE", name: "Only Era", direction: "ascending", firstYear: "1", years: "5", anchor: { year: "1", properYear: "1" } }) })
+]);
+
 function lawFor(declaration, id = "calendar:test") {
   return coordinateLaw({
     frames: { [id]: { id, traits: declaration.kind === "gregorian" ? ["line", "gregorian"] : ["set", "calendar"], coordinate: declaration } }
@@ -101,30 +158,33 @@ test("a law with no era table renders a minimap label byte-identical to before e
 });
 
 test("a minimap label on an era law carries the era-qualified year, not a two-digit civil one", () => {
-  const bce = lawFor(BCE_CE_DECLARATION, "line:history");
-  const at = (year, month, day) => bce.toDays({
+  // Two era FRAMES, stapled: the frame is which era a coordinate means, so the
+  // law is asked for per era rather than switching on a level value.
+  const bceLaw = chainLaw(BCE_CE_CHAIN, PLAIN_GREGORIAN_LADDER, "era:bce");
+  const ceLaw = chainLaw(BCE_CE_CHAIN, PLAIN_GREGORIAN_LADDER, "era:ce");
+  const at = (law, year, month, day) => law.toDays({
     levels: [
-      { level: "era", value: year < 0 ? "Before Common Era" : "Common Era" },
-      { level: "year", value: String(Math.abs(year) || 1) },
+      { level: "year", value: String(year) },
       { level: "month", value: String(month) },
       { level: "day", value: String(day) }
     ]
   });
+  const bce = bceLaw;
   // 44 BCE, March 15 -- month and quarter labels both carry the suffix affix
   // this era authored ("44 BCE"), never a bare two-digit year.
-  const bceDays = at(-44, 3, 15);
+  const bceDays = at(bceLaw, 44, 3, 15);
   assert.equal(minimapLabelText(bceDays, "month", bce), "Mar 44 BCE");
   assert.equal(minimapLabelText(bceDays, "quarter", bce), "Q1-44 BCE");
   assert.doesNotMatch(minimapLabelText(bceDays, "month", bce), /'\d\d$/, "never the two-digit civil form");
 
   // 2026 CE crosses the era boundary going the other way.
-  const ceDays = at(2026, 8, 20);
-  assert.equal(minimapLabelText(ceDays, "month", bce), "Aug 2026 CE");
-  assert.equal(minimapLabelText(ceDays, "quarter", bce), "Q3-2026 CE");
+  const ceDays = at(ceLaw, 2026, 8, 20);
+  assert.equal(minimapLabelText(ceDays, "month", ceLaw), "Aug 2026 CE");
+  assert.equal(minimapLabelText(ceDays, "quarter", ceLaw), "Q3-2026 CE");
 });
 
 test("a day outside every declared era omits its label instead of throwing", () => {
-  const closed = lawFor(CLOSED_ERA_DECLARATION, "line:closed");
+  const closed = chainLaw(CLOSED_CHAIN, PLAIN_GREGORIAN_LADDER, "era:only");
   // Inside the one declared era (proper years 1..5): a real label comes back.
   const inside = new Rational(daysFromCivil(3n, 6n, 15n));
   assert.doesNotThrow(() => closed.formatYearAtDays(inside));

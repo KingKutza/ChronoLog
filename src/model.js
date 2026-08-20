@@ -396,7 +396,19 @@ function validateMagnitudeShape(document, value, label, errors) {
 // selector naming something that frame never declared is refused rather than
 // silently matching nothing forever -- the same reasoning the coordinate law
 // applies to an unresolvable declaration.
-function validateEndPosition(document, end, label, errors) {
+function validateEndPosition(document, end, label, errors, definition = null) {
+  // A kind may declare that its ends carry no position at all (`positions:
+  // false` -- a succession, whose boundary is derived from the eras it joins).
+  // Read from the registry rather than by naming the kind, so a future
+  // positionless kind needs no edit here.
+  if (definition && definition.positions === false) {
+    const declared = ["coordinate", "selector", "span"].filter((form) =>
+      end[form] !== undefined && end[form] !== null);
+    if (declared.length) {
+      errors.push(`${label} declares a ${declared[0]}, but this kind's ends carry no position`);
+    }
+    return;
+  }
   const declared = ["coordinate", "selector", "span", "void"].filter((form) =>
     form === "void" ? end.void === true : end[form] !== undefined && end[form] !== null);
   if (declared.length !== 1) {
@@ -466,7 +478,7 @@ function validateStapleEnd(document, relation, end, index, errors) {
   }
   if (scope === "frame") {
     if (!document.frames?.[end.frame]) errors.push(`${label} references a missing frame`);
-    validateEndPosition(document, end, label, errors);
+    validateEndPosition(document, end, label, errors, stapleKind(relation.kind));
     return;
   }
   if (scope === "series") {

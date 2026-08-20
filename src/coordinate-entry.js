@@ -67,8 +67,16 @@ function childCount(law, level, parts) {
 // as a fraction of the level before it.
 function guidanceLevelNames(law) {
   const names = law.levels.map((level) => level.name);
-  if (names.length > 1 && isContinuousTail(law, law.levels.length - 1)) return names.slice(0, -1);
-  return names;
+  const trimmed = names.length > 1 && isContinuousTail(law, law.levels.length - 1) ? names.slice(0, -1) : names;
+  if (!law.hasEras()) return trimmed;
+  // The era and year levels are typed as ONE position, not two: an era key
+  // alone names no year, and a bare number alone does not say which era it
+  // counts in, so the guidance must say so rather than list them separately.
+  // The era is the FRAME, not a level, so there is one year position -- which
+  // may be written bare ("433") or qualified with this era's own key ("3E 433").
+  const key = law.eraKey();
+  const [year, ...rest] = trimmed;
+  return [`${year} (e.g. "${key} 1" or "1")`, ...rest];
 }
 
 function entryHelpMessage(law) {
@@ -119,33 +127,78 @@ export function parseCoordinateEntry(text, law) {
 
   let sign = 1n;
   let body = trimmed;
+  let hadSign = false;
   if (body[0] === "+" || body[0] === "-") {
     sign = body[0] === "-" ? -1n : 1n;
     body = body.slice(1);
+    hadSign = true;
   }
 
   const tokens = body.split(SEPARATORS).filter(Boolean);
   if (!tokens.length) fail();
-  if (tokens.length > law.levels.length) fail();
+  // An era-qualified year spends TWO tokens on the one year level ("3E 433"),
+  // so the token budget allows one extra token when this law has eras -- the
+  // per-level walk below still refuses anything that does not actually
+  // resolve, this is only the outer bound on how many tokens can ever apply.
+  if (tokens.length > law.levels.length + (law.hasEras() ? 1 : 0)) fail();
 
   const parts = {};
   const entries = [];
   let depth = null;
 
-  tokens.forEach((token, index) => {
-    const level = law.levels[index];
+  // TWO CURSORS, because an era-qualified year spends two tokens on one level.
+  // Walking a single index over both would slide every level below the year one
+  // position out of step -- the day would be read as the hour.
+  let levelIndex = 0;
+  for (let index = 0; index < tokens.length; index += 1, levelIndex += 1) {
+    if (levelIndex >= law.levels.length) fail();
+    const level = law.levels[levelIndex];
 
-    if (isContinuousTail(law, index)) {
+    // An era frame's year may be written bare ("433") or QUALIFIED with the
+    // era's own key ("3E 433"). The frame already fixes which era is meant, so
+    // a qualifier is a redundant confirmation rather than a selector: one that
+    // names a different era is refused outright instead of silently retargeting
+    // a coordinate onto a frame the caller did not ask for.
+    if (law.hasEras() && level.name === law.yearLevel) {
+      const joined = `${tokens[index]} ${tokens[index + 1] ?? ""}`.trim();
+      const qualified = law.parseYear(joined);
+      if (qualified) {
+        if (hadSign) fail(); // an era-qualified year already states its own direction.
+        if (qualified.era !== law.eraKey()) fail();
+        // The stored coordinate keeps the LOCAL year the author typed (433,
+        // never 4249) but a transition BELOW this level (Gregorian's leap
+        // February) resolves against the PROPER year -- "45 BCE" is proper
+        // year -44 and IS a leap year though neither two-digit form is
+        // divisible by 4 -- so `parts` carries the proper one downward while
+        // `entries` keeps the local one. The table's own bounds check is what
+        // refuses a year this era does not have.
+        let properYear;
+        try {
+          properYear = law.eraTable.toProperYear(law.eraKey(), qualified.year);
+        } catch {
+          fail();
+        }
+        entries.push({ level: level.name, value: qualified.year });
+        parts[level.name] = properYear;
+        depth = level.name;
+        index += 1;
+        continue;
+      }
+    }
+
+    const token = tokens[index];
+
+    if (isContinuousTail(law, levelIndex)) {
       if (!/^\d+$/.test(token)) fail();
       entries.push({ level: level.name, value: `0.${token}` });
       depth = level.name;
-      return;
+      continue;
     }
 
     let value;
     if (/^\d+$/.test(token)) {
       value = BigInt(token);
-      if (index === 0) value *= sign;
+      if (levelIndex === 0) value *= sign;
     } else if (level.names && /^[A-Za-z]+$/.test(token)) {
       const found = resolveAuthoredName(token, level.names);
       if (found < 0) fail();
@@ -160,10 +213,24 @@ export function parseCoordinateEntry(text, law) {
       if (value < base || value >= base + count) fail();
     }
 
-    parts[level.name] = value;
+    // A bare year on an era law still has to be a year this era HAS, and the
+    // level below it still needs the PROPER year for its own count -- same
+    // rule as the era-qualified branch above, so a leap 29th resolves
+    // correctly whether or not the era was spelled out.
+    if (law.hasEras() && level.name === law.yearLevel) {
+      let properYear;
+      try {
+        properYear = law.eraTable.toProperYear(law.eraKey(), value.toString());
+      } catch {
+        fail();
+      }
+      parts[level.name] = properYear;
+    } else {
+      parts[level.name] = value;
+    }
     entries.push({ level: level.name, value: value.toString() });
     depth = level.name;
-  });
+  }
 
   return { coordinate: coordinate(entries), depth };
 }
@@ -220,8 +287,38 @@ export function formatCoordinateEntry(coordinateValue, law) {
   const parts = {};
   let text = "";
 
+  // The same "-" / " " / ":" placement rule, shared by the era-qualified
+  // token and every ordinary one below, so the era case is not a second,
+  // divergent copy of the punctuation rule.
+  const place = (index, display) => {
+    if (index === 0) text = display;
+    else if (index <= baseIndex) text += `-${display}`;
+    else if (index === baseIndex + 1) text += ` ${display}`;
+    else text += `:${display}`;
+  };
+
   for (let index = 0; index <= depthIndex; index += 1) {
     const level = law.levels[index];
+
+    // The YEAR renders era-qualified ("3E 433") through the law's own affix.
+    // The era itself is the frame, so it occupies no position of its own -- one
+    // token in, one token out, which is what makes the round trip stable.
+    if (law.hasEras() && level.name === law.yearLevel) {
+      const raw = fixedValue(coordinateValue, level.name);
+      if (raw === null) {
+        throw new Error(`Coordinate is missing level "${level.name}" between the root and its own depth of "${depthName}".`);
+      }
+      place(index, law.formatYear(coordinateValue));
+      // A level below (Gregorian's leap February) counts against the PROPER
+      // year, not the local one just displayed -- same rule as the parse
+      // side. An out-of-table year is already invalid stored data; leave
+      // `parts` without one rather than compound that error.
+      try {
+        parts[level.name] = law.eraTable.toProperYear(law.eraKey(), raw);
+      } catch { /* see comment above */ }
+      continue;
+    }
+
     const raw = fixedValue(coordinateValue, level.name);
     if (raw === null) {
       throw new Error(`Coordinate is missing level "${level.name}" between the root and its own depth of "${depthName}".`);
@@ -237,10 +334,7 @@ export function formatCoordinateEntry(coordinateValue, law) {
       parts[level.name] = value;
     }
 
-    if (index === 0) text = display;
-    else if (index <= baseIndex) text += `-${display}`;
-    else if (index === baseIndex + 1) text += ` ${display}`;
-    else text += `:${display}`;
+    place(index, display);
   }
 
   return text;
@@ -268,6 +362,9 @@ export function coordinatePickerLadder(law, coordinateValue) {
   for (let index = 0; index <= lastIndex; index += 1) {
     const level = law.levels[index];
     const chosen = fixedValue(coordinateValue, level.name);
+    // Eras are FRAMES, not a level, so no rung enumerates them: choosing an era
+    // is choosing which frame to place on, which happens before this ladder and
+    // not inside it.
     const count = childCount(law, level, parts);
     const bounded = count !== null;
     const options = [];
@@ -285,7 +382,14 @@ export function coordinatePickerLadder(law, coordinateValue) {
 
     if (chosen !== null && !isContinuousTail(law, index)) {
       try {
-        parts[level.name] = BigInt(chosen);
+        // A transition below the year (Gregorian's leap-February day count)
+        // resolves against the PROPER year, not the number typed within this
+        // era -- "45 BCE" is proper year -44 and IS a leap year even though
+        // neither two-digit form is divisible by 4. Every other level keeps
+        // reading its raw chosen value.
+        parts[level.name] = law.hasEras() && level.name === law.yearLevel
+          ? law.eraTable.toProperYear(law.eraKey(), chosen)
+          : BigInt(chosen);
       } catch {
         // A non-integer "chosen" on a bounded level cannot happen from this
         // module's own output; a caller handing in a malformed coordinate
@@ -303,7 +407,12 @@ export function coordinatePickerLadder(law, coordinateValue) {
  * calendar's field advertises its own units rather than a Gregorian assumption.
  */
 export function coordinateEntryPlaceholder(law) {
-  const above = law.aboveLadder.map((level) => level.name).join("-");
+  const aboveNames = law.aboveLadder.map((level) => level.name);
+  // Under an era law the year position may carry the era's own key, so the
+  // placeholder advertises that rather than a bare number.
+  const above = law.hasEras()
+    ? [`[${law.eraKey()}] ${aboveNames[0]}`, ...aboveNames.slice(1)].join("-")
+    : aboveNames.join("-");
   const below = law.belowLadder.map((level) => level.name).join(":");
   return below ? `${above} ${below}` : above;
 }
