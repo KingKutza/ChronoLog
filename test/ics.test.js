@@ -83,7 +83,19 @@ test("ICS import keeps recurrence structural and task times distinct", () => {
     .filter((relation) => relation.event === task.id)
     .map((relation) => relation.role)
     .sort();
-  assert.deepEqual(roles, ["completed", "observed"]);
+  assert.deepEqual(roles, ["observed"], "COMPLETED is not an attachment role any more");
+  // COMPLETED maps to the ruled completion shape: Done-state membership plus
+  // an end staple carrying the instant.
+  assert.ok(Object.values(document.relations).some(
+    (relation) => relation.type === "membership" && relation.group === "frame:state-done" && relation.member === task.id
+  ), "the task is a member of the Done state frame");
+  const staple = Object.values(document.relations).find(
+    (relation) => relation.type === "staple"
+      && relation.kind === "end"
+      && relation.ends?.some((end) => end.object === task.id && end.point === "end")
+  );
+  assert.ok(staple, "the completion instant is an end staple on the task's own end point");
+  assert.ok(document.frames["frame:state-done"]?.traits.includes("state"));
 
   const engine = new ChronologEngine(document);
   const facts = engine.queryFacts({

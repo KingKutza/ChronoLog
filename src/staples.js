@@ -64,9 +64,17 @@ import { durationMagnitudeDays } from "./model.js";
 //   positions   do this kind's ends carry a position at all (default true)
 //   anchors     does this kind anchor a named point of an object's extent
 export const STAPLE_KINDS = Object.freeze({
+  // On a series, an end staple cuts the rule (partitions). On an OBJECT it is
+  // the terminal abutment the owner ruled for completion: "the end of this todo
+  // abuts the beginning of this event" -- the object's `end` point stapled to
+  // the instant it finished. Same kind, no completion special case anywhere:
+  // which reading an end staple gets is the consumer's derivation, never a
+  // field on the record. `anchors: false` is load-bearing for the object case
+  // too -- a completion instant names when the todo finished, not where the
+  // object sits, so it must never relocate the extent.
   end: Object.freeze({
-    label: "Ends the rule here",
-    connects: Object.freeze(["frame+series"]),
+    label: "Ends here",
+    connects: Object.freeze(["frame+series", "frame+object"]),
     partitions: true,
     carriesRule: false,
     anchors: false
@@ -765,10 +773,13 @@ export function placementRelation(chronologDocument, objectId, engine = null) {
 }
 
 export function isPlacement(relation, objectId = null) {
+  // Any coordinate-carrying attachment places. Completion is not an attachment
+  // any more (it is a state-frame membership plus an optional end staple --
+  // src/object-kinds.js's stateAffiliations), and a membership relation is a
+  // different type entirely, so neither needs excluding here.
   return Boolean(relation?.type === "attachment"
     && (objectId === null || relation.event === objectId)
-    && relation.coordinate
-    && relation.role !== "completed");
+    && relation.coordinate);
 }
 
 /**

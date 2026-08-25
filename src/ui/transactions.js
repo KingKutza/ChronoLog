@@ -1,11 +1,18 @@
+import { Rational } from "../exact.js";
+import { coordinateLaw } from "../coordinate-law.js";
 import {
   clone,
+  createId,
   overridePatternId,
+  removeContainsForObjects,
+  removeMembershipsForMembers,
   removeOverridesForPatterns,
   removeStaplesForObjects,
-  removeStaplesForPatterns
+  removeStaplesForPatterns,
+  stableVirtualId
 } from "../model.js";
-import { bundleOps, recordOps } from "../ops.js";
+import { STATE_FRAME_TRAITS, isStateFrame } from "../object-kinds.js";
+import { bundleOps, delOp, putOp, recordOps } from "../ops.js";
 import { stapleReferencesId, stapleTouchesAny } from "../staples.js";
 import { applySeriesHeal, healCandidateIds, planSeriesHeal } from "../series-heal.js";
 
@@ -14,6 +21,25 @@ import { applySeriesHeal, healCandidateIds, planSeriesHeal } from "../series-hea
 // reassigned whenever the workspace document is replaced), so every
 // exported function re-reads them from `app` at call time rather than
 // closing over a value captured once at construction time.
+// A relation belongs to an object through whichever field names it: `event`
+// (attachments), `member` (memberships -- state affiliations included), or
+// either end of a containment edge. The one predicate every bundle capture and
+// restore below asks, so a new way for a relation to name an object is one
+// edit here rather than one missed filter per bundle shape.
+function relationNamesObject(relation, ids) {
+  return ids.has(relation.event) || ids.has(relation.member)
+    || (relation.type === "contains" && (ids.has(relation.parent) || ids.has(relation.child)));
+}
+
+// The state frames a transaction can touch: the first completion toggle mints
+// the Done frame inside its own bundle, so bundles capture every state frame
+// (a small set by construction) and restores clear-then-reassign them the same
+// way they already treat the object's own relations. Undo of the minting
+// toggle is what removes the frame again.
+function stateFrameEntries(documentValue) {
+  return Object.entries(documentValue.frames || {}).filter(([, frame]) => isStateFrame(frame));
+}
+
 export function createTransactions(app) {
   // A bundle that can delete a pattern has to carry that pattern's overrides, or
   // undo brings the series back without its exceptions and redo leaves pointers
@@ -117,6 +143,11 @@ export function createTransactions(app) {
       if (eventId && !documentValue.events[eventId]) removed.add(eventId);
     }
     removeStaplesForObjects(documentValue, removed);
+    // Containment edges and memberships (state affiliations included) name a
+    // deleted object the same way a staple's end does, and dangle the same way
+    // -- so they travel in the same transaction, per the same rule.
+    removeContainsForObjects(documentValue, removed);
+    removeMembershipsForMembers(documentValue, removed);
   }
 
   // `replacedEventIds` / the extra `events` entries exist for the same reason as in
@@ -147,16 +178,23 @@ export function createTransactions(app) {
     // so both travel with it the same way a series' staples travel with its
     // pattern (`trackPatternStaples`, above).
     trackObjectStaples(documentValue, [eventId, ...replaced], trackedStaples);
+    const own = new Set([eventId]);
     return {
       event: clone(documentValue.events[eventId]),
       relations: Object.fromEntries(Object.entries(documentValue.relations)
-        .filter(([id, relation]) => relation.event === eventId
-          || replaced.has(relation.event)
-          || replaced.has(relation.member)
+        .filter(([id, relation]) => relationNamesObject(relation, own)
+          || relationNamesObject(relation, replaced)
           || trackedStaples.has(id))
-        .map(([id, relation]) => [id, relation.event === eventId
+        .map(([id, relation]) => [id, relationNamesObject(relation, own)
           ? clone(relation)
           : carryForward(previous?.relations, id, relation)])),
+      // Every state frame travels with every event bundle: the toggle that
+      // marks this event done may mint the Done frame in this same
+      // transaction, and its undo must remove it. `carryForward` keeps an
+      // untouched frame the same object across the before/after pair, so an
+      // edit that never touched state emits no frame ops.
+      frames: Object.fromEntries(stateFrameEntries(documentValue)
+        .map(([id, frame]) => [id, carryForward(previous?.frames, id, frame)])),
       patterns,
       trackedOverrideIds: [...tracked],
       overrides,
@@ -172,11 +210,15 @@ export function createTransactions(app) {
     // Driven by the stable id list, not by `bundle.events`, so redo re-deletes an
     // occurrence the heal retired (that bundle's events map is empty precisely then).
     const replaced = new Set(bundle.replacedEventIds || []);
+    const swept = new Set([eventId, ...replaced]);
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (relation.event === eventId
-        || replaced.has(relation.event)
-        || replaced.has(relation.member)) delete documentValue.relations[id];
+      if (relationNamesObject(relation, swept)) delete documentValue.relations[id];
     }
+    // Clear-then-reassign for state frames, mirroring the relations sweep: the
+    // bundle captured them all, so whatever the transaction minted or edited
+    // comes back to exactly the captured set.
+    for (const [id] of stateFrameEntries(documentValue)) delete documentValue.frames[id];
+    Object.assign(documentValue.frames, clone(bundle.frames || {}));
     for (const id of replaced) delete documentValue.events[id];
     Object.assign(documentValue.events, clone(bundle.events || {}));
     for (const [id, pattern] of Object.entries(documentValue.patterns)) {
@@ -236,7 +278,7 @@ export function createTransactions(app) {
     }, (documentValue) => restoreEventBundle(documentValue, eventId, before), metadata);
   }
 
-  function captureEventSetBundle(documentValue, eventIds) {
+  function captureEventSetBundle(documentValue, eventIds, previous = null) {
     const ids = new Set(eventIds);
     const patterns = Object.fromEntries(Object.entries(documentValue.patterns)
       .filter(([, pattern]) => ids.has(pattern.templateEvent)).map(([id, pattern]) => [id, clone(pattern)]));
@@ -250,8 +292,10 @@ export function createTransactions(app) {
       events: Object.fromEntries(Object.entries(documentValue.events)
         .filter(([id]) => ids.has(id)).map(([id, event]) => [id, clone(event)])),
       relations: Object.fromEntries(Object.entries(documentValue.relations)
-        .filter(([id, relation]) => ids.has(relation.event) || trackedStaples.has(id))
+        .filter(([id, relation]) => relationNamesObject(relation, ids) || trackedStaples.has(id))
         .map(([id, relation]) => [id, clone(relation)])),
+      frames: Object.fromEntries(stateFrameEntries(documentValue)
+        .map(([id, frame]) => [id, carryForward(previous?.frames, id, frame)])),
       patterns,
       overrides: Object.fromEntries(Object.entries(documentValue.overrides)
         .filter(([id]) => tracked.has(id)).map(([id, override]) => [id, clone(override)]))
@@ -262,10 +306,12 @@ export function createTransactions(app) {
     const ids = new Set(eventIds);
     for (const id of ids) delete documentValue.events[id];
     for (const [id, relation] of Object.entries(documentValue.relations)) {
-      if (ids.has(relation.event) || (relation.type === "staple" && stapleTouchesAny(relation, ids))) {
+      if (relationNamesObject(relation, ids) || (relation.type === "staple" && stapleTouchesAny(relation, ids))) {
         delete documentValue.relations[id];
       }
     }
+    for (const [id] of stateFrameEntries(documentValue)) delete documentValue.frames[id];
+    Object.assign(documentValue.frames, clone(bundle.frames || {}));
     for (const [id, pattern] of Object.entries(documentValue.patterns)) {
       if (ids.has(pattern.templateEvent)) delete documentValue.patterns[id];
     }
@@ -295,7 +341,7 @@ export function createTransactions(app) {
         cascadeRemovedPatterns(documentValue, before.patterns);
         convergeSeries(documentValue, { eventIds });
         cascadeRemovedObjects(documentValue, eventIds);
-        after = captureEventSetBundle(documentValue, eventIds);
+        after = captureEventSetBundle(documentValue, eventIds, before);
       }
       Object.assign(metadata, bundleOps(before, after));
     }, (documentValue) => restoreEventSetBundle(documentValue, eventIds, before), metadata);
@@ -329,11 +375,14 @@ export function createTransactions(app) {
       frame: clone(documentValue.frames[frameId]),
       relations: Object.fromEntries(Object.entries(documentValue.relations).filter(([id, relation]) =>
         relation.frame === frameId || relation.parent === frameId || relation.child === frameId
+        // A membership names its frame as `group` -- deleting a group (or state)
+        // frame has to take its memberships, or every member keeps a pointer to
+        // nothing and one bad pointer takes the whole file offline at load.
+        || relation.group === frameId
         || trackedStaples.has(id)
         // A staple names its frames on its ENDS, so a connection into this frame
         // is not caught by `relation.frame` at all. It has to travel with the
-        // frame's deletion, or the survivor keeps a coordinate in a space that no
-        // longer exists and one bad pointer takes the whole file offline at load.
+        // frame's deletion, for the same reason as a membership.
         || (relation.type === "staple" && stapleReferencesId(relation, frameId))
       ).map(([id, relation]) => [id, clone(relation)])),
       patterns,
@@ -348,6 +397,7 @@ export function createTransactions(app) {
   function restoreFrameBundle(documentValue, frameId, bundle) {
     for (const [id, relation] of Object.entries(documentValue.relations)) {
       if (relation.frame === frameId || relation.parent === frameId || relation.child === frameId
+        || relation.group === frameId
         || (relation.type === "staple" && stapleReferencesId(relation, frameId))) {
         delete documentValue.relations[id];
       }
@@ -530,12 +580,130 @@ export function createTransactions(app) {
     return true;
   }
 
+  // Bulk-skip: materialize a set of a series' past virtual occurrences and
+  // affiliate each to a named STATE frame, as one undoable transaction. The
+  // same records "Edit one occurrence" prepares (src/ui/inspector.js's
+  // prepareMaterialization: cloned template event, its placement, the
+  // template's group attachments, a suppressing override) plus one membership
+  // per occurrence -- and the membership is a deviation the series never
+  // projects, which is exactly what keeps the convergence invariant from
+  // healing a deliberate skip away. Keys are the engine's own occurrence keys
+  // (`occurrence-<day>`, src/engine.js), so the day each materialization lands
+  // on is the projection's own answer, never re-derived rule math.
+  //
+  // Ops are static per prepared record (the materializationOps pattern), so
+  // the journal, undo, and redo all see one bundle. The state frame itself is
+  // minted lazily inside the same transaction when absent, like the Done
+  // frame's first toggle.
+  function bulkSkipOccurrences(patternId, occurrenceKeys, { stateFrame, title, label = "Skip occurrences" } = {}) {
+    const { chronolog, history } = app;
+    const pattern = chronolog.patterns?.[patternId];
+    const templateEvent = pattern && chronolog.events[pattern.templateEvent];
+    const templateRelation = pattern && chronolog.relations[pattern.templateRelation];
+    if (!pattern || !templateEvent || !templateRelation || !stateFrame) return 0;
+    const engine = app.refreshEngine?.(chronolog) || app.engine || null;
+    const overridden = new Set(Object.values(chronolog.overrides).map((override) => override.virtual));
+    const groupTemplates = Object.values(chronolog.relations).filter((relation) =>
+      relation.type === "attachment"
+      && relation.event === pattern.templateEvent
+      && chronolog.frames[relation.frame]?.traits?.includes("group"));
+    const prepared = [];
+    for (const key of new Set(occurrenceKeys || [])) {
+      const text = String(key);
+      if (!text.startsWith("occurrence-")) continue;
+      const virtualId = stableVirtualId(patternId, text);
+      // A slot already overridden is already authored -- materializing a second
+      // record over it would fork the fork.
+      if (overridden.has(virtualId)) continue;
+      let coordinate;
+      try {
+        const days = Rational.parse(text.slice("occurrence-".length));
+        coordinate = engine
+          ? engine.daysCoordinate(templateRelation.frame, days)
+          : coordinateLaw(chronolog, templateRelation.frame).fromDays(days);
+      } catch {
+        continue;
+      }
+      const event = clone(templateEvent);
+      event.id = createId("event");
+      event.traits = (event.traits || []).filter((trait) => trait !== "generated");
+      event.provenance = {
+        kind: "explicit",
+        replaces: virtualId,
+        pattern: patternId,
+        originalCoordinate: clone(coordinate)
+      };
+      const relation = clone(templateRelation);
+      relation.id = createId("relation");
+      relation.event = event.id;
+      relation.coordinate = clone(coordinate);
+      relation.provenance = { kind: "explicit", replaces: virtualId };
+      const groups = groupTemplates.map((source) => ({ ...clone(source), id: createId("relation"), event: event.id }));
+      const membership = {
+        id: createId("relation"),
+        type: "membership",
+        group: stateFrame,
+        member: event.id,
+        provenance: { kind: "explicit" }
+      };
+      const override = { id: createId("override"), virtual: virtualId, suppress: true, replacements: [event.id] };
+      prepared.push({ event, relation, groups, membership, override });
+    }
+    if (!prepared.length) return 0;
+    const mintedFrame = chronolog.frames[stateFrame]
+      ? null
+      : { id: stateFrame, title: title || stateFrame, traits: [...STATE_FRAME_TRAITS] };
+    const apply = (documentValue) => {
+      if (mintedFrame) documentValue.frames[stateFrame] = clone(mintedFrame);
+      for (const item of prepared) {
+        documentValue.events[item.event.id] = clone(item.event);
+        documentValue.relations[item.relation.id] = clone(item.relation);
+        for (const group of item.groups) documentValue.relations[group.id] = clone(group);
+        documentValue.relations[item.membership.id] = clone(item.membership);
+        documentValue.overrides[item.override.id] = clone(item.override);
+      }
+    };
+    const revert = (documentValue) => {
+      for (const item of prepared) {
+        delete documentValue.overrides[item.override.id];
+        delete documentValue.relations[item.membership.id];
+        for (const group of item.groups) delete documentValue.relations[group.id];
+        delete documentValue.relations[item.relation.id];
+        delete documentValue.events[item.event.id];
+      }
+      if (mintedFrame) delete documentValue.frames[stateFrame];
+    };
+    const ops = [
+      ...(mintedFrame ? [putOp("frames", stateFrame, mintedFrame)] : []),
+      ...prepared.flatMap((item) => [
+        putOp("events", item.event.id, item.event),
+        putOp("relations", item.relation.id, item.relation),
+        ...item.groups.map((group) => putOp("relations", group.id, group)),
+        putOp("relations", item.membership.id, item.membership),
+        putOp("overrides", item.override.id, item.override)
+      ])
+    ];
+    const inverseOps = [
+      ...prepared.flatMap((item) => [
+        delOp("overrides", item.override.id),
+        delOp("relations", item.membership.id),
+        ...[...item.groups].reverse().map((group) => delOp("relations", group.id)),
+        delOp("relations", item.relation.id),
+        delOp("events", item.event.id)
+      ]),
+      ...(mintedFrame ? [delOp("frames", stateFrame)] : [])
+    ];
+    history.executeDelta(label, apply, revert, { preserveRecurrence: true, ops, inverseOps });
+    return prepared.length;
+  }
+
   return {
     executeEventChange,
     executeEventSetChange,
     executeRecordChange,
     executeFrameChange,
     executePatternChange,
-    convergeSeriesOccurrence
+    convergeSeriesOccurrence,
+    bulkSkipOccurrences
   };
 }

@@ -126,13 +126,31 @@ function addSampleEvents(document) {
     magnitudes: { duration: durationMagnitude("0") },
     payload: { title: "Sample completed task" }
   });
+  // Completion in the ruled shape: done is membership in the Done state frame,
+  // the instant is the object's end staple ("the end of this todo abuts" the
+  // moment it finished).
+  document.frames["frame:state-done"] = {
+    id: "frame:state-done",
+    title: "Done",
+    traits: ["set", "group", "state"]
+  };
   addRelation(document, {
-    id: "relation:sample-task-completed",
-    type: "attachment",
-    event: task.id,
-    frame: "calendar:personal",
-    role: "completed",
-    coordinate: { levels: [{ level: "year", value: "2026" }, { level: "month", value: "8" }, { level: "day", value: "9" }] }
+    id: "relation:sample-task-done",
+    type: "membership",
+    group: "frame:state-done",
+    member: task.id
+  });
+  addRelation(document, {
+    id: "relation:sample-task-completed-at",
+    type: "staple",
+    kind: "end",
+    ends: [
+      { object: task.id, point: "end" },
+      {
+        frame: "calendar:personal",
+        coordinate: { levels: [{ level: "year", value: "2026" }, { level: "month", value: "8" }, { level: "day", value: "9" }] }
+      }
+    ]
   });
 
   addRelation(document, {

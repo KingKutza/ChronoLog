@@ -613,8 +613,11 @@ export function createFramesPanel(app) {
           for (const [id, relation] of Object.entries(documentValue.relations)) {
             // Both a staple's ends count: a connection into this frame keeps a
             // coordinate in a space that is about to stop existing, and one bad
-            // pointer takes the whole file offline at its next load.
+            // pointer takes the whole file offline at its next load. A
+            // membership names its frame as `group` -- deleting a group or
+            // state frame takes its memberships for the same reason.
             if (relation.frame === value.id || relation.parent === value.id || relation.child === value.id
+              || relation.group === value.id
               || (relation.type === "staple" && stapleReferencesId(relation, value.id))) {
               delete documentValue.relations[id];
             }

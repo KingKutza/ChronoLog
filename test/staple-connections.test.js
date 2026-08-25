@@ -221,9 +221,11 @@ test("a kind is defined by the end-scope PAIR it may join, and refuses any other
   const eventId = first.id;
   const patternId = withSeries(document, first.id, firstRelation.id).id;
 
-  // A rule segment is cut at an instant, so an `end` staple reaches a frame and
-  // nothing else: connecting a series to an object is not a defined thing.
-  assert.deepEqual([...STAPLE_KINDS.end.connects], ["frame+series"]);
+  // A rule segment is cut at an instant, so a series-side `end` staple reaches
+  // a frame and nothing else: connecting a series to an object is not a defined
+  // thing. On an OBJECT, `end` is the ruled terminal abutment ("the end of this
+  // todo abuts" the completion instant) -- frame+object, nothing else.
+  assert.deepEqual([...STAPLE_KINDS.end.connects], ["frame+series", "frame+object"]);
   assert.deepEqual([...STAPLE_KINDS.correspondence.connects], ["frame+frame"]);
   assert.equal(STAPLE_KINDS.anchor.connects.includes("object+object"), true);
 
@@ -237,7 +239,7 @@ test("a kind is defined by the end-scope PAIR it may join, and refuses any other
 
 test("stapleKindScopes derives a kind's scopes from its connects, so no surface hand-writes a list", () => {
   assert.deepEqual(stapleKindScopes("correspondence"), ["frame"]);
-  assert.deepEqual(stapleKindScopes("end"), ["frame", "series"]);
+  assert.deepEqual(stapleKindScopes("end"), ["frame", "object", "series"]);
   assert.deepEqual(stapleKindScopes("anchor"), ["frame", "object", "series"]);
   assert.deepEqual(stapleKindScopes("not-a-kind"), []);
 });

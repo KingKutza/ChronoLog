@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CommandHistory, addEvent, addRelation, createId, durationMagnitude } from "../src/model.js";
+import { CommandHistory, addEvent, addRelation, createId, durationMagnitude, validateDocument } from "../src/model.js";
 import { rosterEntries } from "../src/object-kinds.js";
 import { DEFAULT_LENS_ORDER, ViewSession } from "../src/session.js";
 import { toggleTodoCompletion } from "../src/ui/roster.js";
@@ -79,10 +79,25 @@ test("a roster reports an unanchored float honestly rather than inventing a date
   assert.ok(anchored.frame, "and the frame it is stapled to");
 });
 
-// Stage B1: a check control on the roster row marks a ToDo done by writing the
-// same "completed" relation the inspector's Completed date field writes, and
-// undo restores the exact prior state.
-test("marking a ToDo done writes the inspector's completed relation shape; undo clears it exactly", () => {
+function doneMembershipOf(documentValue, todoId) {
+  return Object.values(documentValue.relations).find(
+    (relation) => relation.type === "membership" && relation.group === "frame:state-done" && relation.member === todoId
+  );
+}
+
+function completionStapleOf(documentValue, todoId) {
+  return Object.values(documentValue.relations).find(
+    (relation) => relation.type === "staple"
+      && relation.kind === "end"
+      && relation.ends?.some((end) => end.object === todoId && end.point === "end")
+  );
+}
+
+// The roster's check control marks a ToDo done through the ruled shape: done is
+// membership in the Done state frame, the instant is an end staple -- "the end
+// of this todo abuts" the moment it finished. Same records the inspector's
+// Completed field writes, and undo restores the exact prior state.
+test("marking a ToDo done writes the Done-state membership and end staple; undo clears both exactly", () => {
   const document = createSampleDocument();
   const todoId = createId("event");
   addEvent(document, {
@@ -110,39 +125,38 @@ test("marking a ToDo done writes the inspector's completed relation shape; undo 
   const { app } = transactionHarness(document, "calendar:personal");
   toggleTodoCompletion(app, todoId);
 
-  const completedRelation = Object.values(app.chronolog.relations).find(
-    (relation) => relation.type === "attachment" && relation.event === todoId && relation.role === "completed"
-  );
-  assert.ok(completedRelation, "checking the box adds a temporal attachment relation with role completed");
-  assert.equal(completedRelation.frame, "calendar:personal", "it lands on the same calendar frame as the ToDo's own placement");
+  const membership = doneMembershipOf(app.chronolog, todoId);
+  assert.ok(membership, "checking the box writes membership in the Done state frame -- state is a frame, not a property");
+  const staple = completionStapleOf(app.chronolog, todoId);
+  assert.ok(staple, "and the instant is an end staple on the object's own end point");
+  const frameEnd = staple.ends.find((end) => end.frame);
+  assert.equal(frameEnd.frame, "calendar:personal", "it lands on the same calendar frame as the ToDo's own placement");
   assert.ok(
-    completedRelation.coordinate.levels.some((level) => level.level === "year"),
-    "coordinate is the levels shape daysToCivilCoordinate/the inspector's Completed field both produce"
+    frameEnd.coordinate.levels.some((level) => level.level === "year"),
+    "coordinate is the levels shape the inspector's Completed field produces"
   );
 
   const afterComplete = rosterEntries(app.chronolog, "todo").find((entry) => entry.id === todoId);
   assert.equal(afterComplete.completed, true);
-  assert.deepEqual(afterComplete.completedAt, completedRelation.coordinate);
+  assert.deepEqual(afterComplete.completedAt, frameEnd.coordinate);
   // The ToDo's own placement is untouched -- completed-at is a separate fact,
   // never a stand-in for where the object is stapled.
   assert.deepEqual(afterComplete.coordinate, scheduledCoordinate);
   // Still one of the roster's entries -- marking done never deletes, hides, or
-  // lapses it (ROADMAP #9's staple/decay model is unsettled and stays that way).
+  // lapses it (ROADMAP #2's staple/decay model is unsettled and stays that way).
   assert.ok(rosterEntries(app.chronolog, "todo").some((entry) => entry.id === todoId));
 
   assert.equal(app.history.undo(), true);
   const afterUndo = rosterEntries(app.chronolog, "todo").find((entry) => entry.id === todoId);
   assert.equal(afterUndo.completed, false, "undo restores the exact prior state");
   assert.equal(afterUndo.completedAt, null);
-  assert.ok(
-    !Object.values(app.chronolog.relations).some((relation) => relation.role === "completed" && relation.event === todoId),
-    "the completed relation itself is gone, not just hidden"
-  );
+  assert.ok(!doneMembershipOf(app.chronolog, todoId), "the membership itself is gone, not just hidden");
+  assert.ok(!completionStapleOf(app.chronolog, todoId), "and so is the end staple");
 });
 
-// Unchecking is the same fact removed the same way, and it is itself undoable
-// (checking, then unchecking, then undoing the uncheck restores completion).
-test("unchecking a completed ToDo clears the relation, and that step undoes too", () => {
+// Unchecking is the same two facts removed the same way, and it is itself
+// undoable (checking, then unchecking, then undoing the uncheck restores both).
+test("unchecking a completed ToDo clears membership and staple, and that step undoes too", () => {
   const document = createSampleDocument();
   const todoId = createId("event");
   addEvent(document, {
@@ -168,6 +182,7 @@ test("unchecking a completed ToDo clears the relation, and that step undoes too"
   const afterUncheck = rosterEntries(app.chronolog, "todo").find((entry) => entry.id === todoId);
   assert.equal(afterUncheck.completed, false);
   assert.equal(afterUncheck.completedAt, null);
+  assert.ok(!completionStapleOf(app.chronolog, todoId), "leaving the state takes the instant with it");
 
   assert.equal(app.history.undo(), true); // undo the uncheck
   const afterUndoUncheck = rosterEntries(app.chronolog, "todo").find((entry) => entry.id === todoId);
@@ -179,9 +194,12 @@ test("unchecking a completed ToDo clears the relation, and that step undoes too"
 });
 
 // A float with no staple yet can still be marked done -- completion is
-// independent of the staple/decay question ROADMAP #9 leaves open, so this
-// falls back to the active frame rather than inventing a staple to hang it on.
-test("marking an unstapled ToDo done falls back to the active frame and invents no staple", () => {
+// independent of the staple/decay question ROADMAP #2 leaves open. The end
+// staple's frame falls back to the active frame, and because the `end` kind
+// never anchors, it must not invent a placement for the float. This first
+// completion is also what mints the Done frame -- nothing seeds it -- and undo
+// of that first toggle removes the minted frame again.
+test("marking an unstapled ToDo done falls back to the active frame, mints the Done frame lazily, and anchors nothing", () => {
   const document = createStructuralDocument();
   document.frames["calendar:personal"] = {
     id: "calendar:personal",
@@ -197,17 +215,25 @@ test("marking an unstapled ToDo done falls back to the active frame and invents 
     magnitudes: { duration: durationMagnitude("0") },
     payload: { title: "Someday idea" }
   });
+  assert.equal(document.frames["frame:state-done"], undefined, "an empty document holds no Done frame");
 
   const { app } = transactionHarness(document, "calendar:personal");
   toggleTodoCompletion(app, todoId);
 
+  const doneFrame = app.chronolog.frames["frame:state-done"];
+  assert.ok(doneFrame, "the first completion mints the deterministic Done frame");
+  assert.equal(doneFrame.title, "Done");
+  assert.ok(doneFrame.traits.includes("group") && doneFrame.traits.includes("state"));
   const entry = rosterEntries(app.chronolog, "todo").find((item) => item.id === todoId);
   assert.equal(entry.completed, true);
-  assert.equal(entry.anchored, false, "completing an unstapled float does not invent a staple for it");
-  const completedRelation = Object.values(app.chronolog.relations).find(
-    (relation) => relation.role === "completed" && relation.event === todoId
-  );
-  assert.equal(completedRelation.frame, "calendar:personal", "falls back to the session's active frame");
+  assert.equal(entry.anchored, false, "the completion staple never anchors the float anywhere");
+  const staple = completionStapleOf(app.chronolog, todoId);
+  assert.equal(staple.ends.find((end) => end.frame).frame, "calendar:personal", "falls back to the session's active frame");
+  assert.deepEqual(validateDocument(app.chronolog).errors, [], "the completed document is valid");
+
+  assert.equal(app.history.undo(), true);
+  assert.equal(app.chronolog.frames["frame:state-done"], undefined, "undo of the minting toggle removes the frame it minted");
+  assert.deepEqual(validateDocument(app.chronolog).errors, [], "and leaves a valid document behind");
 });
 
 test("a roster is stable and total on an empty or malformed document", () => {
@@ -367,7 +393,7 @@ test("Stage B3: a lone float with no colliding neighbour claims the full column,
   const floats = floatWithTitle(target, "Renew the parking permit");
   assert.equal(floats.length, 1, "the lone float renders exactly once");
   const [button] = floats;
-  assert.equal(button.style.right, "0%", "right-edge anchoring is preserved (ROADMAP #9)");
+  assert.equal(button.style.right, "0%", "right-edge anchoring is preserved (ROADMAP #2)");
   assert.equal(button.style.width, "calc(100% - 3px)", "absent a real collision, a float takes the full column width");
 });
 

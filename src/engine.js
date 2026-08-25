@@ -557,6 +557,32 @@ export class ChronologEngine {
       }
     }
 
+    // Containment edges, indexed from both ends for the same overscale reason
+    // the staple indexes exist: a project summary asks "children of" once per
+    // descendant, and the delete cascade asks "parents of" the same way. The
+    // index itself never recurses, so a cyclic family tree -- which validation
+    // deliberately admits -- costs nothing here; derivations over it carry
+    // their own visit-set guards (src/object-kinds.js's containsSummary).
+    this.containsByParent = new Map();
+    this.parentsByChild = new Map();
+    for (const relation of Object.values(document.relations)) {
+      if (relation.type !== "contains") continue;
+      const children = this.containsByParent.get(relation.parent) || [];
+      if (!children.includes(relation.child)) children.push(relation.child);
+      this.containsByParent.set(relation.parent, children);
+      const parents = this.parentsByChild.get(relation.child) || [];
+      if (!parents.includes(relation.parent)) parents.push(relation.parent);
+      this.parentsByChild.set(relation.child, parents);
+    }
+    for (const index of [this.containsByParent, this.parentsByChild]) {
+      for (const bucket of index.values()) bucket.sort();
+    }
+    // Per-generation memo homes for src/object-kinds.js's containment summary
+    // and done-membership set: any document change lands back here through
+    // setDocument, which is what invalidates them.
+    this.containsSummaryMemo = new Map();
+    this.doneMembersMemo = null;
+
     for (const relation of Object.values(document.relations)) {
       if (relation.type === "membership") continue;
       if (relation.type !== "attachment") continue;
@@ -849,15 +875,15 @@ export class ChronologEngine {
   // a renderer can read spread/overdetermination without re-deriving them --
   // existing fields and their meaning are untouched either way.
   //
-  // The "completed" role is deliberately excluded from anchor placement: it
-  // names a distinct instant (when a todo was finished), not where the object
-  // sits, so an anchor on the object must not relocate it. Extent is still
-  // attached for information, just never used to move `day`/`coordinate`.
+  // A completion instant needs no exclusion here any more: it is a state-frame
+  // membership plus an `end`-kind staple (src/object-kinds.js), and the `end`
+  // kind's own `anchors: false` is what keeps it out of anchor placement --
+  // when a todo was finished is a distinct instant, never where the object
+  // sits. Nothing in placement treats any staple as special.
   //
   // `resolveObjectExtent` is looked up once per event id (not once per
-  // relation) via `extentByEvent` below -- a "completed" and a "placed"
-  // relation on the same event would otherwise pay for the same document-wide
-  // staple scan twice.
+  // relation) via `extentByEvent` below -- two relations on the same event
+  // would otherwise pay for the same document-wide staple scan twice.
   // An event's own occurrence-math duration, read through THIS document's own
   // law (the magnitude's `frame`, normally `measure:human-time`) rather than
   // the registered standard -- a method, not the free function this used to
@@ -924,8 +950,7 @@ export class ChronologEngine {
         extentByEvent.set(event.id, extent);
       }
       if (!extent) continue;
-      const anchored = relation.role !== "completed"
-        && extent.startDays !== null
+      const anchored = extent.startDays !== null
         && (extent.source === "anchors" || extent.source === "anchor+magnitude");
       // A coordinate-less attachment relation is bare MEMBERSHIP -- "this object
       // belongs to this frame" -- and membership alone has never placed anything.

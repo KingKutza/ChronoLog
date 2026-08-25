@@ -127,9 +127,11 @@ test("stapleKindOptions is STAPLE_KINDS itself, filtered by scope -- never a han
   const objectKinds = Object.keys(STAPLE_KINDS).filter((kind) => kind !== "correspondence" && stapleKindScopes(kind).includes("object"));
   assert.deepEqual(stapleKindOptions("series").map(([value]) => value).sort(), seriesKinds.sort());
   assert.deepEqual(stapleKindOptions("object").map(([value]) => value).sort(), objectKinds.sort());
-  // Series-only kinds (partitioning/phase) must never be offered on a bare,
-  // non-recurring event -- there is no series body to place them on.
-  assert.ok(!stapleKindOptions("object").some(([value]) => value === "end"));
+  // Series-only kinds (rule handoff/phase) must never be offered on a bare,
+  // non-recurring event -- there is no series body to place them on. `end` is
+  // NOT series-only any more: on an object it is the ruled terminal abutment
+  // (the completion instant), so the registry legitimately offers it here.
+  assert.ok(stapleKindOptions("object").some(([value]) => value === "end"));
   assert.ok(!stapleKindOptions("object").some(([value]) => value === "inflection"));
   assert.ok(!stapleKindOptions("object").some(([value]) => value === "phase"));
   // `correspondence` (frame-to-frame) is not an object/series staple at all --
@@ -146,12 +148,15 @@ test("stapleKindOptions is STAPLE_KINDS itself, filtered by scope -- never a han
 // ---------------------------------------------------------------------------
 
 test("buildStapleInput rejects a kind that cannot connect this scope to the chosen far end", () => {
+  // `end` joins an object to a frame coordinate (the ruled terminal abutment),
+  // never to another object -- an abutment's instant is a coordinate, and an
+  // object-to-object connection is the anchor kind's job.
   assert.throws(
     () => buildStapleInput({
       scope: "object", targetId: "event:x", kind: "end",
-      farScope: "frame", farId: "calendar:test", coordinateText: "2026-01-01", law: coordinateLaw(createStructuralDocument(), "frame:wall-time")
+      farScope: "object", farId: "event:y"
     }),
-    /cannot connect an event/
+    /cannot connect an event to another object/
   );
 });
 

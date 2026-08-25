@@ -288,20 +288,32 @@ const DEVIATIONS = [
     const placement = placementOf(chronolog, event.id);
     placement.parameters = { ...placement.parameters, dateOnly: true };
   }],
-  // This one matters for a live reason: Stage B1 added a "mark done" control to
-  // the ToDo roster, which writes exactly such a relation. Completing one
-  // occurrence of a series is authored data and must never be healed away.
-  ["a completion recorded on this occurrence", (chronologDocument, event, chronolog) => {
-    const placement = placementOf(chronolog, event.id);
-    const completion = {
+  // These two matter for a live reason: the roster's done toggle writes exactly
+  // these records against one occurrence. Completing (or otherwise state-ing)
+  // one occurrence of a series is authored data and must never be healed away
+  // -- the membership and the end staple each block healing on their own.
+  ["a state membership recorded on this occurrence", (chronologDocument, event, chronolog) => {
+    chronolog.frames["frame:state-done"] = { id: "frame:state-done", title: "Done", traits: ["set", "group", "state"] };
+    const membership = {
       id: createId("relation"),
-      type: "attachment",
-      role: "completed",
-      event: event.id,
-      frame: placement.frame,
-      coordinate: structuredClone(placement.coordinate)
+      type: "membership",
+      group: "frame:state-done",
+      member: event.id
     };
-    chronolog.relations[completion.id] = completion;
+    chronolog.relations[membership.id] = membership;
+  }],
+  ["a completion end staple recorded on this occurrence", (chronologDocument, event, chronolog) => {
+    const placement = placementOf(chronolog, event.id);
+    const staple = {
+      id: createId("relation"),
+      type: "staple",
+      kind: "end",
+      ends: [
+        { object: event.id, point: "end" },
+        { frame: placement.frame, coordinate: structuredClone(placement.coordinate) }
+      ]
+    };
+    chronolog.relations[staple.id] = staple;
   }]
 ];
 
@@ -316,6 +328,43 @@ for (const [label, deviate] of DEVIATIONS) {
     assert.ok(chronologDocument.events[event.id], "the authored occurrence survives");
   });
 }
+
+// Both directions of the state-affiliation rule, pinned together: writing a
+// done membership plus its end staple against a materialized occurrence blocks
+// healing, and removing them re-enables it purely because the state changed
+// back -- the invariant is history-free, so nothing about HOW they were
+// removed matters.
+test("state affiliation blocks healing while present and re-enables it when removed", () => {
+  const { document: chronologDocument, override, event } = materializedFixture();
+  assert.equal(decisionFor(chronologDocument, override).healable, true, "healable before any state is written");
+
+  chronologDocument.frames["frame:state-done"] = { id: "frame:state-done", title: "Done", traits: ["set", "group", "state"] };
+  const placement = placementOf(chronologDocument, event.id);
+  const membership = { id: createId("relation"), type: "membership", group: "frame:state-done", member: event.id };
+  const staple = {
+    id: createId("relation"),
+    type: "staple",
+    kind: "end",
+    ends: [
+      { object: event.id, point: "end" },
+      { frame: placement.frame, coordinate: structuredClone(placement.coordinate) }
+    ]
+  };
+  chronologDocument.relations[membership.id] = membership;
+  chronologDocument.relations[staple.id] = staple;
+
+  const blocked = decisionFor(chronologDocument, override);
+  assert.equal(blocked.healable, false, "a done occurrence is authored data the heal must not destroy");
+  assert.match(blocked.reason, /relations deviate/);
+  assert.ok(chronologDocument.events[event.id], "the occurrence survives");
+
+  delete chronologDocument.relations[membership.id];
+  const stillBlocked = decisionFor(chronologDocument, override);
+  assert.equal(stillBlocked.healable, false, "the end staple blocks on its own too");
+
+  delete chronologDocument.relations[staple.id];
+  assert.equal(decisionFor(chronologDocument, override).healable, true, "removing the state re-enables the heal");
+});
 
 test("the heal refuses an occurrence whose group membership was changed for this instance only", () => {
   const { document: chronologDocument, override, groupRelations } = materializedFixture({ withGroup: true });

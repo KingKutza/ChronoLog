@@ -26,17 +26,26 @@ the archive.
    undo-tracked surfaces (the event editor and frame forms need more than
    a button). Frame overlay selection is session view state — a document
    authored before that change is bridged into the session once.
-2. **ToDo and Notes** — implement the staple/decay model (see LEXICON.md,
-   2026-08-17/18 rulings): floats live at their staples, project forward
-   for a keep-range, lapse from present view without deletion. Importance
-   levels are groups whose handling (keep-range, decay, display weight) is
-   a group property — composable, addable, removable, including irregular
-   levels; the fixed standard/important/landmark enum retires into that
-   model (display-side unification shipped, and display weight is now a
-   formula over the incoming weight with per-lens promotion thresholds —
-   see AGENTS.md, "Display weight"; keep-range and decay remain unbuilt
-   group properties, as do the persisted migrations — legacy trait
-   strings, additive kind-switching). **The Notes
+2. **ToDo and Notes** — the todo model is ruled (see LEXICON.md,
+   2026-08-25 rulings) and building: state is a frame (done is a frame a
+   todo affiliates with; the completion instant is a terminal end-staple;
+   the legacy completed relation migrates); staples are directional, not
+   typed (no due kind — a due reading derives from the arrow of time, and
+   a due staple can place a todo across the spectrum from now until due);
+   `contains` lets any object hold any objects with no judgment on the
+   family tree, so a list or project is a container object, never a group
+   frame, and task↔project needs no promotion; apparent magnitude with a
+   per-lens falloff over distance from an object's staple-span home
+   replaces keep-range (importance groups modify magnitude; the fixed
+   standard/important/landmark enum retires by migration); there are no
+   filters — projecting or dropping state frames does that job. Two todo
+   lenses, list and board (a gantt may follow), independent projections
+   like Spiral and Radial; three capture modes (quick delimited line,
+   tab-through fields, placed in a lens); title-only items read sparse at
+   a glance. ICS todo mapping (DUE, STATUS, PRIORITY) is held until the
+   model settles; VTODO import/export behavior is preserved through the
+   migration. Reconciling the staple-kind registry with the directional
+   ruling is a later pass. **The Notes
    default is Obsidian-shaped**: a name, properties and tags (groups)
    under a rolled-up section, and a big markdown text window that renders
    everything except the line under the cursor in edit mode. Staples

@@ -1,5 +1,6 @@
 import { eventComponentKey, residualEventComponent } from "./ics.js";
 import { clone, migrateDocument, overridePatternId, validateDocument } from "./model.js";
+import { DONE_STATE_FRAME_ID, ensureStateFrame } from "./object-kinds.js";
 import { OpLog, applyOps } from "./ops.js";
 
 function parsedRRule(value = "") {
@@ -175,9 +176,60 @@ function migrateStapleConnections(document, report = null) {
   return document;
 }
 
+// Completion used to be its own attachment relation (`role: "completed"`,
+// coordinate = the instant). The ruled shape stores the same two facts where
+// they belong: done is membership in the Done state frame (state is a frame,
+// not a property) and the instant is an `end`-kind staple -- the object's own
+// `end` point abutting a frame coordinate. A RESTATEMENT, like the staple
+// conversion above: the coordinate survives at exactly the instant it named
+// (a relation without one becomes membership only -- done, instant unstated),
+// and the legacy record is REPLACED, never kept alongside.
+//
+// Idempotent by trigger: the legacy shape itself is what fires this, and the
+// rewrite removes it. The membership reuses the relation's own id and the
+// staple's id derives from it, so repeated loads of one legacy file converge
+// on identical records rather than minting fresh ids per window.
+function migrateCompletedRelations(document, report = null) {
+  let converted = 0;
+  for (const relation of Object.values(document?.relations || {})) {
+    if (relation?.type !== "attachment" || relation.role !== "completed") continue;
+    ensureStateFrame(document, DONE_STATE_FRAME_ID);
+    const { event, frame, coordinate, parameters } = relation;
+    if (coordinate) {
+      const stapleId = `${relation.id}:completed-at`;
+      document.relations[stapleId] = {
+        id: stapleId,
+        type: "staple",
+        kind: "end",
+        ends: [
+          { object: event, point: "end" },
+          { frame, coordinate, ...(parameters ? { parameters } : {}) }
+        ],
+        ...(relation.provenance ? { provenance: clone(relation.provenance) } : {})
+      };
+    }
+    for (const key of Object.keys(relation)) {
+      if (key !== "id" && key !== "provenance") delete relation[key];
+    }
+    relation.type = "membership";
+    relation.group = DONE_STATE_FRAME_ID;
+    relation.member = event;
+    converted += 1;
+  }
+  if (converted) {
+    addRepair(report, {
+      kind: "completed-state",
+      count: converted,
+      message: `Restated ${converted} completion${converted === 1 ? "" : "s"} as Done-state membership with an end staple.`
+    });
+  }
+  return document;
+}
+
 export function compactDocument(document, report = null) {
   migrateDocument(document);
   migrateStapleConnections(document, report);
+  migrateCompletedRelations(document, report);
   recoverLegacyRecurrenceConstraints(document);
   recoverDanglingOverrideReplacements(document);
   recoverOrphanedVirtualOverrides(document, report);

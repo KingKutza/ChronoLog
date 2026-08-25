@@ -144,6 +144,70 @@ Rulings and additions (Don, 2026-08-17/18, KISS pass + dock/floats design):
   (bounded, settable) are different things; and the inflection staple
   records where life changed the schedule.
 
+Rulings and additions (Don, 2026-08-25, ToDo design session):
+- **Marginalia** — promoted to a first-class term, use to be determined.
+- **The second memory**: "It should always be lower friction to fix the
+  difference between the record and reality then it is to leave it be, I
+  should never have to lie about reality to fit the system. Chronolog is in
+  effect a second memory." The failure of existing todo apps: "they are clean
+  and that forces the user to lie, and then sometimes it is easier to lie by
+  omition then to update."
+- **State is a frame**: "there is no resolution, there is a state, and there
+  is a staple, a staple can be terminal or not, eg. the end of this todo
+  abuts the beginning of this event. And state, which is just a group/frame
+  affiliation, that we say there is a done state witch is a frame and this
+  todo is a part of it. We could even treat it as a different sort of time
+  call it an atomic time, think along the lines of a stack, and so when we
+  project it we can view the data as sequential."
+- **Staples are directional, not typed**: "the difference between a start and
+  due staple is only the direction of time along the frame they attach too,
+  or where multiple frames, the collective vector of time across the set...
+  while we could maybe think of it all and hard code it all in like 60k lines
+  of code, we could also treat with it in an extensible and modular fashion
+  that is agnostic on such issues and then have a more robust system that
+  only uses 3k lines of code." A due staple can place: a future todo "exists
+  in the spectrum of now until due"; behind now it shows "as a past item, not
+  done or complete just past."
+- **Containment passes no judgment**: events, notes, and todos are one object
+  class that "can... all contain and be contained by any arbitrary number of
+  other objects, and this should support any valid family tree... the system
+  should not pass judgment on the shape of events and other event like
+  objects within it nor on the relations the have to one an other. And the
+  lenses should project that structure whatever it is." Rank is an apparent
+  property, not an actual one. "A list is NOT a group frame" — a project is
+  an event/note/todo that contains other such items.
+- **Apparent magnitude** (supersedes the keep-range mechanism above; the
+  projection-decays principle stands): objects "have an apparent magnitude
+  implicit and them modified by membership, and relation, then the lense has
+  an opinion on what magnitude is displayed how in its range. Items past due
+  would still float relative to the range of that due and create/start and
+  the farther they are from that home the more magnitude they loose, thus
+  falling off into the past and out of projection."
+- **The needle in the haystack** (why there are no filters): "the pile hides
+  everything by showing everything. A needle in a haystack is not hidden
+  because it is not in your range of vision but because it looks like
+  everything else in your range of vision." State is a frame, so "by
+  controlling the frames projected we can effect the identical view as would
+  be rendered by a filter." "Listing todo items by not done, is stupid and
+  wrongheaded."
+- **Gamification, excluded but not on principle**: it "only works under 3
+  assumptions, A) good behavior is rewarded, B) bad behavior is punished,
+  and C) the most convenient way to move the score is to practice the
+  behavior." Todoist's score was "an accumulated interaction measure not a
+  score." Excluded here as an extra system whose safely-scorable set only
+  partially overlaps good behavior in using the app.
+- **ToDo lenses**: list and board are two lenses, "maybe 3" — like Spiral and
+  Radial, "there is no common sub straight except that data. both lenses...
+  independently project the data per there own rules." Three capture modes:
+  "a quick enter mode, that we can just type like common delimited shit...
+  a standard enter that is for a frame where we tab through, then there is
+  also a create where we place in a lense, that is particular."
+- **No double storage**: an Obsidian markdown checkbox "is a string in the
+  data sense untill it acts like an object then it inherits the bits needed
+  to hold those relationships and data" — the same ruling as no-op series
+  instance edits. ICS todo conversions are held until the data model is
+  nailed down.
+
 ## Vocabulary (time-traveler framing, from ReadMe.txt and the pr-2 mockup)
 
 - **Prime Line / PrimeLine** — the canonical timeline; the one currently displayed as primary.

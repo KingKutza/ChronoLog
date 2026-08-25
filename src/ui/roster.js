@@ -1,46 +1,59 @@
 import { formatCivil, nowDays } from "../exact.js";
 import { coordinateLaw, GREGORIAN_LAW } from "../coordinate-law.js";
-import { addRelation } from "../model.js";
-import { OBJECT_KINDS, rosterEntries } from "../object-kinds.js";
+import { addRelation, frameEnd, objectEnd, putStaple, removeStaple } from "../model.js";
+import {
+  DONE_STATE_FRAME_ID,
+  DONE_STATE_TITLE,
+  OBJECT_KINDS,
+  ensureStateFrame,
+  objectEndStaple,
+  rosterEntries,
+  stateAffiliations
+} from "../object-kinds.js";
 import { escapeHTML } from "./dom-helpers.js";
 
-// A ToDo's completed relation, if it has one -- the same "temporal attachment
-// with role completed" shape the inspector's Completed date field reads and
-// writes (src/ui/inspector.js's `temporalRelations`/completed lookup), so this
-// finds exactly what that field would find.
-function findCompletedRelation(documentValue, eventId) {
-  return Object.values(documentValue.relations).find(
-    (relation) => relation.type === "attachment" && relation.event === eventId && relation.role === "completed"
-  );
-}
-
-// Mark or clear a ToDo's completion straight from its roster row: a clear
-// mechanism the owner asked for, that writes exactly the fact the inspector's
-// Completed date field already writes -- a temporal attachment relation with
-// role "completed", anchored to now the same way a new float anchors to now.
-// Routed through `executeEventChange` so the toggle is one undoable step and
-// unchecking restores the exact prior state, including the removed relation.
-// Marking done never deletes, hides, or otherwise touches the ToDo's own
-// record -- ROADMAP #9's staple/decay model is unsettled, so this invents no
-// lifecycle rule beyond the one fact the owner asked for.
-export function toggleTodoCompletion(app, eventId) {
+// Toggle an object's affiliation with a STATE frame -- done today, cancelled or
+// postponed tomorrow, all through the one mechanism the owner ruled: state is a
+// frame, being in it is group membership, and the instant (when stated) is the
+// object's end staple ("the end of this todo abuts" the moment it finished).
+// Entering the state writes membership plus an end staple at `at`; leaving it
+// removes both. One `executeEventChange` bundle either way, so undo restores
+// the exact prior records -- the lazily-minted state frame included, on the
+// first toggle that created it. Nothing here deletes, hides, or otherwise
+// touches the object's own record: a state is a fact about it, never a
+// lifecycle rule (ROADMAP #2's staple/decay model stays unsettled).
+export function toggleStateAffiliation(app, eventId, {
+  stateFrame = DONE_STATE_FRAME_ID,
+  title = DONE_STATE_TITLE,
+  at = null
+} = {}) {
   const { chronolog } = app;
   if (!chronolog.events[eventId]) return;
-  const alreadyCompleted = Boolean(findCompletedRelation(chronolog, eventId));
-  app.executeEventChange(alreadyCompleted ? "Mark ToDo not done" : "Mark ToDo done", eventId, (documentValue) => {
-    const existing = findCompletedRelation(documentValue, eventId);
+  const affiliated = stateAffiliations(chronolog, eventId, app.engine)
+    .some((entry) => entry.frame === stateFrame);
+  const label = affiliated ? `Leave state ${title}` : `Enter state ${title}`;
+  app.executeEventChange(label, eventId, (documentValue) => {
+    const existing = Object.values(documentValue.relations).find((relation) =>
+      relation.type === "membership" && relation.group === stateFrame && relation.member === eventId);
     if (existing) {
       delete documentValue.relations[existing.id];
+      // The instant goes with the state: un-doing a done is a claim that it did
+      // not finish, so the staple that said when it finished cannot stand.
+      const staple = objectEndStaple(documentValue, eventId);
+      if (staple) removeStaple(documentValue, staple.id);
       return;
     }
-    // The completed relation lands on the same calendar frame as whatever
-    // placement/observed relation the ToDo already has, so both facts agree on
-    // where this object lives; an unstapled float falls back to the active frame,
-    // the same default a brand-new float gets.
+    ensureStateFrame(documentValue, stateFrame, title);
+    addRelation(documentValue, { type: "membership", group: stateFrame, member: eventId });
+    // The end staple lands on the same calendar frame as whatever placement/
+    // observed relation the object already has, so both facts agree on where
+    // this object lives; an unstapled float falls back to the active frame,
+    // the same default a brand-new float gets. One end staple per object: a
+    // second state entered while an instant is already stated reuses it.
+    if (objectEndStaple(documentValue, eventId)) return;
     const primary = Object.values(documentValue.relations).find(
       (relation) => relation.type === "attachment"
         && relation.event === eventId
-        && relation.role !== "completed"
         && relation.coordinate
     );
     const frame = primary?.frame || app.session.activeFrame;
@@ -55,20 +68,24 @@ export function toggleTodoCompletion(app, eventId) {
     } catch {
       law = GREGORIAN_LAW;
     }
-    addRelation(documentValue, {
-      type: "attachment",
-      event: eventId,
-      frame,
-      role: "completed",
-      coordinate: law.fromDays(nowDays())
+    putStaple(documentValue, {
+      kind: "end",
+      ends: [objectEnd(eventId, "end"), frameEnd(frame, law.fromDays(at ?? nowDays()))]
     });
   });
+}
+
+// The roster checkbox's own verb: done-ness, through the general state toggle
+// above. Kept as a named export so the checkbox, the tests, and any future
+// surface that means specifically "done" say it the same way.
+export function toggleTodoCompletion(app, eventId) {
+  toggleStateAffiliation(app, eventId);
 }
 
 // The ToDo and Notes dock cards: a roster of every object of one kind, plus a
 // "new" affordance. Deliberately a flat list — the staple/decay model (floats
 // living at their staples, projecting forward for a keep-range, lapsing from the
-// present view without deletion) is ROADMAP #9 and is not settled, so this card
+// present view without deletion) is ROADMAP #2 and is not settled, so this card
 // invents no lifecycle rule that would later have to be unwound.
 export function createRoster(app) {
   function render(kind) {

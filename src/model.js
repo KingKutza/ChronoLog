@@ -220,10 +220,14 @@ export function validateDocument(document) {
       }
       const event = document.events?.[relation.event];
       const frame = document.frames?.[relation.frame];
+      // "completed" is no longer an attachment role: completion is a state-frame
+      // membership plus an optional end staple (the compactDocument repair
+      // migrates the legacy shape before validation ever sees it), so a role
+      // that spells the old shape is refused rather than silently double-stored.
       if (
         event?.traits?.includes("task")
         && frame?.traits?.includes("calendar")
-        && !["observed", "completed"].includes(relation.role)
+        && relation.role !== "observed"
       ) {
         errors.push(`Task attachment ${id} must be retrospective`);
       }
@@ -242,6 +246,18 @@ export function validateDocument(document) {
       if (relation.include === false || relation.mode === "exclude") {
         errors.push(`Membership ${id} uses negative group membership, which is not defined`);
       }
+    } else if (relation.type === "contains") {
+      // Containment without judgment: parent and child are both event ids
+      // (events/notes/todos are one object class), multi-parent and any depth
+      // are legal, and NO cycle refusal happens here -- the system passes no
+      // judgment on family-tree shape, so derivations carry their own visit-set
+      // guards instead. Only the two claims a record cannot survive without are
+      // checked: it points at real objects, and it does not contain itself.
+      if (relation.parent === relation.child) {
+        errors.push(`Containment ${id} makes an object contain itself`);
+      }
+      if (!document.events?.[relation.parent]) errors.push(`Containment ${id} references a missing parent`);
+      if (!document.events?.[relation.child]) errors.push(`Containment ${id} references a missing child`);
     } else if (relation.type === "shared-segment") {
       validateSharedSegment(document, relation, errors);
     } else if (relation.type === "termination") {
@@ -839,6 +855,39 @@ function removeStaplesReferencing(document, ids) {
 // next load.
 export function removeStaplesForObjects(document, objectIds) {
   return removeStaplesReferencing(document, objectIds);
+}
+
+// A containment edge belongs to BOTH of its objects: deleting either the
+// parent or the child has to take the edge, or the survivor keeps a pointer to
+// nothing and one bad pointer takes the whole file offline at its next load.
+// Same invariant, same transaction as `removeStaplesForObjects` above.
+export function removeContainsForObjects(document, objectIds) {
+  const removed = objectIds instanceof Set ? objectIds : new Set(objectIds);
+  if (!removed.size) return 0;
+  let count = 0;
+  for (const [id, relation] of Object.entries(document?.relations || {})) {
+    if (relation?.type !== "contains") continue;
+    if (!removed.has(relation.parent) && !removed.has(relation.child)) continue;
+    delete document.relations[id];
+    count += 1;
+  }
+  return count;
+}
+
+// The membership-keyed sibling: a membership names its member the way a
+// containment names its ends, so a deleted object's memberships (its state
+// affiliations included) go with it rather than dangling into validation
+// failure at the next load.
+export function removeMembershipsForMembers(document, memberIds) {
+  const removed = memberIds instanceof Set ? memberIds : new Set(memberIds);
+  if (!removed.size) return 0;
+  let count = 0;
+  for (const [id, relation] of Object.entries(document?.relations || {})) {
+    if (relation?.type !== "membership" || !removed.has(relation.member)) continue;
+    delete document.relations[id];
+    count += 1;
+  }
+  return count;
 }
 
 export { removeStaplesReferencing };

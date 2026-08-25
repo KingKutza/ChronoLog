@@ -29,6 +29,7 @@ import {
   suppressVirtual,
   touch
 } from "./model.js";
+import { DONE_STATE_FRAME_ID, doneAffiliation, ensureStateFrame } from "./object-kinds.js";
 import { recurrenceEndMode, recurrenceUntilForCoordinate } from "./recurrence-end.js";
 import {
   DEFAULT_POINT,
@@ -38,6 +39,7 @@ import {
   resolveObjectExtent,
   seriesSegments,
   stapleEndFor,
+  stapleKind,
   stapleOtherEnd,
   staplesForObject
 } from "./staples.js";
@@ -546,13 +548,26 @@ function eventFromEntry(document, entry, warnings, pendingAnchors) {
     });
   }
   if (entry.task && entry.completed) {
+    // COMPLETED maps to the ruled shape: done is Done-state membership, the
+    // instant is the object's end staple ("the end of this todo abuts" the
+    // moment it finished). Time typing rides on the staple's frame end so
+    // export can restate the same COMPLETED text.
+    ensureStateFrame(document, DONE_STATE_FRAME_ID);
     addRelation(document, {
-      type: "attachment",
-      event: event.id,
-      frame: entry.calendarFrame.id,
-      role: "completed",
-      coordinate: entry.completed.coordinate,
-      parameters: { utc: entry.completed.utc, timeZone: entry.completed.timeZone },
+      type: "membership",
+      group: DONE_STATE_FRAME_ID,
+      member: event.id,
+      provenance: { kind: "ics", source: entry.sourceId }
+    });
+    putStaple(document, {
+      kind: "end",
+      ends: [
+        objectEnd(event.id, "end"),
+        frameEnd(entry.calendarFrame.id, entry.completed.coordinate, {
+          utc: entry.completed.utc,
+          timeZone: entry.completed.timeZone
+        })
+      ],
       provenance: { kind: "ics", source: entry.sourceId }
     });
   }
@@ -933,7 +948,11 @@ function eventComponent(document, event, relation, now, componentName = "VEVENT"
       (item) => item.type === "attachment" && item.event === event.id
     );
     const observed = taskRelations.find((item) => item.role === "observed") || relation;
-    const completed = taskRelations.find((item) => item.role === "completed");
+    // Completion reads through the one state derivation (src/object-kinds.js):
+    // Done-frame membership plus the end staple's frame end, whose coordinate,
+    // frame, and time typing are exactly what COMPLETED restates. A done
+    // affiliation with no stated instant has nothing to write, honestly.
+    const completed = doneAffiliation(document, event.id)?.at || null;
     if (observed?.coordinate) {
       if (observed.parameters?.stamp) {
         setProperty(component, "DTSTAMP", coordinateToICS(icsBoundaryCoordinate(document, observed.frame, observed.coordinate), false, true));
@@ -1019,7 +1038,13 @@ function eventComponent(document, event, relation, now, componentName = "VEVENT"
 // reject it specially.
 function applyAnchorAnnotations(component, document, engine, event) {
   if (!engine || !event?.id) return;
-  const staples = staplesForObject(document, event.id);
+  // Only ANCHORING kinds annotate: X-CHRONOLOG-ANCHOR round-trips back through
+  // `finalizeAnchorStaples` as an anchor staple, so writing a non-anchoring
+  // object staple here -- the completion end staple -- would reimport as an
+  // end ANCHOR that relocates the object. The completion instant already
+  // round-trips as COMPLETED, whole and losslessly.
+  const staples = staplesForObject(document, event.id)
+    .filter((staple) => stapleKind(staple.kind)?.anchors);
   removeProperty(component, "X-CHRONOLOG-ANCHOR");
   removeProperty(component, "X-CHRONOLOG-SPREAD");
   if (!staples.length) return;
@@ -1344,7 +1369,7 @@ export function exportICS(document, {
     const event = document.events[relation.event];
     if (!event) continue;
     if (event.traits.includes("task")) {
-      if (relation.role === "completed" || exportedTasks.has(event.id)) continue;
+      if (exportedTasks.has(event.id)) continue;
       exportedTasks.add(event.id);
     }
     const component = eventComponent(document, event, relation, now);

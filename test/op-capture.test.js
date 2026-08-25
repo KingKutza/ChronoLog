@@ -168,9 +168,14 @@ test("executeEventChange deleting an event with relations and an override emits 
   });
 
   const deleted = changes.at(-1);
+  // The done membership and completion end staple travel with the deletion
+  // (cascadeRemovedObjects), even though the mutate above never named them --
+  // referential cascades are the edit's job.
   assertExactOps(deleted.ops, [
     "del events/event:sample-task",
-    "del relations/relation:sample-task-completed",
+    "del relations/membership:sample-task",
+    "del relations/relation:sample-task-done",
+    "del relations/relation:sample-task-completed-at",
     `del overrides/${overrideId}`,
     "put meta/modified"
   ], "delete event with relations and override");
@@ -188,11 +193,16 @@ test("executeEventSetChange over two events emits puts for both and their relati
   });
 
   const change = changes.at(-1);
+  // The standup's group membership is one of ITS OWN records now (memberships
+  // travel with the object the way attachments always have), so the bundle
+  // legitimately re-puts it -- but nothing of the untouched third event's, and
+  // no state frame, appears.
   assertExactOps(change.ops, [
     `put events/${standupId}`,
     `put events/${appointmentId}`,
     "put relations/relation:sample-standup-placed",
     "put relations/relation:sample-appointment-placed",
+    "put relations/membership:sample-standup",
     "put meta/modified"
   ], "event set change");
 });

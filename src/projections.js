@@ -563,7 +563,7 @@ function renderIntimate(target, context) {
       button.style.top = `${item.start / minutesPerHour * hourPixels}px`;
       button.style.height = `${Math.max(13, (item.end - item.start) / minutesPerHour * hourPixels)}px`;
       if (float) {
-        // Right-edge anchoring is the ruling (ROADMAP #9: floats read as
+        // Right-edge anchoring is the ruling (ROADMAP #2: floats read as
         // marginalia down the right of the day); it is not a reason to
         // narrow one. Absent a genuine overlapping float, a float claims the
         // full column, same as a lone timed event would -- only a real

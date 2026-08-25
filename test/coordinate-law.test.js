@@ -475,10 +475,13 @@ test("wave 8.20 residue: toggleTodoCompletion (src/ui/roster.js) resolves 'now' 
   toggleTodoCompletion(app, todo.id);
   const after = nowDays();
 
-  const completed = Object.values(app.chronolog.relations).find(
-    (relation) => relation.type === "attachment" && relation.event === todo.id && relation.role === "completed"
+  const staple = Object.values(app.chronolog.relations).find(
+    (relation) => relation.type === "staple"
+      && relation.kind === "end"
+      && relation.ends?.some((end) => end.object === todo.id && end.point === "end")
   );
-  assert.ok(completed, "checking the box wrote a completed relation");
+  assert.ok(staple, "checking the box wrote the completion end staple");
+  const completed = staple.ends.find((end) => end.frame);
   assert.equal(completed.frame, "calendar:personal");
   const resolved = coordinateLaw(app.chronolog, "calendar:personal").toDays(completed.coordinate);
   // `fromDays` carries its continuous tail as a 12-place decimal (its own

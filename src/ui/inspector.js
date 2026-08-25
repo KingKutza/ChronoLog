@@ -25,7 +25,18 @@ import {
   removeStaple,
   seriesEnd
 } from "../model.js";
-import { OBJECT_KINDS, normalizeObjectKind, objectKindForEvent, traitsForObjectKind } from "../object-kinds.js";
+import {
+  DONE_STATE_FRAME_ID,
+  DONE_STATE_TITLE,
+  OBJECT_KINDS,
+  ensureStateFrame,
+  isStateFrame,
+  normalizeObjectKind,
+  objectEndStaple,
+  objectKindForEvent,
+  stateAffiliations,
+  traitsForObjectKind
+} from "../object-kinds.js";
 import { delOp, putOp } from "../ops.js";
 import { calendarFrames, groupFrames } from "../projections.js";
 import {
@@ -786,9 +797,12 @@ export function createInspector(app) {
 
   function primaryRelation(eventId) {
     const { session } = app;
+    // No completed role to skip any more: completion is a state membership plus
+    // an end staple (src/object-kinds.js), so every calendar attachment here is
+    // a candidate placement.
     const all = temporalRelations(eventId);
-    return all.find((relation) => relation.frame === session.activeFrame && relation.role !== "completed")
-      || all.find((relation) => relation.role !== "completed")
+    return all.find((relation) => relation.frame === session.activeFrame)
+      || all[0]
       || null;
   }
 
@@ -1018,7 +1032,11 @@ export function createInspector(app) {
     if (!event) return false;
     session.inspector = { type: "event", id: eventId };
     const relation = primaryRelation(eventId);
-    const completed = temporalRelations(eventId).find((item) => item.role === "completed");
+    // Done is a state-frame affiliation; the instant, when stated, is the
+    // object's end staple. The Completed field reads and writes exactly those
+    // two records -- the same derivation the roster's checkbox reads.
+    const completed = stateAffiliations(chronolog, eventId, engine)
+      .find((entry) => entry.frame === DONE_STATE_FRAME_ID)?.at || null;
     const duration = friendlyDuration(event);
     const calendars = calendarFrames(chronolog);
     // Importance frames appear WITH ordinary groups now (ROADMAP #9: the split
@@ -1032,7 +1050,11 @@ export function createInspector(app) {
     // Groups membership plus the weight readout below are the two remaining
     // dials, and `event.display.lenses` (an existing document's authored data)
     // is read by src/projections.js untouched; nothing here writes it any more.
-    const allGroups = groupFrames(chronolog);
+    // State frames (Done and its future siblings) are groups mechanically but
+    // their membership is the state toggle's and the Completed field's to
+    // write -- offering them here as checkboxes would mint a second,
+    // attachment-shaped record beside the membership the toggle owns.
+    const allGroups = groupFrames(chronolog).filter((frame) => !isStateFrame(frame));
     const recurrence = findRecurrencePattern(chronolog, eventId);
     const originalRecurrenceChoice = recurrenceFormChoice(recurrence);
     const recurrenceEnd = recurrenceEndMode(recurrence?.rrule);
@@ -1450,8 +1472,7 @@ export function createInspector(app) {
             const target = placementRelation(documentValue, eventId)
               || Object.values(documentValue.relations).find((item) => item.type === "attachment"
                 && item.event === eventId
-                && documentValue.frames[item.frame]?.traits.includes("calendar")
-                && item.role !== "completed");
+                && documentValue.frames[item.frame]?.traits.includes("calendar"));
             if (!target) return;
             const law = coordinateLaw(documentValue, target.frame);
             const patch = implicitPlacementEdit(text, law);
@@ -1744,7 +1765,6 @@ export function createInspector(app) {
             (item) => item.type === "attachment"
               && item.event === eventId
               && documentValue.frames[item.frame]?.traits.includes("calendar")
-              && item.role !== "completed"
           );
           // The attachment relation is FRAME MEMBERSHIP -- "this object
           // belongs to this calendar" -- and it is kept regardless of
@@ -1765,24 +1785,29 @@ export function createInspector(app) {
               role: target.traits.includes("task") ? "observed" : "placed"
             });
           }
-          const existingCompleted = Object.values(documentValue.relations).find(
-            (item) => item.type === "attachment" && item.event === eventId && item.role === "completed"
+          // The Completed field writes the ruled shape: done is membership in
+          // the Done state frame, the instant is the object's end staple.
+          // A date entered means done at that instant; the date cleared while
+          // an instant was stated means not done (both records go). A done
+          // affiliation with NO stated instant is legal and is left alone --
+          // a blank field agrees with it rather than revoking it.
+          const doneMembership = Object.values(documentValue.relations).find(
+            (item) => item.type === "membership" && item.group === DONE_STATE_FRAME_ID && item.member === eventId
           );
+          const endStaple = objectEndStaple(documentValue, eventId);
           if (completedCoordinate) {
-            if (existingCompleted) {
-              existingCompleted.coordinate = completedCoordinate;
-              existingCompleted.frame = chosenFrame;
-            } else {
-              addRelation(documentValue, {
-                type: "attachment",
-                event: eventId,
-                frame: chosenFrame,
-                role: "completed",
-                coordinate: completedCoordinate
-              });
+            ensureStateFrame(documentValue, DONE_STATE_FRAME_ID, DONE_STATE_TITLE);
+            if (!doneMembership) {
+              addRelation(documentValue, { type: "membership", group: DONE_STATE_FRAME_ID, member: eventId });
             }
-          } else if (existingCompleted) {
-            delete documentValue.relations[existingCompleted.id];
+            putStaple(documentValue, {
+              ...(endStaple ? { id: endStaple.id, ...(endStaple.spread ? { spread: endStaple.spread } : {}) } : {}),
+              kind: "end",
+              ends: [objectEnd(eventId, "end"), frameEnd(chosenFrame, completedCoordinate)]
+            });
+          } else if (endStaple) {
+            removeStaple(documentValue, endStaple.id);
+            if (doneMembership) delete documentValue.relations[doneMembership.id];
           }
           for (const relationValue of Object.values(documentValue.relations)) {
             if (

@@ -126,7 +126,10 @@ test("VTODO round-trips DTSTART, DTSTAMP, and COMPLETED distinctly", () => {
     .filter((relation) => relation.event === task.id)
     .map((relation) => relation.role)
     .sort();
-  assert.deepEqual(roles, ["completed", "observed"]);
+  assert.deepEqual(roles, ["observed"], "COMPLETED is a Done-state membership plus an end staple now, not a role");
+  assert.ok(Object.values(document.relations).some(
+    (relation) => relation.type === "membership" && relation.group === "frame:state-done" && relation.member === task.id
+  ));
   const output = exportICS(document, { frame: result.frames[0], now: NOW });
   assert.match(output, /DTSTART:20260805T120000Z/);
   assert.match(output, /DTSTAMP:20260807T010000Z/);
