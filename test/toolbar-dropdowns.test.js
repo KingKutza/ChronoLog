@@ -410,6 +410,29 @@ test("hidden-lens panel contents can be rebuilt while the drop is open and porta
   }
 });
 
+// The ToDo lenses are ordinary catalog lenses, so every hidden-lens flow --
+// the drop offering them, and restore-and-switch from it -- covers them with
+// no lens-specific code anywhere in the toolbar.
+test("the hidden-lens flows carry the ToDo lenses like any other catalog lens", () => {
+  const h = harness();
+  try {
+    const { session } = h.app;
+    session.configureLenses({ enabledLenses: session.lensOrder.filter((lens) => !["list", "board"].includes(lens)) });
+    h.toolbar.updateChrome();
+    const entry = h.toolbar.barDropdowns.get("hidden-lenses");
+    assert.equal(h.hiddenLenses.hidden, false, "hiding the ToDo lenses shows the drop");
+    open(entry.container);
+    const titles = entry.panel.children.map((child) => child.textContent);
+    assert.deepEqual(titles, ["List", "Board"], "both ToDo lenses offer their restore buttons");
+    // Restoring from the drop re-enables and switches, same as any lens.
+    entry.panel.children[0].dispatch("click");
+    assert.ok(session.enabledLenses.includes("list"), "picking List restores it to the bar");
+    assert.equal(session.currentLens(), "list", "and switches to it");
+  } finally {
+    h.restore();
+  }
+});
+
 // A2/A7 smoke check riding along on the same harness: the Frame drop is a
 // bar dropdown too (relabeled from "Active calendar"), and it enrolls and
 // behaves exactly like the others — proof a *new* dropdown needs nothing

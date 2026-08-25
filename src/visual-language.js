@@ -5,6 +5,8 @@
 
 import { applyWeightFormula, defaultWeightRuntime, normalizeWeightFormula, weightContributionOrder } from "./weight-formula.js";
 import { GREGORIAN_LAW } from "./coordinate-law.js";
+import { DONE_STATE_FRAME_ID, isStateFrame } from "./object-kinds.js";
+import { staplesForObject } from "./staples.js";
 
 export const THEME_FIELDS = Object.freeze({
   ground: "Ground",
@@ -167,6 +169,51 @@ export function sigilForFact(fact, durationMinutes = 0, importance = "standard",
 
 export function sigilDescription(fact, durationMinutes = 0, importance = "standard", minutesPerDay = GREGORIAN_LAW.minutesPerDay().toNumber()) {
   return SIGIL_VOCABULARY[sigilForFact(fact, durationMinutes, importance, minutesPerDay)].label;
+}
+
+/**
+ * The cross-lens ToDo state vocabulary, stamped as `data-todo-state`:
+ *
+ *   "done"    affiliated with the Done state frame.
+ *   "closed"  affiliated with any other state frame (cancelled, postponed --
+ *             whatever states the document holds).
+ *   "sparse"  title-only capture: no state, no group membership of any kind,
+ *             no description, and no authored staple beyond the creation
+ *             placement (an attachment relation, not a staple record).
+ *   null      open -- the default carries no stamp.
+ *
+ * State is a modifier axis over the existing task ○ glyph, never a new
+ * glyph. Non-todos and virtual occurrences answer null: state is authored
+ * per object, and a projection's generated occurrence has none of its own.
+ * `context` is the `{document, engine}` shape every lens renderer threads.
+ */
+export function todoStateForFact(context, fact) {
+  const event = fact?.event;
+  if (!event?.traits?.some((trait) => trait === "task" || trait === "todo")) return null;
+  if (fact?.virtualId || event.provenance?.kind === "pattern") return null;
+  const document = context?.document;
+  const engine = context?.engine;
+  const memberships = engine?.eventDisplayGroupMemberships
+    ? engine.eventDisplayGroupMemberships(event.id)
+    : Object.values(document?.relations || {})
+      .filter((relation) => relation?.type === "membership" && relation.member === event.id)
+      .map((relation) => ({ group: relation.group }));
+  const stateFrames = memberships
+    .map(({ group }) => document?.frames?.[group])
+    .filter((frame) => isStateFrame(frame));
+  if (stateFrames.some((frame) => frame.id === DONE_STATE_FRAME_ID)) return "done";
+  if (stateFrames.length) return "closed";
+  if (String(event.payload?.description || "").trim()) return null;
+  if (memberships.length) return null;
+  if (staplesForObject(document, event.id, engine).length) return null;
+  return "sparse";
+}
+
+// Aria/sigil labels compose the state ("Task or float, done: Title") -- one
+// composer so every stamped node says it the same way.
+export function sigilAriaLabel(sigil, todoState, title) {
+  const vocabulary = SIGIL_VOCABULARY[sigil] || SIGIL_VOCABULARY.point;
+  return `${vocabulary.label}${todoState ? `, ${todoState}` : ""}: ${title || "untitled"}`;
 }
 
 function importanceSource(context, fact) {

@@ -452,9 +452,9 @@ button {
 #lens-bar button:hover { background: var(--surface); color: var(--ink); }
 #lens-bar button.active { background: var(--ink); color: white; }
 
-/* ToDo and Notes are not lenses — they open dock cards rather than changing what
-   the stage projects — so they are coloured distinctly and never take the lens
-   bar's active state. */
+/* Notes is not a lens — it opens a dock card rather than changing what the
+   stage projects — so it is coloured distinctly and never takes the lens
+   bar's active state. ToDo graduated: List and Board are lenses. */
 #lens-bar .view-bar-card {
   border: 1px solid color-mix(in srgb, var(--secondary) 42%, transparent);
   color: color-mix(in srgb, var(--secondary) 72%, var(--ink));
@@ -1949,7 +1949,7 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
 }
 .lens-workspace-row .check-chip { grid-area: check; min-width: 0; }
 /* The two promotion thresholds share the row rather than taking one of their
-   own: ROADMAP #1 asks the lens workspace to fit without scrolling, and seven
+   own: ROADMAP #1 asks the lens workspace to fit without scrolling, and nine
    lenses each gaining a line would break that. */
 .lens-threshold-fields {
   grid-area: thresholds;
@@ -2077,3 +2077,160 @@ body.radial-wheel-motion .radial-event-arc { animation: none; }
   #viewport { position: static; }
   html, body, #app, #projection { height: auto; overflow: visible; }
 }
+
+/* ToDo state grammar: state is a modifier axis over the existing task ○
+   glyph, stamped as data-todo-state by applySigil (src/projections.js) --
+   done = filled ring + strikethrough where titles render, closed = slashed
+   ring + strikethrough, sparse (title-only capture) = hollow/dotted. Every
+   color reads through the theme variables, so both themes get it. */
+.event-chip[data-todo-state="done"],
+.event-chip[data-todo-state="closed"],
+.intimate-event[data-todo-state="done"] strong,
+.intimate-event[data-todo-state="closed"] strong { text-decoration: line-through; }
+.event-chip[data-todo-state="done"]::before {
+  background: var(--event-color);
+  border-radius: 50%;
+  color: var(--paper);
+}
+.event-chip[data-todo-state="closed"]::before {
+  background: linear-gradient(135deg, transparent 44%, var(--event-color) 44%, var(--event-color) 56%, transparent 56%);
+  border-radius: 50%;
+}
+.event-chip[data-todo-state="sparse"] { border-left-style: dotted; }
+.event-chip[data-todo-state="sparse"]::before { opacity: .55; }
+.intimate-event.float-event[data-todo-state="done"] { border-style: solid; }
+.intimate-event.float-event[data-todo-state="sparse"] { border-style: dotted; }
+.event-pip[data-sigil="task"][data-todo-state="done"] { background: var(--event-color, var(--ink)) !important; }
+.event-pip[data-sigil="task"][data-todo-state="closed"] {
+  background: linear-gradient(135deg, transparent 40%, var(--event-color, var(--ink)) 40%, var(--event-color, var(--ink)) 60%, transparent 60%) !important;
+}
+.event-pip[data-sigil="task"][data-todo-state="sparse"] { border-style: dotted; }
+.line-event[data-sigil="task"][data-todo-state="done"] { fill: currentColor; }
+.line-event[data-sigil="task"][data-todo-state="closed"] { stroke-dasharray: 3 2; }
+.line-event[data-sigil="task"][data-todo-state="sparse"] { stroke-dasharray: 1 2; opacity: .7; }
+.radial-event-arc[data-todo-state="closed"] { stroke-dasharray: 4 3; }
+.radial-event-arc[data-todo-state="sparse"] { stroke-dasharray: 1 3; opacity: .7; }
+
+/* Falloff opacity ramp (data-todo-falloff, buckets stamped by applySigil):
+   an unresolved todo fades with distance past its home; bucket 3 is the
+   floor -- it lapses from prominence, never from truth. Done/closed todos
+   are never stamped: their state grammar already says what they are. */
+[data-todo-falloff="1"] { opacity: .78; }
+[data-todo-falloff="2"] { opacity: .58; }
+[data-todo-falloff="3"] { opacity: .42; }
+
+/* The spectrum: an open todo stapled ahead of now occupies now→staple as a
+   light span treatment on its own lane -- never a second event. */
+.todo-spectrum {
+  position: absolute;
+  pointer-events: none;
+  border-right: 2px dashed color-mix(in srgb, var(--event-color, var(--ink)) 55%, transparent);
+  background: color-mix(in srgb, var(--event-color, var(--ink)) 6%, transparent);
+  border-radius: 3px;
+}
+.tactical-day.todo-spectrum-day {
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--ink) 22%, transparent);
+}
+
+/* The ToDo lenses. List is one column, narrow-first; Board scrolls its
+   columns horizontally so a phone never pays for full-width nothing (empty
+   groups never render a column at all -- src/board.js). */
+.todo-list,
+.todo-board-wrap {
+  height: 100%;
+  overflow: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.todo-list { max-width: 720px; margin: 0 auto; width: 100%; }
+.todo-capture { display: flex; flex-direction: column; gap: 6px; }
+.todo-quick-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 14px/1.3 var(--data);
+}
+.todo-quick-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.todo-capture-fields { display: flex; gap: 8px; flex-wrap: wrap; }
+.todo-capture-field { display: flex; flex-direction: column; gap: 2px; flex: 1 1 140px; }
+.todo-capture-field span { font: 700 10px/1 var(--data); text-transform: uppercase; color: var(--muted); }
+.todo-capture-field input {
+  padding: 6px 8px;
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 13px/1.3 var(--data);
+}
+.todo-section { display: flex; flex-direction: column; gap: 4px; }
+.todo-section-title,
+.todo-column-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 4px;
+  border-bottom: 1px solid var(--hair);
+}
+.todo-section-title strong,
+.todo-column-title strong { font: 700 12px/1 var(--data); text-transform: uppercase; letter-spacing: .04em; }
+.todo-section-title small,
+.todo-column-title small { color: var(--muted); font: 600 11px/1 var(--data); }
+.todo-row,
+.todo-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 2px;
+}
+.todo-card {
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 8px;
+}
+.todo-check { width: 17px; height: 17px; margin-top: 2px; accent-color: var(--secondary); flex: none; }
+.todo-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink);
+}
+.todo-open strong { font: 600 14px/1.3 var(--data); }
+.todo-open small { color: var(--muted); font: 500 11px/1.2 var(--data); }
+.todo-open[data-selected="true"] strong { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* State treatment where the roster's own titles render. Sparse reads
+   visibly thin: a title-only capture has nothing else to say yet. */
+.todo-row[data-todo-state="done"] .todo-open strong,
+.todo-row[data-todo-state="closed"] .todo-open strong,
+.todo-card[data-todo-state="done"] .todo-open strong,
+.todo-card[data-todo-state="closed"] .todo-open strong { text-decoration: line-through; color: var(--muted); }
+.todo-row[data-todo-state="sparse"] .todo-open strong,
+.todo-card[data-todo-state="sparse"] .todo-open strong { color: color-mix(in srgb, var(--ink) 62%, var(--paper)); font-weight: 500; }
+.todo-empty { color: var(--muted); font: 500 13px/1.4 var(--data); padding: 8px 2px; }
+.todo-board { display: flex; gap: 10px; overflow-x: auto; align-items: flex-start; flex: 1; }
+.todo-column {
+  flex: 0 0 min(280px, 82vw);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  padding: 8px;
+}
+/* A state frame's row in the Frame drop -- selectable like any frame, but
+   visibly a state, and it never carries a Primary marker. */
+.check-chip.state-chip { font-style: italic; }

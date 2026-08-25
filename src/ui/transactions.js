@@ -1,8 +1,11 @@
-import { Rational } from "../exact.js";
-import { coordinateLaw } from "../coordinate-law.js";
+import { Rational, nowDays } from "../exact.js";
+import { GREGORIAN_LAW, coordinateLaw } from "../coordinate-law.js";
 import {
+  addEvent,
+  addRelation,
   clone,
   createId,
+  durationMagnitude,
   overridePatternId,
   removeContainsForObjects,
   removeMembershipsForMembers,
@@ -11,7 +14,7 @@ import {
   removeStaplesForPatterns,
   stableVirtualId
 } from "../model.js";
-import { STATE_FRAME_TRAITS, isStateFrame } from "../object-kinds.js";
+import { OBJECT_KINDS, STATE_FRAME_TRAITS, isStateFrame, traitsForObjectKind } from "../object-kinds.js";
 import { bundleOps, delOp, putOp, recordOps } from "../ops.js";
 import { stapleReferencesId, stapleTouchesAny } from "../staples.js";
 import { applySeriesHeal, healCandidateIds, planSeriesHeal } from "../series-heal.js";
@@ -697,6 +700,70 @@ export function createTransactions(app) {
     return prepared.length;
   }
 
+  // The one write path behind every ToDo capture mode: quick enter and the
+  // standard inline row both commit through here (placed create keeps its
+  // existing createEventAt path). `parsed` is `{title, group?, dateDays?,
+  // note?}` -- title required; `group` a group-frame TITLE to match (never
+  // minted: meaning is authored, and a typo must not create a frame);
+  // `dateDays` a universal day ordinal or null for now; `note` becomes the
+  // description. A title-only call writes exactly what the create menu's
+  // ToDo writes today: an event with the todo traits plus an observed
+  // relation at now, one bundle, one undo.
+  function createQuickTodo(parsed = {}) {
+    const { chronolog, session } = app;
+    const title = String(parsed.title || "").trim();
+    if (!title) return null;
+    const definition = OBJECT_KINDS.todo;
+    const eventId = createId("event");
+    const frame = session.activeFrame;
+    const wanted = String(parsed.group || "").trim().toLowerCase();
+    const groupFrame = wanted
+      ? Object.values(chronolog.frames).find((candidate) => candidate.traits?.includes("group")
+        && !isStateFrame(candidate)
+        && String(candidate.title || "").trim().toLowerCase() === wanted) || null
+      : null;
+    // The stored coordinate is built under the active frame's own law, never
+    // the standard boundary; an unresolvable declaration must not make
+    // capture fail (same fallback toggleStateAffiliation takes).
+    let law;
+    try {
+      law = coordinateLaw(chronolog, frame);
+    } catch {
+      law = GREGORIAN_LAW;
+    }
+    const at = parsed.dateDays ?? nowDays();
+    executeEventChange("Create ToDo", eventId, (documentValue) => {
+      addEvent(documentValue, {
+        id: eventId,
+        traits: traitsForObjectKind([], "todo"),
+        magnitudes: { duration: durationMagnitude("0") },
+        payload: { title, description: String(parsed.note || ""), location: "" }
+      });
+      addRelation(documentValue, {
+        type: "attachment",
+        event: eventId,
+        frame,
+        role: definition.relationRole,
+        coordinate: law.fromDays(at)
+      });
+      if (groupFrame) {
+        addRelation(documentValue, {
+          type: "membership",
+          group: groupFrame.id,
+          member: eventId,
+          provenance: { kind: "explicit" }
+        });
+      }
+    }, true);
+    return {
+      id: eventId,
+      group: groupFrame?.id || null,
+      // An unmatched group is reported, never guessed at or minted -- the
+      // caller decides how to say so.
+      unmatchedGroup: wanted && !groupFrame ? String(parsed.group).trim() : null
+    };
+  }
+
   return {
     executeEventChange,
     executeEventSetChange,
@@ -704,6 +771,7 @@ export function createTransactions(app) {
     executeFrameChange,
     executePatternChange,
     convergeSeriesOccurrence,
-    bulkSkipOccurrences
+    bulkSkipOccurrences,
+    createQuickTodo
   };
 }

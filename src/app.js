@@ -13,6 +13,7 @@ import { createRoster } from "./ui/roster.js";
 import { createFramesPanel } from "./ui/frames-panel.js";
 import { applyTheme, createToolbar, storedTheme } from "./ui/toolbar.js";
 import { createDragController } from "./ui/drag.js";
+import { createTodoCapture } from "./ui/todo-capture.js";
 import { createCalendarSyncPanel } from "./ui/calendar-sync-panel.js";
 
 // The bootstrap: construct the document/session/store/history, wire every
@@ -200,6 +201,9 @@ Object.assign(app, createRoster(app));
 Object.assign(app, createFramesPanel(app));
 Object.assign(app, createToolbar(app, { projection, lensControls, LOCAL_WORKSPACE_TARGET }));
 Object.assign(app, createDragController(app, { projection, minimap }));
+// The ToDo lenses' capture/toggle delegation -- listeners live here, not in
+// the renderers, so a re-render never orphans a handler.
+createTodoCapture(app, { projection });
 createCalendarSyncPanel(app);
 
 async function loadWorkspaceDocument() {

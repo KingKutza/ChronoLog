@@ -44,11 +44,11 @@ test("every element a module looks up by id exists in the shell or is created in
   assert.deepEqual(missing, []);
 });
 
-test("lens bar exposes seven explicit lenses with a minimap and a lens configuration entry point", async () => {
+test("lens bar exposes nine explicit lenses with a minimap and a lens configuration entry point", async () => {
   const html = await readSource("pocket-instrument.html");
   assert.match(html, /id="lens-bar"/);
   assert.match(html, /id="lens-controls"/);
-  for (const lens of ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"]) {
+  for (const lens of ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial", "list", "board"]) {
     assert.match(html, new RegExp(`data-lens="${lens}"`));
   }
   assert.match(html, /id="minimap"/);
@@ -89,11 +89,12 @@ test("Frames triggers are accessible toggles for the dock", async () => {
   assert.doesNotMatch(html, /id="inspector"/, "the inspector drawer is gone, not hidden");
 });
 
-test("the view bar carries ToDo and Notes card triggers and a hidden-lens drop", async () => {
+test("the view bar carries the ToDo lenses, the Notes card trigger, and a hidden-lens drop", async () => {
   const html = await readSource("pocket-instrument.html");
-  // They live inside the view bar, after the seven lenses, and open dock cards
-  // rather than changing what the stage projects.
-  assert.match(html, /id="open-todos"[^>]*aria-controls="dock"/);
+  // The old #open-todos card trigger became the List lens, and Board is a
+  // normal catalog lens beside it: they change what the stage projects, so
+  // they sit in the lens group as data-lens buttons, not card triggers.
+  assert.doesNotMatch(html, /id="open-todos"/, "the ToDo card trigger is gone -- List is a lens now");
   assert.match(html, /id="open-notes"[^>]*aria-controls="dock"/);
   assert.match(html, /id="hidden-lenses"/);
 
@@ -101,17 +102,19 @@ test("the view bar carries ToDo and Notes card triggers and a hidden-lens drop",
   const end = html.indexOf("</nav>", start);
   assert.ok(start >= 0 && end > start, "the view bar exists");
   const bar = html.slice(start, end);
-  for (const id of ["open-todos", "open-notes", "hidden-lenses"]) {
+  for (const id of ["open-notes", "hidden-lenses"]) {
     assert.ok(bar.includes(`id="${id}"`), `#${id} is in the view bar, not somewhere else`);
   }
-  // They come after the seven lenses, which is where the ruling puts them.
-  assert.ok(bar.indexOf('data-lens="radial"') < bar.indexOf('id="open-todos"'));
-  // Distinct styling is a requirement, not a nicety: they are not lenses.
-  // bug 3 additionally puts bar-control on these two, alongside view-bar-card
-  // (see the dedicated bar-control test below), so the class list is no
-  // longer exactly "view-bar-card" -- match the token, not the whole value.
-  assert.match(bar, /class="[^"]*\bview-bar-card\b[^"]*"[^>]*id="open-todos"/);
+  // The ToDo lenses order with the lenses -- after Radial, before the Notes
+  // card trigger, matching DEFAULT_LENS_ORDER's catalog order.
+  assert.ok(bar.indexOf('data-lens="radial"') < bar.indexOf('data-lens="list"'));
+  assert.ok(bar.indexOf('data-lens="list"') < bar.indexOf('data-lens="board"'));
+  assert.ok(bar.indexOf('data-lens="board"') < bar.indexOf('id="open-notes"'));
+  // Distinct styling is a requirement, not a nicety: Notes is not a lens.
   assert.match(bar, /class="[^"]*\bview-bar-card\b[^"]*"[^>]*id="open-notes"/);
+  // The lens buttons carry no view-bar-card class -- they ARE lenses.
+  assert.doesNotMatch(bar, /view-bar-card[^>]*data-lens="list"/);
+  assert.doesNotMatch(bar, /view-bar-card[^>]*data-lens="board"/);
 });
 
 // Bug 5 (8.19 Part Three): the standalone "Settings" button is gone — the
@@ -144,10 +147,10 @@ test("every static bar control on the document bar and view bar carries the shar
   assert.match(hud, /<button class="[^"]*\bbar-control\b[^"]*" id="new-frame"/, "#new-frame carries bar-control");
   assert.match(hud, /<details id="frame-select"[^>]*>\s*<summary class="bar-control"/, "#frame-select's summary carries bar-control");
   assert.match(hud, /<details id="document-menu">\s*<summary class="bar-control"/, "#document-menu's summary carries bar-control");
-  for (const lens of ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial"]) {
+  for (const lens of ["intimate", "tactical", "strategic", "wall", "lines", "spiral", "radial", "list", "board"]) {
     assert.match(lensBar, new RegExp(`class="bar-control"[^>]*data-lens="${lens}"`), `the ${lens} lens button carries bar-control`);
   }
-  for (const id of ["open-todos", "open-notes", "lens-settings"]) {
+  for (const id of ["open-notes", "lens-settings"]) {
     assert.match(lensBar, new RegExp(`class="[^"]*\\bbar-control\\b[^"]*"[^>]*id="${id}"`), `#${id} carries bar-control`);
   }
   // The reported defect: the hamburger itself, sized as a full-height square

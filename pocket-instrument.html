@@ -57,10 +57,15 @@
       <button class="bar-control" type="button" data-lens="lines" aria-label="Lines"><span class="responsive-label-long">Lines</span><span class="responsive-label-short" aria-hidden="true">Lines</span></button>
       <button class="bar-control" type="button" data-lens="spiral" aria-label="Spiral"><span class="responsive-label-long">Spiral</span><span class="responsive-label-short" aria-hidden="true">Spir</span></button>
       <button class="bar-control" type="button" data-lens="radial" aria-label="Radial"><span class="responsive-label-long">Radial</span><span class="responsive-label-short" aria-hidden="true">Rad</span></button>
-      <!-- ToDo and Notes sit after the seven lenses and are coloured distinctly
-           because they are not lenses: they open dock cards rather than changing
-           what the stage projects. -->
-      <button class="view-bar-card bar-control" type="button" id="open-todos" aria-controls="dock"><span class="responsive-label-long">ToDo</span><span class="responsive-label-short" aria-hidden="true">Do</span></button>
+      <!-- The ToDo lenses: the old #open-todos card trigger became the List
+           lens button, and Board arrives as a normal catalog lens -- they
+           change what the stage projects, so they sit in the lens group like
+           any other lens. -->
+      <button class="bar-control" type="button" data-lens="list" aria-label="List"><span class="responsive-label-long">List</span><span class="responsive-label-short" aria-hidden="true">List</span></button>
+      <button class="bar-control" type="button" data-lens="board" aria-label="Board"><span class="responsive-label-long">Board</span><span class="responsive-label-short" aria-hidden="true">Brd</span></button>
+      <!-- Notes sits after the lenses and is coloured distinctly because it
+           is not a lens: it opens a dock card rather than changing what the
+           stage projects. -->
       <button class="view-bar-card bar-control" type="button" id="open-notes" aria-controls="dock"><span class="responsive-label-long">Notes</span><span class="responsive-label-short" aria-hidden="true">Note</span></button>
       <!-- These two used to be misfiled in the document dropdown under a
            "Documents" label even though neither is document data -- both

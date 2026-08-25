@@ -250,6 +250,17 @@ test("a roster is stable and total on an empty or malformed document", () => {
 test("the number keys follow the visible bar order, not the catalogue", () => {
   const session = new ViewSession({});
   assert.deepEqual(session.availableLenses(), [...DEFAULT_LENS_ORDER]);
+  // Nine lenses now -- the ToDo pair joined the catalog, so keys 8 and 9
+  // reach List and Board in the default order (toolbar.js's digit range is
+  // 1-9, indexing this same availableLenses() list).
+  assert.equal(session.availableLenses().length, 9);
+  assert.equal(session.availableLenses()[7], "list");
+  assert.equal(session.availableLenses()[8], "board");
+  session.setLens(session.availableLenses()[7]);
+  assert.equal(session.currentLens(), "list", "the eighth key lands on the List lens");
+  session.setLens(session.availableLenses()[8]);
+  assert.equal(session.currentLens(), "board", "the ninth key lands on the Board lens");
+  session.setLens("intimate");
 
   // Hide Tactical: everything after it shifts up one position.
   session.configureLenses({

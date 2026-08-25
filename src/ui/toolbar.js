@@ -6,6 +6,7 @@ import {
 } from "../exact.js";
 import { calendarFrames } from "../projections.js";
 import { FIXED_RADIAL_CYCLES, cyclePeriodHint, normalizeRadialGuideValues, radialGuideSettings, resolveRadialCycle } from "../radial.js";
+import { isStateFrame } from "../object-kinds.js";
 import { DEFAULT_LENS_ORDER, LENS_CATALOG, LENS_IMPORTANCE_THRESHOLD_DEFAULTS } from "../session.js";
 import { createDropdownRegistry, exclusiveOpenSet, outsideInteractionCloses, panelPlacement, wrapFocusIndex } from "../panel-flip.js";
 import { parseDocument } from "../store.js";
@@ -293,11 +294,38 @@ export function createToolbar(app, dom) {
     const { panel } = entry;
     const summaryValue = byId("frame-select").querySelector(".frame-select-summary-value");
     const frames = calendarFrames(chronolog);
-    session.pruneFrameSelection(frames.map((frame) => frame.id));
-    const signature = frames.map((frame) => `${frame.id} ${frame.title}`).join("|");
+    // State frames join the drop: selection is how a state's members reach
+    // (or leave) the ToDo lenses' projection — controlling the frames
+    // projected is the ruled substitute for a filter. A state frame carries
+    // no coordinate law, so it never offers a Primary marker and the time
+    // surfaces filter it out of their overlays (src/projections.js).
+    const stateFrames = Object.values(chronolog.frames)
+      .filter((frame) => isStateFrame(frame))
+      .sort((left, right) => String(left.title || left.id).localeCompare(String(right.title || right.id)));
+    session.pruneFrameSelection([...frames, ...stateFrames].map((frame) => frame.id));
+    const signature = [...frames, ...stateFrames].map((frame) => `${frame.id} ${frame.title}`).join("|");
     if (panel.dataset.signature !== signature) {
       panel.dataset.signature = signature;
       panel.replaceChildren();
+      const onSelectionChange = () => {
+        const checked = [...panel.querySelectorAll('input[type="checkbox"]:checked')].map((node) => node.value);
+        const previousLeading = session.activeFrame;
+        // Never allow a frame drop with nothing selected — the same guard
+        // spirit as lens enablement: a control that can select itself into
+        // uselessness is a trap, not a feature.
+        session.setFrameSelection(checked.length ? checked : [previousLeading]);
+        // A state frame can be projected but never lead: it has no axis and
+        // no coordinate law to govern the view. If unchecking the leader
+        // left a state frame in charge, hand the marker to a frame that can
+        // actually hold it.
+        if (isStateFrame(chronolog.frames[session.activeFrame])) {
+          const fallback = session.selectedFrames()
+            .find((id) => chronolog.frames[id] && !isStateFrame(chronolog.frames[id])) || previousLeading;
+          session.setLeadingFrame(fallback);
+        }
+        if (session.activeFrame !== previousLeading) app.selectLeadingFrame(session.activeFrame);
+        else app.scheduleRender();
+      };
       for (const frame of frames) {
         const label = document.createElement("label");
         label.className = "check-chip";
@@ -305,16 +333,7 @@ export function createToolbar(app, dom) {
         input.type = "checkbox";
         input.name = "frame-select";
         input.value = frame.id;
-        input.addEventListener("change", () => {
-          const checked = [...panel.querySelectorAll('input[type="checkbox"]:checked')].map((node) => node.value);
-          const previousLeading = session.activeFrame;
-          // Never allow a frame drop with nothing selected — the same guard
-          // spirit as lens enablement: a control that can select itself into
-          // uselessness is a trap, not a feature.
-          session.setFrameSelection(checked.length ? checked : [previousLeading]);
-          if (session.activeFrame !== previousLeading) app.selectLeadingFrame(session.activeFrame);
-          else app.scheduleRender();
-        });
+        input.addEventListener("change", onSelectionChange);
         // The explicit primary marker (AGENTS.md's frame model, point 4:
         // selecting/displaying a frame never creates a mapping — this only
         // moves which selected frame supplies primary coordinates and
@@ -335,6 +354,18 @@ export function createToolbar(app, dom) {
           app.selectLeadingFrame(frame.id);
         });
         label.append(input, document.createTextNode(frame.title), marker);
+        panel.append(label);
+      }
+      for (const frame of stateFrames) {
+        const label = document.createElement("label");
+        label.className = "check-chip state-chip";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = "frame-select";
+        input.value = frame.id;
+        input.addEventListener("change", onSelectionChange);
+        label.append(input, document.createTextNode(frame.title || frame.id));
+        label.title = `Project ${frame.title || frame.id}: its members appear in the ToDo lenses while checked`;
         panel.append(label);
       }
       if (!frames.length) {
@@ -384,11 +415,12 @@ export function createToolbar(app, dom) {
       const button = lensBar.querySelector(`[data-lens="${lens}"]`);
       if (button) lensBar.append(button);
     }
-    // The ToDo/Notes buttons, the relocated view-wide tools (bug 5's audit —
-    // "shared date" and "Configure lenses" used to be misfiled under the
-    // document dropdown), and the hidden-lens drop always sit after the
-    // lenses, in this order, whatever order the lenses themselves are in.
-    for (const id of ["open-todos", "open-notes", "lens-bar-tools", "hidden-lenses"]) {
+    // The Notes button (ToDo became the List lens and orders with the
+    // lenses above), the relocated view-wide tools (bug 5's audit — "shared
+    // date" and "Configure lenses" used to be misfiled under the document
+    // dropdown), and the hidden-lens drop always sit after the lenses, in
+    // this order, whatever order the lenses themselves are in.
+    for (const id of ["open-notes", "lens-bar-tools", "hidden-lenses"]) {
       const node = byId(id);
       if (node) lensBar.append(node);
     }
@@ -555,6 +587,8 @@ export function createToolbar(app, dom) {
       wallMonths: session.wallMonths,
       linesMonths: session.linesMonths,
       linesDays: session.linesDays,
+      listGrouping: session.listGrouping,
+      boardGrouping: session.boardGrouping,
       strategicDetail: session.strategicDetail,
       wallDetail: session.wallDetail,
       strategicRecordSlashes: session.strategicRecordSlashes,
@@ -733,6 +767,17 @@ export function createToolbar(app, dom) {
         readout(`${session.linesDays} days`),
         number("window", session.linesDays, 3, 90, (value) => { session.linesDays = value; })
       );
+    } else if (lens === "list" || lens === "board") {
+      // The ToDo lenses' one control: which grouping supplies the List's
+      // sections / the Board's columns. Projection context, not a filter —
+      // visibility is which frames the session projects (the Frame drop).
+      const property = lens === "list" ? "listGrouping" : "boardGrouping";
+      barControls.push(select("group by", [
+        ["state", "State"],
+        ["importance", "Importance"],
+        ["container", "Container"],
+        ["frame", "Frame"]
+      ], session[property], (value) => { session[property] = value; }));
     } else if (["strategic", "wall"].includes(lens)) {
       const property = lens === "strategic" ? "strategicMonths" : "wallMonths";
       const maximum = lens === "wall" ? 12 : 18;
@@ -1203,7 +1248,8 @@ export function createToolbar(app, dom) {
   // (#document-menu) itself now opens the settings/document card directly,
   // so a second control that did the same thing one click further in was
   // redundant, not a distinct destination.
-  byId("open-todos").addEventListener("click", () => app.openRoster("todo"));
+  // The ToDo trigger is gone: it became the List lens button (data-lens, in
+  // the lens group), picked up by the generic lens-control wiring above.
   byId("open-notes").addEventListener("click", () => app.openRoster("note"));
 
   // A press outside the dock used to discard a provisional draft and close the
@@ -1449,7 +1495,7 @@ export function createToolbar(app, dom) {
       event.preventDefault();
       app.pageDockTo(Number(event.key) - 1);
       return;
-    } else if (/^[1-7]$/.test(event.key)) {
+    } else if (/^[1-9]$/.test(event.key)) {
       // The digits follow the bar the user is looking at, not a fixed catalogue
       // order. With a lens hidden or reordered, the old hard-coded list meant 4
       // could land on a lens that was not the fourth button — or on a hidden one,

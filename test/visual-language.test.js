@@ -9,7 +9,9 @@ import {
   factImportanceWeight,
   normalizeTheme,
   resolveObjectColor,
-  sigilForFact
+  sigilAriaLabel,
+  sigilForFact,
+  todoStateForFact
 } from "../src/visual-language.js";
 
 function colorFixture({ groupModes = {} } = {}) {
@@ -212,6 +214,80 @@ test("a frame with no display.weight, or an invalid one, does not affect the com
   const fact = { event };
   assert.equal(factImportanceWeight(context, fact), 1);
   assert.equal(factImportance(context, fact), "standard");
+});
+
+// The cross-lens ToDo state vocabulary: done (Done-frame affiliation),
+// closed (any other state frame), sparse (title-only capture), open = null.
+// Pure over {document, engine}, so the whole grammar pins without a DOM.
+function todoStateFixture() {
+  const document = {
+    events: {},
+    relations: {},
+    frames: {
+      "frame:state-done": { id: "frame:state-done", title: "Done", traits: ["set", "group", "state"] },
+      "frame:state-postponed": { id: "frame:state-postponed", title: "Postponed", traits: ["set", "group", "state"] },
+      "group:home": { id: "group:home", title: "Home", traits: ["set", "group"] }
+    }
+  };
+  const membershipsByEvent = {};
+  const staplesByEvent = {};
+  const engine = {
+    eventDisplayGroupMemberships: (id) => (membershipsByEvent[id] || []).map((group) => ({ group })),
+    staplesByObject: new Map()
+  };
+  return { document, engine, membershipsByEvent, staplesByEvent };
+}
+
+test("todoStateForFact speaks the four-state vocabulary and answers null for non-todos and virtuals", () => {
+  const { document, engine, membershipsByEvent } = todoStateFixture();
+  const todo = (id, payload = {}) => {
+    document.events[id] = { id, traits: ["event", "task", "todo"], payload };
+    return { event: document.events[id] };
+  };
+  const context = { document, engine };
+
+  membershipsByEvent["event:done"] = ["frame:state-done"];
+  assert.equal(todoStateForFact(context, todo("event:done")), "done");
+
+  membershipsByEvent["event:postponed"] = ["frame:state-postponed"];
+  assert.equal(todoStateForFact(context, todo("event:postponed")), "closed", "any non-Done state frame reads closed");
+
+  // Done wins the stamp when both affiliations exist -- one stamp per mark.
+  membershipsByEvent["event:both"] = ["frame:state-postponed", "frame:state-done"];
+  assert.equal(todoStateForFact(context, todo("event:both")), "done");
+
+  // Title-only capture: no state, no membership, no description, no
+  // authored staple beyond the creation placement.
+  assert.equal(todoStateForFact(context, todo("event:bare")), "sparse");
+
+  // Anything the capture said beyond the title lifts sparse: a description...
+  assert.equal(todoStateForFact(context, todo("event:described", { description: "call first" })), null);
+  // ...or a group membership of any kind...
+  membershipsByEvent["event:grouped"] = ["group:home"];
+  assert.equal(todoStateForFact(context, todo("event:grouped")), null);
+  // ...or an authored staple.
+  const stapled = todo("event:stapled");
+  engine.staplesByObject.set("event:stapled", [{
+    id: "relation:staple",
+    type: "staple",
+    kind: "anchor",
+    ends: [{ object: "event:stapled", point: "start" }, { frame: "calendar:personal", coordinate: { levels: [] } }]
+  }]);
+  assert.equal(todoStateForFact(context, stapled), null);
+
+  // Not a todo: no stamp, whatever its memberships.
+  document.events["event:plain"] = { id: "event:plain", traits: ["event"] };
+  membershipsByEvent["event:plain"] = ["frame:state-done"];
+  assert.equal(todoStateForFact(context, { event: document.events["event:plain"] }), null);
+
+  // A generated occurrence carries no authored state of its own.
+  assert.equal(todoStateForFact(context, { ...todo("event:virtual"), virtualId: "occurrence-1" }), null);
+});
+
+test("aria labels compose the sigil and the state through one composer", () => {
+  assert.equal(sigilAriaLabel("task", "done", "Water the plants"), "Task or float, done: Water the plants");
+  assert.equal(sigilAriaLabel("task", null, "Water the plants"), "Task or float: Water the plants");
+  assert.equal(sigilAriaLabel("task", "sparse", ""), "Task or float, sparse: untitled");
 });
 
 test("controlled themes always produce a complete valid palette", () => {

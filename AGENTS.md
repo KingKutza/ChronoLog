@@ -2,7 +2,7 @@
 
 ChronoLog is a local-first timeline instrument, pre-alpha and exploratory:
 timelines are first-class objects, events staple onto them (sometimes onto
-more than one), and seven lenses project one shared `chronolog/1` document.
+more than one), and nine lenses project one shared `chronolog/1` document.
 Read [LEXICON.md](LEXICON.md) for vocabulary and the
 founding ideas before naming anything new — it is the owner's own voice and
 brainstorm space. Meaning is authored by the user: color and semantics come
@@ -52,9 +52,10 @@ character when you touch adjacent code or docs.
     asks `src/dock-layout.js`, and applies the answer — because it is the part
     that cannot run outside a browser.
   - `roster.js` — the ToDo and Notes dock cards: every object of one kind plus a
-    "new" affordance that anchors to now. Deliberately a flat roster — the
-    staple/decay model is ROADMAP #9 and unsettled, so this invents no lifecycle
-    rule that would have to be unwound.
+    "new" affordance that anchors to now, and the state toggle
+    (`toggleStateAffiliation`) that writes a state-frame membership plus the
+    terminal end staple. The todo lifecycle model is ROADMAP #2 and ruled —
+    see "ToDo state and containment" below.
   - `workspace.js` — the render loop and minimap wiring.
   - `transactions.js` — document-mutation-with-undo helpers shared by the
     inspector and Frames panel.
@@ -238,7 +239,10 @@ mutates in place — the sync diff relies on that invariant.
 
 Frames are open trait records, not a closed type enum — `traits` add
 capabilities (`calendar`, `timeline`, `line`, `cycle`, `measure`, `group`,
-`importance`, ...) and unfamiliar traits remain valid data. Four concepts
+`importance`, `state`, ...) and unfamiliar traits remain valid data. A
+**state frame** carries both `group` and `state` (a bare `state` trait is
+formula state and never collides); `frame:state-done` ("Done") is minted
+lazily by the first completion toggle, never seeded. Four concepts
 stay distinct and must not collapse into each other:
 
 1. A **frame/line** owns temporal coordinates.
@@ -839,6 +843,44 @@ Staples cross the ICS boundary like this:
   because a fresh import always mints a new frame id; the exported `FRAME`
   parameter is informational only.
 
+### ToDo state and containment
+
+There is no resolution property and no lifecycle enum — "there is no
+resolution, there is a state, and there is a staple" (LEXICON.md,
+2026-08-25). The parts compose:
+
+- **State is a frame.** Done — and any state the user authors — is a frame
+  with `group` + `state` traits; an object in that state holds an ordinary
+  membership relation to it. Controlling which state frames project does
+  everything a filter would; no surface may grow a show/hide-by-state knob or
+  a filterable status property.
+- **The instant is a terminal staple.** Completion time is an `end`-kind
+  staple — the object's `end` point abutting a frame coordinate. Backdating
+  edits that coordinate; a membership with no staple is legal ("done, instant
+  unstated"). The `end` kind is `anchors: false`: it never relocates the
+  object. `stateAffiliations`/`doneAffiliation` in `src/object-kinds.js` are
+  the one derivation; nothing else may read state.
+- **Staples stay directional, not typed.** No "due" kind exists. A staple
+  ahead of the view's now reads as due, behind it as past — the reading comes
+  from the arrow of time at projection, never from a kind string. Reconciling
+  the kind registry with this ruling is a flagged later pass.
+- **Containment passes no judgment.** `{type:"contains", parent, child}`
+  connects any objects; validation refuses only dangling ids and
+  parent = child. Multi-parent and cyclic shapes are legal data; derivations
+  are cycle-safe (`containsSummary` reports `cyclic`, never throws) and a
+  parent's state is never inferred from its children. Rank is not stored. A
+  list or project is a container object, never a group frame.
+- **Apparent magnitude, not keep-range.** `src/falloff.js` is pure:
+  `objectHome` (the day range an object's staples span), `distanceFromHome`,
+  `apparentMagnitude(base, distance, {halfDistanceDays})` = base·h/(h+|d|).
+  Lenses fade unresolved todos by distance from home; done/closed objects
+  never fade. Data never changes — falloff is projection only.
+- **Migration.** `migrateCompletedRelations` in `compactDocument` restates
+  every legacy `role:"completed"` attachment as membership + end staple,
+  idempotently, minting the Done frame only when legacy records exist. ICS
+  VTODO COMPLETED reads and writes through the derivation; new ICS todo
+  mapping (DUE, STATUS, PRIORITY) is held until the model settles.
+
 ### Display weight
 
 A frame's weight handling is a **formula** in `chronolog-formula/1`, evaluated
@@ -876,8 +918,9 @@ threshold. Existing records are never migrated.
 ### Visual grammar
 
 One fixed sigil vocabulary (point/diamond/repeat/ring/square/split-diamond/
-span — see `src/visual-language.js`) applies across all seven lenses
-(Intimate, Tactical, Strategic, Wall, Lines, Spiral, Radial); a lens may
+span — see `src/visual-language.js`) applies across all nine lenses
+(Intimate, Tactical, Strategic, Wall, Lines, Spiral, Radial, List, Board);
+a lens may
 omit a mark it cannot render at scale, but must not repurpose one to mean
 something else. Color identifies an authored frame/group/context; it is
 never the sole carrier of an event's structural role — that is always paired

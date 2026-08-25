@@ -7,6 +7,8 @@ import { GREGORIAN_LAW, civilCoordinateToDays } from "./coordinate-law.js";
 import { clampDockWidth, normalizeDockSide } from "./dock-layout.js";
 import { FrameSelection } from "./frame-selection.js";
 import { normalizeRadialGuideValues, positiveRadialCycle } from "./radial.js";
+import { normalizeListGrouping } from "./list.js";
+import { normalizeBoardGrouping } from "./board.js";
 import { IMPORTANCE_WEIGHT_THRESHOLD, factImportanceWeight } from "./visual-language.js";
 
 const DEFAULT_DOCK_WIDTH = 1 / 3;
@@ -27,7 +29,7 @@ export function spanForScale(scale) {
   return interpolateLog(DETENTS[1].span, DETENTS[2].span, value - 1);
 }
 
-const PROJECTIONS = ["calendar", "wall", "lines", "radial"];
+const PROJECTIONS = ["calendar", "wall", "lines", "radial", "list", "board"];
 // This is deliberately a small registry rather than a collection of special
 // cases in the toolbar.  A future lens needs one entry here plus a renderer;
 // persisted workspaces then get its default position without losing a user's
@@ -77,6 +79,22 @@ export const LENS_CATALOG = Object.freeze({
     description: "One cycle, one band per group — events as arcs overlapping around the same circle.",
     projection: "radial",
     capabilities: ["cycle", "radial-guides", "labels"]
+  }),
+  // The two ToDo lenses. Separate entries, separate renderers, separate math
+  // modules (src/list.js, src/board.js) — the Spiral/Radial precedent taken
+  // fully: "there is no common sub straight except that data. both lenses...
+  // independently project the data per there own rules."
+  list: Object.freeze({
+    title: "List",
+    description: "Capture fast, check off, see the shape — every ToDo in one column.",
+    projection: "list",
+    capabilities: ["roster", "capture", "grouping"]
+  }),
+  board: Object.freeze({
+    title: "Board",
+    description: "Columns are the grouping — the same ToDos laid out side by side.",
+    projection: "board",
+    capabilities: ["roster", "capture", "grouping", "columns"]
   })
 });
 export const DEFAULT_LENS_ORDER = Object.freeze(Object.keys(LENS_CATALOG));
@@ -107,7 +125,9 @@ export const LENS_VIEW_DEFAULTS = Object.freeze({
     radialMajorEvery: 0,
     radialMarks: "auto"
   }),
-  radial: Object.freeze({ radialLabels: true, radialDivisions: 0, radialMajorEvery: 0, radialMarks: "auto" })
+  radial: Object.freeze({ radialLabels: true, radialDivisions: 0, radialMajorEvery: 0, radialMarks: "auto" }),
+  list: Object.freeze({ listGrouping: "state" }),
+  board: Object.freeze({ boardGrouping: "state" })
 });
 // The importance-promotion thresholds used to be one fixed pair shared by
 // every lens (`IMPORTANCE_WEIGHT_THRESHOLD` in `src/visual-language.js`); the
@@ -171,13 +191,26 @@ export function sanitizeSessionParameters(parameters, chronologDocument) {
   return input;
 }
 
-export function normalizeLensWorkspace(input = {}) {
+export function normalizeLensWorkspace(input = {}, { enableUnseen = false } = {}) {
   const requestedOrder = Array.isArray(input.lensOrder) ? input.lensOrder : [];
   const requestedEnabled = Array.isArray(input.enabledLenses) ? input.enabledLenses : null;
   const order = [...requestedOrder, ...DEFAULT_LENS_ORDER]
     .filter((lens, index, values) => Object.hasOwn(LENS_CATALOG, lens) && values.indexOf(lens) === index);
   const enabled = (requestedEnabled || DEFAULT_LENS_ORDER)
     .filter((lens, index, values) => Object.hasOwn(LENS_CATALOG, lens) && values.indexOf(lens) === index);
+  // Migration for catalog growth, applied only where a PERSISTED workspace is
+  // being restored (the ViewSession constructor passes `enableUnseen`): a
+  // catalog lens the persisted lensOrder has never seen is appended to BOTH
+  // lensOrder (above) and enabledLenses — a genuinely new lens must be
+  // visible to existing users, not born hidden behind the drop. A lens the
+  // order already knows but enabledLenses omits was hidden by the user and
+  // stays hidden. Live reconfiguration (configureLenses) never migrates:
+  // there the caller's word is the whole workspace.
+  if (enableUnseen && Array.isArray(input.lensOrder) && requestedEnabled) {
+    for (const lens of DEFAULT_LENS_ORDER) {
+      if (!requestedOrder.includes(lens) && !enabled.includes(lens)) enabled.push(lens);
+    }
+  }
   // A workspace without a reachable projection is not useful. Restore the
   // first ordered lens instead of silently retaining a dead toolbar.
   if (!enabled.length) enabled.push(order[0] || DEFAULT_LENS_ORDER[0]);
@@ -221,7 +254,9 @@ export function minimapDragFocus(drag, fraction) {
 
 export class ViewSession {
   constructor(input = {}) {
-    const lensWorkspace = normalizeLensWorkspace(input);
+    // The constructor is the persisted-workspace path, so it is the one place
+    // the catalog-growth migration applies -- see normalizeLensWorkspace.
+    const lensWorkspace = normalizeLensWorkspace(input, { enableUnseen: true });
     this.projection = input.projection || "calendar";
     this.lensOrder = lensWorkspace.lensOrder;
     this.enabledLenses = lensWorkspace.enabledLenses;
@@ -294,6 +329,11 @@ export class ViewSession {
     this.wallMonths = Math.max(1, Math.floor(Number(input.wallMonths ?? LENS_VIEW_DEFAULTS.wall.wallMonths)));
     this.linesMonths = Math.max(1, Math.floor(Number(input.linesMonths ?? 9)));
     this.linesDays = Math.max(3, Math.floor(Number(input.linesDays ?? LENS_VIEW_DEFAULTS.lines.linesDays)));
+    // The ToDo lenses' one setting each: which grouping supplies the List's
+    // sections and the Board's columns. Projection context, never a filter --
+    // visibility is controlled by which frames the session projects.
+    this.listGrouping = normalizeListGrouping(input.listGrouping ?? LENS_VIEW_DEFAULTS.list.listGrouping);
+    this.boardGrouping = normalizeBoardGrouping(input.boardGrouping ?? LENS_VIEW_DEFAULTS.board.boardGrouping);
     this.strategicDetail = Boolean(input.strategicDetail ?? false);
     this.wallDetail = Boolean(input.wallDetail ?? input.detail ?? LENS_VIEW_DEFAULTS.wall.wallDetail);
     this.strategicRecordSlashes = Boolean(input.strategicRecordSlashes ?? input.recordSlashes ?? LENS_VIEW_DEFAULTS.strategic.strategicRecordSlashes);
@@ -543,6 +583,10 @@ export class ViewSession {
     if (lens === "strategic") return this.strategicMonths * monthDays;
     if (lens === "wall") return this.wallMonths * monthDays;
     if (lens === "lines") return this.linesDays;
+    // The ToDo lenses project the whole roster, not a time window; the
+    // minimap and the keyboard-step math still need one finite span, so the
+    // Tactical detent's is the cheapest honest stand-in.
+    if (lens === "list" || lens === "board") return DETENTS[1].span;
     if (this.projection === "radial") {
       return this.radialCycle.mul(this.radialPast + this.radialFuture + 1).toNumber();
     }
@@ -618,6 +662,8 @@ export class ViewSession {
       wallMonths: this.wallMonths,
       linesMonths: this.linesMonths,
       linesDays: this.linesDays,
+      listGrouping: this.listGrouping,
+      boardGrouping: this.boardGrouping,
       strategicDetail: this.strategicDetail,
       wallDetail: this.wallDetail,
       strategicRecordSlashes: this.strategicRecordSlashes,

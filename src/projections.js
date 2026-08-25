@@ -9,9 +9,12 @@ import {
 import { coordinateLaw, GREGORIAN_LAW, daysToCivilCoordinate, displayLaw } from "./coordinate-law.js";
 import { projectableFrames } from "./frame-projection.js";
 import { arcPath, polar, radialCycleWindow, radialGuideSettings, radialRenderState, spiralRibbonPath } from "./radial.js";
-import { objectKindForEvent } from "./object-kinds.js";
+import { isStateFrame, objectKindForEvent } from "./object-kinds.js";
 import { factMatchesSelection } from "./session.js";
 import { aggregateLinePoints, lineFramePlan, lineProgress, linesRenderState } from "./lines.js";
+import { listSections } from "./list.js";
+import { boardColumns } from "./board.js";
+import { apparentMagnitude, objectHome } from "./falloff.js";
 import { aggregateStrategicDays, STRATEGIC_DAY_FACT_LIMIT } from "./strategic-density.js";
 import { fixedCalendarDefinition, fixedCalendarParts, fixedDayLabel, fixedMonthWindow } from "./calendar-projection.js";
 import {
@@ -23,7 +26,17 @@ import {
   minimapLabelGranularity,
   minimapLabelTicks
 } from "./minimap.js";
-import { SIGIL_VOCABULARY, factImportance, resolveObjectColor, sigilDescription, sigilForFact } from "./visual-language.js";
+import {
+  IMPORTANCE_WEIGHT_THRESHOLD,
+  SIGIL_VOCABULARY,
+  factImportance,
+  factImportanceWeight,
+  resolveObjectColor,
+  sigilAriaLabel,
+  sigilDescription,
+  sigilForFact,
+  todoStateForFact
+} from "./visual-language.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 // The minimap is an activity preview, not a second event list.
@@ -98,9 +111,12 @@ function layeredCalendarFrames(context, requestedFrame) {
   // then every other selected frame that still exists. Companions are
   // subordinate display companions only — their coordinates are never
   // converted (AGENTS.md's frame model, point 4).
+  // A state frame can be selected (its selection is what admits its members
+  // into the ToDo lenses' projection) but it carries no axis and no
+  // coordinate law, so it never overlays a time surface.
   return context.session.selectedFrames()
     .map((id) => context.document.frames[id])
-    .filter(Boolean);
+    .filter((frame) => frame && !isStateFrame(frame));
 }
 
 // Display-facing: uses the isDisplayGroup union so a group's per-lens display
@@ -355,12 +371,70 @@ function bindFact(node, fact) {
   return node;
 }
 
+// Falloff (src/falloff.js) reaching the display-weight pathway: an UNRESOLVED
+// todo (no done/closed affiliation) seen from farther past its home registers
+// with lower apparent magnitude. The ratio is h/(h+d) -- apparentMagnitude of
+// a unit base -- exact until the `.toNumber()` boundary here, where it joins
+// the weight numbers (already plain JS numbers) it modifies. Null means "no
+// falloff applies": not a todo, done/closed (their state grammar already says
+// what they are), no home, a home not yet past, or a law with no now-mapping
+// (no clock, no honest distance from now).
+function todoFalloffRatio(context, fact) {
+  if (!activeLaw.mapsToClock()) return null;
+  if (objectKindForEvent(fact.event) !== "todo") return null;
+  const state = todoStateForFact(context, fact);
+  if (state === "done" || state === "closed") return null;
+  const memo = context.todoFalloffMemo ||= new Map();
+  if (memo.has(fact.event.id)) return memo.get(fact.event.id);
+  const home = objectHome(context.document, context.engine, fact.event.id);
+  const now = nowDays();
+  let ratio = null;
+  if (home && now.compare(home.endDays) > 0) {
+    ratio = apparentMagnitude("1", now.sub(home.endDays)).toNumber();
+  }
+  memo.set(fact.event.id, ratio);
+  return ratio;
+}
+
+// The opacity ramp's buckets, and the lens's falloff floor: bucket 3 is the
+// floor -- a lapsed todo fades to it and no further, so it still renders at
+// its historical staples when scrolled to. It lapses from prominence, never
+// from truth.
+function todoFalloffBucket(ratio) {
+  if (ratio === null || ratio > 0.75) return null;
+  if (ratio > 0.5) return "1";
+  if (ratio > 0.25) return "2";
+  return "3";
+}
+
+// The falloff-aware importance verdict every renderer in this file reads in
+// place of bare `factImportance`: identical for everything except an
+// unresolved todo past its home, whose composed weight is scaled by the
+// apparent-magnitude ratio before the same thresholds apply -- so a promoted
+// but long-lapsed todo demotes in every importance-driven treatment at once.
+function factRenderImportance(context, fact) {
+  const ratio = todoFalloffRatio(context, fact);
+  if (ratio === null) return factImportance(context, fact);
+  const weight = factImportanceWeight(context, fact) * ratio;
+  if (weight >= IMPORTANCE_WEIGHT_THRESHOLD.landmark) return "landmark";
+  if (weight >= IMPORTANCE_WEIGHT_THRESHOLD.important) return "important";
+  return "standard";
+}
+
 function applySigil(node, fact, context) {
-  const sigil = sigilForFact(fact, durationMinutes(fact.event), factImportance(context, fact), minutesPerDayNumber());
+  const sigil = sigilForFact(fact, durationMinutes(fact.event), factRenderImportance(context, fact), minutesPerDayNumber());
   const vocabulary = SIGIL_VOCABULARY[sigil];
   node.dataset.sigil = sigil;
   node.dataset.sigilGlyph = vocabulary.glyph;
-  node.setAttribute("aria-label", `${vocabulary.label}: ${fact.event.payload?.title || "untitled"}`);
+  // The cross-lens ToDo state stamp and falloff bucket ride the same funnel
+  // as the sigil, so every mark -- chip, intimate float, pip, line dot,
+  // radial arc -- carries them without per-lens wiring. State is a modifier
+  // axis over the task ○ glyph; the aria label composes it.
+  const todoState = todoStateForFact(context, fact);
+  if (todoState) node.dataset.todoState = todoState;
+  const falloffBucket = todoFalloffBucket(todoFalloffRatio(context, fact));
+  if (falloffBucket) node.dataset.todoFalloff = falloffBucket;
+  node.setAttribute("aria-label", sigilAriaLabel(sigil, todoState, fact.event.payload?.title));
   return sigil;
 }
 
@@ -552,7 +626,7 @@ function renderIntimate(target, context) {
     assignLanes(timed.filter((item) => isFloat(item)));
     for (const item of timed.slice(0, 80)) {
       const included = item.fact.displayLayer === "included";
-      const important = factImportance(context, item.fact) !== "standard";
+      const important = factRenderImportance(context, item.fact) !== "standard";
       const continuation = item.fact.continuation && durationMinutes(item.fact.event) < minutesPerDay;
       const float = isFloat(item);
       const button = element("button", `intimate-event${included ? " included-event" : ""}${float ? " float-event" : ""}${important ? " important-event" : ""}${continuation ? " continuation-event" : ""}`);
@@ -584,6 +658,28 @@ function renderIntimate(target, context) {
           : [])
       );
       column.append(button);
+    }
+    // The spectrum: an open todo whose staple is ahead of the view's now
+    // occupies the stretch now→staple. A light span treatment on the todo's
+    // own lane -- never a second event -- from the now line up to where its
+    // chip sits. Withheld with the now line itself under a law with no
+    // now-mapping, and never drawn for done/closed todos: their state grammar
+    // already says what they are.
+    if (activeLaw.mapsToClock() && today >= day - bufferDays && today <= day + bufferDays) {
+      const nowRailMinutes = Number(today - (day - bufferDays)) * minutesPerDay + minuteOfDay(nowDays());
+      for (const item of timed.slice(0, 80)) {
+        if (!isFloat(item) || objectKindForEvent(item.fact.event) !== "todo") continue;
+        if (item.start <= nowRailMinutes) continue;
+        const state = todoStateForFact(context, item.fact);
+        if (state === "done" || state === "closed") continue;
+        const span = element("div", "todo-spectrum");
+        span.style.setProperty("--event-color", factColor(context, item.fact));
+        span.style.top = `${nowRailMinutes / minutesPerHour * hourPixels}px`;
+        span.style.height = `${(item.start - nowRailMinutes) / minutesPerHour * hourPixels}px`;
+        span.style.right = `${item.lane / item.laneCount * 100}%`;
+        span.style.width = `calc(${100 / item.laneCount}% - 3px)`;
+        column.append(span);
+      }
     }
     for (let boundary = 1; boundary < railDays; boundary += 1) {
       const boundaryDay = day - bufferDays + BigInt(boundary);
@@ -641,7 +737,7 @@ function strategicPresentation(context, fact) {
   // is authored, never inferred, and specifically not from imported categories.
   // It was the only place in the codebase that promoted an object on the strength
   // of a provider's category string.
-  const important = factImportance(context, fact) !== "standard";
+  const important = factRenderImportance(context, fact) !== "standard";
   const pattern = context.document.patterns[fact.event.provenance?.pattern];
   const frequency = String(pattern?.rrule?.FREQ || "").toUpperCase();
   if (context.session.strategicMode === "blocks") return duration >= 240 ? "name" : "none";
@@ -658,6 +754,25 @@ function renderTactical(target, context) {
   const start = focusDay - BigInt(Math.floor(total / 2));
   const result = queryFacts(context, context.session.activeFrame, new Rational(start), new Rational(start + BigInt(total)), 600);
   const byDay = factsByDay(result.facts, start, start + BigInt(total));
+  // The spectrum, Tactical's shape of it: an open todo stapled ahead of the
+  // view's now washes the cells from today through its staple day -- a
+  // zone-like treatment, never a second event; the chip stays at its staple.
+  // Withheld under a law with no now-mapping, same as the now line.
+  const spectrumDays = new Set();
+  if (activeLaw.mapsToClock()) {
+    const now = new Date();
+    const nowDay = daysFromCivil(BigInt(now.getFullYear()), BigInt(now.getMonth() + 1), BigInt(now.getDate()));
+    for (const fact of result.facts) {
+      if (objectKindForEvent(fact.event) !== "todo") continue;
+      const state = todoStateForFact(context, fact);
+      if (state === "done" || state === "closed") continue;
+      const factDay = Rational.parse(fact.day).floor();
+      if (factDay <= nowDay) continue;
+      const first = nowDay > start ? nowDay : start;
+      const last = factDay < start + BigInt(total) ? factDay : start + BigInt(total) - 1n;
+      for (let spanDay = first; spanDay <= last; spanDay += 1n) spectrumDays.add(spanDay.toString());
+    }
+  }
   const grid = element("div", "tactical-grid");
   grid.style.setProperty("--rows", String(context.session.tacticalRows));
   grid.style.setProperty("--columns", String(context.session.tacticalColumns));
@@ -668,6 +783,7 @@ function renderTactical(target, context) {
     const weekday = activeLaw.cycleIndex("weekday", day);
     const fixed = fixedCalendarParts(calendar, day);
     const cell = element("section", `tactical-day${weekday === 0 || weekday === 6 ? " weekend" : ""}`);
+    if (spectrumDays.has(day.toString())) cell.classList.add("todo-spectrum-day");
     cell.dataset.createDay = day.toString();
     const header = element("header", "day-heading");
     header.append(
@@ -955,7 +1071,14 @@ function renderSimpleLines(target, context) {
   const height = 620;
   const primeY = height / 2;
   const xFor = (day) => 145 + lineProgress(day, window.start, window.end) * 995;
-  const plan = lineFramePlan(context.document, context.session.activeFrame, context.session.companionFrames);
+  // A selected state frame is not an unsupported companion -- it is not a
+  // companion here at all: its selection governs the ToDo lenses' population
+  // and claims nothing about this axis.
+  const plan = lineFramePlan(
+    context.document,
+    context.session.activeFrame,
+    context.session.companionFrames.filter((id) => !isStateFrame(context.document.frames[id]))
+  );
   if (plan.topology) {
     renderTopologyLines(target, context, plan.topology);
     return;
@@ -1135,7 +1258,7 @@ function renderTopologyLines(target, context, topology) {
     for (const point of positions) {
       const fact = { event: context.document.events[eventId], relation: point.attachment, coordinate: point.attachment.coordinate };
       const dot = svgElement("circle", { cx: xForEvent.get(eventId), cy: lane.get(point.attachment.frame) + point.offset, r: 6, fill: factColor(context, fact), class: "line-event", tabindex: 0 });
-      bindFact(dot, fact); applySigil(dot, fact, context); const title = svgElement("title"); title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact), minutesPerDayNumber())} · ${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
+      bindFact(dot, fact); applySigil(dot, fact, context); const title = svgElement("title"); title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factRenderImportance(context, fact), minutesPerDayNumber())} · ${fact.event?.payload?.title || eventId} · authored incidence`; dot.append(title); svg.append(dot);
     }
   }
   const status = svgElement("text", { x: width / 2, y: height - 18, "text-anchor": "middle", class: "lines-state" });
@@ -1180,7 +1303,7 @@ function radialEventPath(context, fact, attributes) {
   const sigil = applySigil(path, fact, context);
   path.classList.add(`sigil-${sigil}`);
   const title = svgElement("title");
-  title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factImportance(context, fact), minutesPerDayNumber())} · ${fact.event.payload?.title || "(untitled)"}`;
+  title.textContent = `${sigilDescription(fact, durationMinutes(fact.event), factRenderImportance(context, fact), minutesPerDayNumber())} · ${fact.event.payload?.title || "(untitled)"}`;
   path.append(title);
   return path;
 }
@@ -1362,7 +1485,7 @@ function renderRadial(target, context) {
         d: arcPath(cx, cy, radius, startAngle, endAngle),
         stroke: factColor(context, fact),
         "stroke-width": durationMinutes(fact.event)
-          ? Math.min(factImportance(context, fact) === "landmark" ? 11 : 8, Math.max(3, laneStep * 0.72))
+          ? Math.min(factRenderImportance(context, fact) === "landmark" ? 11 : 8, Math.max(3, laneStep * 0.72))
           : 4
       }));
       if (session.radialLabels && radialLabels.length < 24) {
@@ -1441,7 +1564,7 @@ function renderRadial(target, context) {
         svg.append(radialEventPath(context, item.fact, {
           d: arcPath(cx, cy, radius, startAngle, endAngle),
           stroke: factColor(context, item.fact),
-          "stroke-width": Math.max(factImportance(context, item.fact) === "landmark" ? 5 : 3, laneStep * 0.72)
+          "stroke-width": Math.max(factRenderImportance(context, item.fact) === "landmark" ? 5 : 3, laneStep * 0.72)
         }));
         if (session.radialLabels && radialLabels.length < 24) {
           const middle = (startAngle + endAngle) / 2;
@@ -1465,6 +1588,154 @@ function renderRadial(target, context) {
   renderErrors(target, result);
 }
 
+// ---------------------------------------------------------------------------
+// The ToDo lenses: List and Board
+// ---------------------------------------------------------------------------
+
+// Capture chrome, shared by both ToDo lenses the way the data layer is: it is
+// the write path's surface (delegated to src/ui/todo-capture.js, committed
+// through createQuickTodo in src/ui/transactions.js), not either lens's
+// projection rules -- nothing about sections or columns passes through here.
+// Quick enter is the pinned input; Tab opens the inline standard row (group,
+// date, note) -- never a dock card. State lives on session.todoCapture
+// (transient, never serialized) so a mid-typing re-render loses nothing.
+function todoCaptureBar(context) {
+  const capture = context.session.todoCapture || {};
+  const bar = element("div", "todo-capture");
+  const input = element("input", "todo-quick-input");
+  input.type = "text";
+  input.value = capture.text || "";
+  input.placeholder = "New ToDo · #group @date > note";
+  input.dataset.quickCapture = "true";
+  input.setAttribute("aria-label", "Quick ToDo entry: Enter creates, Tab opens fields");
+  bar.append(input);
+  let focusTarget = capture.focus === "quick" ? input : null;
+  if (capture.expanded) {
+    const row = element("div", "todo-capture-fields");
+    for (const field of ["group", "date", "note"]) {
+      const label = element("label", "todo-capture-field");
+      label.append(element("span", "", field));
+      const fieldInput = element("input");
+      fieldInput.type = "text";
+      fieldInput.value = capture[field] || "";
+      fieldInput.dataset.captureField = field;
+      fieldInput.setAttribute("aria-label", `ToDo ${field}`);
+      if (capture.focus === field) focusTarget = fieldInput;
+      label.append(fieldInput);
+      row.append(label);
+    }
+    bar.append(row);
+  }
+  // Renders replace the whole projection subtree, so the field that had the
+  // caret is a fresh node every pass; the capture state names it, and the
+  // renderer focuses it AFTER appending to the live tree -- focus on a
+  // detached node is a silent no-op. A stub DOM has no focus() and skips it.
+  return { bar, focusTarget };
+}
+
+function todoSectionMeta(section) {
+  if (section.meta) return `${section.meta.open} open · ${section.meta.done} done`;
+  return `${section.entries.length}`;
+}
+
+function todoListRow(context, entry) {
+  const row = element("div", "todo-row");
+  if (entry.state) row.dataset.todoState = entry.state;
+  const check = element("input", "todo-check");
+  check.type = "checkbox";
+  check.checked = entry.state === "done";
+  check.dataset.todoToggle = entry.id;
+  check.setAttribute("aria-label", entry.state === "done" ? `Mark ${entry.title} not done` : `Mark ${entry.title} done`);
+  const open = element("button", "todo-open");
+  open.type = "button";
+  open.dataset.eventId = entry.id;
+  if (factMatchesSelection(activeSelection, { event: { id: entry.id } })) open.dataset.selected = "true";
+  open.append(
+    element("strong", "", entry.title),
+    element("small", "", entry.anchored ? formatCivil(entry.coordinate, true) : "no staple yet")
+  );
+  row.append(check, open);
+  return row;
+}
+
+// List: one column, narrow-first -- capture fast, check off, see the shape.
+function renderList(target, context) {
+  const wrap = element("div", "todo-list");
+  wrap.dataset.scrollKey = "todo-list";
+  const capture = todoCaptureBar(context);
+  wrap.append(capture.bar);
+  const plan = listSections(context.document, context.engine, {
+    grouping: context.session.listGrouping,
+    selectedFrames: context.session.selectedFrames()
+  });
+  for (const section of plan.sections) {
+    const node = element("section", "todo-section");
+    node.dataset.sectionKey = section.key === null ? "" : section.key;
+    const header = element("header", "todo-section-title");
+    header.append(element("strong", "", section.title), element("small", "", todoSectionMeta(section)));
+    node.append(header);
+    for (const entry of section.entries) node.append(todoListRow(context, entry));
+    wrap.append(node);
+  }
+  if (!plan.sections.length) {
+    wrap.append(element("p", "todo-empty", "Nothing to do. Type above to capture."));
+  }
+  target.append(wrap);
+  capture.focusTarget?.focus?.();
+}
+
+// The Board's own card builder -- deliberately not the List's row builder,
+// per the lens-independence ruling; only the data layer is shared.
+function todoBoardCard(context, entry) {
+  const card = element("div", "todo-card");
+  if (entry.state) card.dataset.todoState = entry.state;
+  const check = element("input", "todo-check");
+  check.type = "checkbox";
+  check.checked = entry.state === "done";
+  check.dataset.todoToggle = entry.id;
+  check.setAttribute("aria-label", entry.state === "done" ? `Mark ${entry.title} not done` : `Mark ${entry.title} done`);
+  const open = element("button", "todo-open");
+  open.type = "button";
+  open.dataset.eventId = entry.id;
+  if (factMatchesSelection(activeSelection, { event: { id: entry.id } })) open.dataset.selected = "true";
+  open.append(
+    element("strong", "", entry.title),
+    element("small", "", entry.anchored ? formatCivil(entry.coordinate, true) : "no staple yet")
+  );
+  card.append(check, open);
+  return card;
+}
+
+// Board: columns are the grouping. Columns scroll horizontally at narrow
+// width; an empty group renders no column at all -- boardColumns never emits
+// one, so a phone is never spent on full-width nothing.
+function renderBoard(target, context) {
+  const wrap = element("div", "todo-board-wrap");
+  wrap.dataset.scrollKey = "todo-board";
+  const capture = todoCaptureBar(context);
+  wrap.append(capture.bar);
+  const plan = boardColumns(context.document, context.engine, {
+    grouping: context.session.boardGrouping,
+    selectedFrames: context.session.selectedFrames()
+  });
+  const board = element("div", "todo-board");
+  for (const column of plan.columns) {
+    const node = element("section", "todo-column");
+    node.dataset.columnKey = column.key === null ? "" : column.key;
+    const header = element("header", "todo-column-title");
+    header.append(element("strong", "", column.title), element("small", "", todoSectionMeta(column)));
+    node.append(header);
+    for (const entry of column.entries) node.append(todoBoardCard(context, entry));
+    board.append(node);
+  }
+  if (!plan.columns.length) {
+    board.append(element("p", "todo-empty", "Nothing to do. Type above to capture."));
+  }
+  wrap.append(board);
+  target.append(wrap);
+  capture.focusTarget?.focus?.();
+}
+
 export function renderProjection(target, context) {
   target.replaceChildren();
   activeSelection = context.session.selection || null;
@@ -1473,6 +1744,8 @@ export function renderProjection(target, context) {
   if (context.session.projection === "calendar") renderCalendar(target, context);
   else if (context.session.projection === "wall") renderWall(target, context);
   else if (context.session.projection === "lines") renderSimpleLines(target, context);
+  else if (context.session.projection === "list") renderList(target, context);
+  else if (context.session.projection === "board") renderBoard(target, context);
   else renderRadial(target, context);
 }
 
@@ -1560,7 +1833,7 @@ export function renderMinimap(target, context) {
       const magnitude = minimapEventMagnitude({
         durationDays: duration.toNumber(),
         stapleCount: Math.max(0, context.engine.eventFrames(sourceId).length - 1),
-        importance: factImportance(context, fact)
+        importance: factRenderImportance(context, fact)
       }) / occupiedBins;
       for (let bin = firstBin; bin <= lastBin; bin += 1) {
         magnitudes[bin] += magnitude;

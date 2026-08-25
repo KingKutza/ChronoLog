@@ -31,6 +31,16 @@ export function createDragController(app, dom) {
     return projection.querySelector(".intimate-scroll");
   }
 
+  // The ToDo lenses are scrollable rosters, not time surfaces: wheel is the
+  // native scroll, a drag is a scroll or a text selection, and a drag onto
+  // nothing must never mint an event or pan focus. The pointer-gesture and
+  // wheel handlers stand down entirely while one is active; single-click
+  // selection, double-click open, and the delegated capture/toggle listeners
+  // (src/ui/todo-capture.js) are the whole interaction surface there.
+  function todoLensActive() {
+    return app.session.projection === "list" || app.session.projection === "board";
+  }
+
   // The governing frame's hours-per-day, as a plain number for pixel/layout
   // math. Every `dataset.bufferHours`/`dataset.timelineHours` fallback below
   // used to assume a bare 24; this is what they fall back to instead, so a
@@ -112,6 +122,7 @@ export function createDragController(app, dom) {
   function adjustWindow(steps) {
     const { session } = app;
     const lens = session.currentLens();
+    if (todoLensActive()) return;
     if (lens === "intimate") {
       prepareIntimateZoom(session.intimateHourPixels * 1.2 ** (-steps));
     } else if (lens === "tactical") {
@@ -129,6 +140,7 @@ export function createDragController(app, dom) {
 
   function panFromWheel(event) {
     const { session } = app;
+    if (todoLensActive()) return;
     if (session.currentLens() === "intimate" && !event.ctrlKey && !event.metaKey) {
       // Vertical wheel is the rail's own scrolling and stays native. Horizontal
       // wheel spends the rail's slack natively too, and becomes window movement
@@ -372,6 +384,7 @@ export function createDragController(app, dom) {
   }, true);
 
   projection.addEventListener("pointerdown", (event) => {
+    if (todoLensActive()) return;
     if (event.shiftKey) return;
     const item = event.target.closest("[data-event-id]");
     if (!item || (!item.dataset.relationId && !item.dataset.virtualId)) return;
@@ -502,6 +515,7 @@ export function createDragController(app, dom) {
 
   projection.addEventListener("pointerdown", (event) => {
     const { session } = app;
+    if (todoLensActive()) return;
     if (!event.shiftKey && event.target.closest("[data-event-id],button")) return;
     const cell = event.target.closest("[data-create-day],[data-drop-start]");
     const pan = event.shiftKey || intimatePanSurface(event.target);

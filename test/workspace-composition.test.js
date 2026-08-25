@@ -6,10 +6,20 @@ import { addEvent, addFrame, addRelation, createDocument, daysToCoordinate, dura
 import { coordinate } from "../src/exact.js";
 
 test("lens workspace persists a filtered order, restores defaults, and never loses a reachable lens", () => {
-  const session = new ViewSession({ lensOrder: ["lines", "intimate"], enabledLenses: ["lines"] });
+  // The constructor is the persisted-workspace path, where the catalog-growth
+  // migration applies: a catalog lens the persisted order has never seen is
+  // appended VISIBLE (a genuinely new lens must reach existing users), so a
+  // fixture that wants only "lines" visible must persist the whole order and
+  // hide the rest -- exactly what a real saved workspace does.
+  const session = new ViewSession({
+    lensOrder: ["lines", ...DEFAULT_LENS_ORDER.filter((lens) => lens !== "lines")],
+    enabledLenses: ["lines"]
+  });
   assert.deepEqual(session.availableLenses(), ["lines"]);
   session.setLens("intimate");
   assert.equal(session.currentLens(), "tactical", "disabled lenses cannot be selected");
+  // Live reconfiguration never migrates: the caller's word is the whole
+  // workspace, so an empty enabled set falls back to the first ordered lens.
   session.configureLenses({ lensOrder: ["radial", "lines"], enabledLenses: [] });
   assert.deepEqual(session.availableLenses(), ["radial"]);
   session.restoreDefaultLenses();
