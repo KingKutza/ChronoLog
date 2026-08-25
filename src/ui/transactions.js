@@ -715,7 +715,12 @@ export function createTransactions(app) {
     if (!title) return null;
     const definition = OBJECT_KINDS.todo;
     const eventId = createId("event");
-    const frame = session.activeFrame;
+    // A write must never reference a frame the document does not hold -- the
+    // session's active frame may be a phantom (a fresh empty workspace, a
+    // deleted frame in a persisted session), and an attachment to it makes a
+    // document that refuses to load. A capture with no real frame is a bare
+    // null-frame todo, which the List's null section exists to catch.
+    const frame = chronolog.frames[session.activeFrame] ? session.activeFrame : null;
     const wanted = String(parsed.group || "").trim().toLowerCase();
     const groupFrame = wanted
       ? Object.values(chronolog.frames).find((candidate) => candidate.traits?.includes("group")
@@ -739,13 +744,15 @@ export function createTransactions(app) {
         magnitudes: { duration: durationMagnitude("0") },
         payload: { title, description: String(parsed.note || ""), location: "" }
       });
-      addRelation(documentValue, {
-        type: "attachment",
-        event: eventId,
-        frame,
-        role: definition.relationRole,
-        coordinate: law.fromDays(at)
-      });
+      if (frame) {
+        addRelation(documentValue, {
+          type: "attachment",
+          event: eventId,
+          frame,
+          role: definition.relationRole,
+          coordinate: law.fromDays(at)
+        });
+      }
       if (groupFrame) {
         addRelation(documentValue, {
           type: "membership",

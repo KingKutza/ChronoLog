@@ -56,7 +56,13 @@ export function toggleStateAffiliation(app, eventId, {
         && relation.event === eventId
         && relation.coordinate
     );
-    const frame = primary?.frame || app.session.activeFrame;
+    // A write must never reference a frame the document does not hold (the
+    // active frame may be a phantom on a fresh workspace). With no real frame
+    // to pin the instant to, the membership alone is the honest record --
+    // done, instant unstated, which the ruling makes legal.
+    const frame = primary?.frame
+      || (documentValue.frames[app.session.activeFrame] ? app.session.activeFrame : null);
+    if (!frame) return;
     // The stored coordinate must be built under THIS frame's own law -- the
     // standard boundary would silently mean the wrong instant under an edited
     // law (src/coordinate-law.js). An unresolvable frame declaration must not

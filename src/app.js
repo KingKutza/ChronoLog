@@ -241,7 +241,14 @@ async function loadWorkspaceDocument() {
   }
 }
 
-app.render();
+// The pre-load paint may fail on a session/document mismatch the load is
+// about to resolve; it must never cost the document — a throw here would
+// abort this module before the store ever attaches.
+try {
+  app.render();
+} catch (error) {
+  console.error(error);
+}
 await loadWorkspaceDocument();
 const validation = validateDocument(app.chronolog);
 if (!validation.valid) app.toast(validation.errors.join(" · "), true);

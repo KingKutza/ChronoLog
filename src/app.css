@@ -433,10 +433,16 @@ button {
 }
 
 /* Direct children only — the little "restore this lens" buttons inside the
-   hidden-lens panel are buttons too, but they are not bar-width columns. */
+   hidden-lens panel are buttons too, but they are not bar-width columns.
+   Nine lenses share the bar now, so a label that cannot fit its column clips
+   to an ellipsis at every width — overlapping neighbours is never an option.
+   The bar's real re-fit is ROADMAP #1 chrome work. */
 #lens-bar > button {
   flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 #lens-bar button {

@@ -1741,6 +1741,24 @@ export function renderProjection(target, context) {
   activeSelection = context.session.selection || null;
   activeLaw = context.session.law ?? displayLaw(context.document, context.session);
   target.dataset.projection = context.session.projection;
+  // The lens contract: a renderer that cannot support the current document
+  // uses the explicit visible error state — it must not throw. A session may
+  // legitimately point at a frame the document does not hold (a fresh empty
+  // workspace, a deleted frame in a persisted session), and every time
+  // projection resolves the lead frame's law before it can draw.
+  const lead = context.session.activeFrame;
+  const needsLead = !["list", "board"].includes(context.session.projection);
+  if (needsLead && !context.document.frames?.[lead]) {
+    renderErrors(target, {
+      errors: [{
+        pattern: lead || "no frame",
+        message: lead
+          ? "this frame is not in the document — select a frame to project."
+          : "no frame selected — create or select a frame to project."
+      }]
+    });
+    return;
+  }
   if (context.session.projection === "calendar") renderCalendar(target, context);
   else if (context.session.projection === "wall") renderWall(target, context);
   else if (context.session.projection === "lines") renderSimpleLines(target, context);
