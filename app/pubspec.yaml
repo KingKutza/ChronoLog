@@ -1,0 +1,31 @@
+name: chronolog
+description: "ChronoLog — timelines and events as staples."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Annotations only: a pure-Dart, dependency-free annotation package, so
+  # lib/core/ stays pure Dart and nothing here reaches a host API.
+  freezed_annotation: ^3.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  # lib/core/ is pure Dart, so its spec runs on the Dart VM under `dart test`
+  # without loading the Flutter test binding.
+  test: ^1.25.0
+  flutter_lints: ^6.0.0
+  # Record-type codegen. `*.freezed.dart` files are build products, committed to
+  # the tree and outside the hand-written line budget. JSON codegen is
+  # deliberately absent: unknown-field preservation and never-throw-on-data mean
+  # every codec here is hand-written, and two codec styles would be chaff.
+  build_runner: ^2.4.0
+  freezed: ^4.0.0
+
+flutter:
+  uses-material-design: true
