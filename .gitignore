@@ -9,6 +9,7 @@ local/
 
 # Build output
 dist/
+out/
 *.tgz
 
 # Launcher logs (written under the resolved data dir, which now defaults to the app root itself)
@@ -21,3 +22,4 @@ logs/
 .DS_Store
 .vscode/
 .idea/
+.vs/

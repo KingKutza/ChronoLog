@@ -1,13 +1,12 @@
-import 'package:flutter/material.dart';
+// The entry point, and nothing else. What the program IS lives in `app.dart`,
+// where every seam is a parameter and a spec stands the whole thing up in
+// memory; a main that assembled anything would be an assembly no test runs.
 
-void main() => runApp(const ChronoLogApp());
+import 'package:flutter/widgets.dart';
 
-class ChronoLogApp extends StatelessWidget {
-  const ChronoLogApp({super.key});
+import 'app.dart';
 
-  @override
-  Widget build(BuildContext context) => const MaterialApp(
-    title: 'ChronoLog',
-    home: Scaffold(body: Placeholder()),
-  );
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const ChronoLogApp());
 }

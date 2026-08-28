@@ -9,12 +9,14 @@
 // enumeration rather than a hope.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:chronolog/core/document.dart';
 import 'package:chronolog/core/ops.dart';
 import 'package:chronolog/core/records.dart';
+import 'package:chronolog/store/plaintext_file.dart';
 import 'package:chronolog/store/seams.dart';
 
 Future<Directory> tempRoot(String label) => Directory.systemTemp.createTemp('chronolog-$label-');
@@ -74,6 +76,75 @@ class _Task implements StoreTimer {
   void cancel() => cancelled = true;
 }
 
+/// A DISK THAT IS A MAP. The one in-memory store the whole spec shares.
+///
+/// A widget test runs inside a fake-async zone, so REAL file I/O inside
+/// `testWidgets` never completes -- the load awaits a future the zone will not
+/// run. Everything here answers in memory, which is also the honest shape for a
+/// card or surface spec: what the surface does is the subject, and the
+/// filesystem is not.
+class MemoryFiles implements StoreFiles {
+  final Map<String, List<int>> contents = {};
+
+  /// What was written to the one path ending in [name], as text.
+  String? find(String name) {
+    for (final entry in contents.entries) {
+      if (entry.key.endsWith(name)) return utf8.decode(entry.value);
+    }
+    return null;
+  }
+
+  void write(String path, String text) => contents[path] = utf8.encode(text);
+
+  /// The bytes under each path, so a spec can assert what was written.
+  Map<String, List<int>> get written => contents;
+
+  void put(PlaintextFile file, String text) => write(file.path, text);
+
+  @override
+  Future<List<int>?> read(String path) async => contents[path];
+
+  @override
+  Future<void> ensureDirectory(String path) async {}
+
+  @override
+  Future<void> writeNew(String path, List<int> bytes) async => contents[path] = [...bytes];
+
+  @override
+  Future<void> rename(String from, String to) async {
+    final bytes = contents.remove(from);
+    if (bytes != null) contents[to] = bytes;
+  }
+
+  @override
+  Future<void> appendSynced(String path, List<int> bytes) async =>
+      contents[path] = [...?contents[path], ...bytes];
+
+  @override
+  Future<void> truncate(String path, int length) async =>
+      contents[path] = [...?contents[path]?.take(length)];
+
+  @override
+  Future<void> delete(String path) async => contents.remove(path);
+
+  @override
+  Future<List<String>> namesIn(String path) async {
+    final under = [
+      for (final key in contents.keys)
+        if (key.startsWith('$path/') || key.startsWith('$path${Platform.pathSeparator}')) key,
+    ];
+    return {for (final key in under) _lastSegment(key)}.toList()..sort();
+  }
+
+  static String _lastSegment(String path) {
+    final cut = [
+      path.lastIndexOf('/'),
+      path.lastIndexOf(Platform.pathSeparator),
+    ].reduce((a, b) => a > b ? a : b);
+    return cut < 0 ? path : path.substring(cut + 1);
+  }
+}
+
 /// Every write step, named, with a hook before each one. Reads pass straight
 /// through and are not steps: nothing a read does can leave a file half written.
 class InstrumentedFiles implements StoreFiles {
@@ -126,6 +197,9 @@ class InstrumentedFiles implements StoreFiles {
     await _step('delete');
     return inner.delete(path);
   }
+
+  @override
+  Future<List<String>> namesIn(String path) => inner.namesIn(path);
 }
 
 /// The kill signal. Its own type so a case can tell a simulated crash from a

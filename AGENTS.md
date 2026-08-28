@@ -2,7 +2,8 @@
 
 ChronoLog is a local-first timeline instrument, pre-alpha and exploratory:
 timelines are first-class objects, events staple onto them (sometimes onto
-more than one), and nine lenses project one shared `chronolog/1` document.
+more than one), and the lenses project one shared `chronolog/1` document (the
+lens count is data in the catalog, never a fact a test may assert).
 Read [LEXICON.md](LEXICON.md) for vocabulary and the
 founding ideas before naming anything new — it is the owner's own voice and
 brainstorm space. Meaning is authored by the user: color and semantics come
@@ -12,7 +13,206 @@ character when you touch adjacent code or docs.
 
 ## Architecture map
 
-### `src/`
+### `app/lib/`
+
+The Flutter program (the shipping build since 2026-08-28). `core/` and `store/`
+are the proven model; everything else is the surface. Nothing under `core/` may
+import Flutter. There are no Flutter plugins and there never will be: a Windows
+plugin build needs symlink support this machine's policy forbids, so host
+capabilities go through `dart:ffi` (`host/`).
+
+- `main.dart` — the entry point and nothing else. What the program IS lives in
+  `app.dart`, where every seam is a parameter and a spec stands the whole thing
+  up in memory.
+- `app.dart` — the assembly. `Workspace.open` takes the filesystem, the clock,
+  the data root and the file picker, and returns store, editor, settings,
+  session files, stage, chrome and card factory wired together. First-run
+  honesty lives here: an empty root establishes an empty document, and a view
+  tile projects the shipped wall-time frame rather than a seeded calendar. A
+  card is an edit session, so a layout naming one from a previous run drops the
+  leaf instead of leaving a hole.
+
+#### `core/` — the model
+
+- `coordinate_law.dart`, `eras.dart`, `era_chain.dart`, `calendar_structure.dart`,
+  `coordinate_entry.dart` — the coordinate-arithmetic engine, the era table, the
+  authoring side of a declaration, and the variable-precision entry field's
+  substrate. Depth is precision, never uncertainty. See "Coordinate law".
+- `records.dart`, `document.dart`, `ops.dart`, `validate.dart` — the
+  `chronolog/1` document shape, record-level ops as the change representation,
+  and the load-time validator. `createEmptyWorkspaceDocument` is what a first
+  run establishes: two structural frames and nothing else.
+- `projection.dart` — `ProjectionEngine`: fact queries, occurrence generation,
+  the boolean-algebra `Projection` over connections, the weight chain's ring
+  input (`modifyingFrames`), the whole connection graph (`connectionsOf`),
+  cross-frame correspondence (`frameProjection` / `coordinateSpaceOf`), and the
+  ONE reader for a group display property (`authoredHandling`) that zone fill,
+  sigil and falloff half-distance all go through. See "Frames are groups".
+- `indexes.dart`, `staples.dart`, `frame_projection.dart` — the index layer, the
+  staple substrate (a staple is a two-ended connection; nothing else may
+  hand-read one), and the ruling that cross-frame projection exists only through
+  staples. See "Staples".
+- `weight.dart`, `falloff.dart`, `strategic_density.dart` — `composeWeight` in
+  the blessed order, apparent-magnitude falloff, and the per-day density budget.
+  See "Display weight".
+- `math.dart` — THE ONE MATH. `parse`/`evaluate`/`Env`/`MathRefusal`; every
+  setting, weight formula, placement predicate and span formula is an
+  expression in it.
+- `exact.dart` — exact rational/BigInt arithmetic and `nowDays()`. No `DateTime`
+  arithmetic in domain code.
+- `object_kinds.dart`, `todo_shape.dart`, `series_heal.dart`,
+  `recurrence_end.dart`, `rrule.dart`, `event_cycle.dart`,
+  `frame_selection.dart` — object trait bundles, the ToDo derivation, the series
+  convergence invariant, how an RRULE stops, recurrence expansion,
+  observed-boundary cycles, and a plain frame selection.
+- `ics.dart`, `ics_text.dart`, `ics_values.dart` — the ruled lossy ICS boundary.
+
+#### `store/` — truth on disk
+
+- `data_dir.dart` — where the data lives, and where it never lives: the app's
+  own directory or an explicit path. No branch here can name a profile
+  directory, and that absence IS the ruling.
+- `journal.dart`, `document_store.dart` — snapshot plus append-only journal,
+  the 350ms autosave debounce, refcounted deferral, in-flight coalescing that
+  carries force forward, and a failed write that hands the ops back.
+- `plaintext_file.dart` — a named sidecar the app reads, writes atomically and
+  polls for external edits, so hand-editing a file and using the GUI are one
+  authoring path.
+- `seams.dart` — the outside world, injected: every file call and the clock.
+
+#### `edit/` — the one write door
+
+- `editor.dart` — `Editor` over the store and the engine. The ops list IS the
+  undo entry; undo and redo are FORWARD journal entries. Every door is one
+  `transaction`, so cascades and the convergence invariant are laws rather than
+  code paths. Notifications raised during a build are held to the end of the
+  frame.
+- `reach.dart`, `cascades.dart` — the reachable-record closure, settling, and
+  the cascade a removal drags with it (including `duplicateFrame`'s deep copy
+  with staple-end remap).
+- `drafts.dart` — edit-session drafts keyed by object id; N cards hold N drafts;
+  discard is its own undo entry.
+- `gestures.dart` — the write side of pointer verbs: `createAt`, `moveFact`
+  (with materialization and snap-back), `toggleState`, `setContains`, and their
+  composable `withState`/`withContains` document forms, so two acts that are one
+  act are one undo entry.
+- `capture.dart`, `capture_grammar.dart` — quick-capture; a fuzzy `#group` miss
+  ASKS before anything is committed.
+- `weight_explain.dart` — the weight derivation, whole, for the card's explainer.
+
+#### `session/` — what the surface is looking at
+
+- `settings.dart` — every tunable as a named setting whose shipped default is an
+  expression in the one math, plus text settings (key chords, theme name) which
+  are deliberately not arithmetic. A refused expression keeps the last good
+  value and says why.
+- `lens_catalog.dart` — `LensSpec`/`ControlSpec` and the shipped lenses as DATA.
+  A lens declares its controls; the context bar renders the declaration and
+  knows no lens by name.
+- `view_state.dart` — per-view-tile lens, projection, focus and per-lens map,
+  and the `ViewBook` that `chronolog.view` holds.
+- `files.dart` — the plaintext sidecars (`chronolog.layout`, `.view`,
+  `.settings`, `themes/*.json`), read once and then polled, written on a
+  debounce, flushed on demand.
+
+#### `stage/` — everything is a tile
+
+- `layout_tree.dart` — the tiling tree: `split`/`tabs`/`dwindle` containers and
+  tile leaves, JSON both ways, insert/close/move/split/tab, ratio snapping,
+  directional focus.
+- `placement_rules.dart` — where a new tile lands, as an ordered rule list
+  matched in the one math. A full tab stack overflows BESIDE itself.
+- `tile.dart` — `TileSpec` and `Stage`. Type is content; no tile kind has a
+  special path, and closing asks nothing.
+- `stage_widget.dart` — the tree as widgets: one divider service, one tab strip,
+  the permanent hairline grip, drag-to-split and drag-to-tab.
+
+#### `chrome/` — the three bars
+
+- `controls.dart` — `Chrome` (what the chrome is looking at) and the designed
+  control vocabulary every bar, menu and card is made of. No raw number field,
+  no comma string, no bare record id.
+- `document_bar.dart`, `view_bar.dart`, `context_bar.dart` — what the document
+  is and the actions on the whole of it; which lens the focused view tile is;
+  that lens's own declared controls. An unclaimed action is not rendered.
+- `projection_control.dart` — which frames the focused view looks through, over
+  the same row and the same selection the frames browser authors.
+- `menus.dart` — the one menu class every drop and every right-click uses.
+- `keyboard.dart` — one keyboard map; every binding is a setting.
+- `shell.dart` — `chronologSettings()` (EVERY area's defaults, composed — a key
+  in no map is a refusal naming it), the shipped stage preset, and
+  `ChronoSurface`.
+
+#### `lens/` — the painting substrate and the lenses
+
+- `tunables.dart`, `theme.dart`, `lens_painter.dart` — the settings seam; the
+  8-field palette with three derived tones and two font roles; `LensScene` and
+  `LensPainter`, where `project` and `unproject` sit side by side so the eye and
+  the drop cannot disagree.
+- `law_context.dart` — one law read per paint. There is no 24 and no 1440 in
+  this layer.
+- `facts.dart`, `capacity.dart`, `lanes.dart`, `zones.dart`, `now.dart` — the
+  fact window with exact per-day segmentation; the ONE magnitude-driven capacity
+  budget; one lane packer keyed on temporal overlap; the zone grammar as a group
+  property; one now derivation, gated on `mapsToClock`.
+- `marks.dart`, `color.dart`, `display_weight.dart` — the sigil vocabulary with
+  its paint folded in; the authored 4-step colour cascade (no colour is ever
+  inferred from a trait); the composed display weight with per-lens promotion
+  and per-frame falloff. See "Visual grammar".
+- `gestures.dart`, `view_tile.dart`, `context_menu.dart`, `drag_ghost.dart` —
+  THE one pointer table, the view tile that hosts a lens and owns it, the app's
+  own right-click surface, and the drag ghost that names the live coordinate.
+- `minimap/` — magnitude accumulation with hysteresis, the boundary label ladder,
+  the particle-field painter, and the tile that scrubs the focused view.
+- `painters/` — `intimate`, `tactical`, `strategic`, `wall` over one parameterised
+  `month_grid`; `lines`, `spiral`, `radial`.
+- `radial/`, `lines/` — cycle resolution and polar geometry; Lines' warp plan
+  (N staples = warp, and Lines draws it).
+- `todo/`, `tree/` — the two roster lenses over one row and one capture bar, and
+  the connection graph, which renders a GRAPH and never a strict tree.
+
+#### `cards/` — the editors
+
+- `card_factory.dart` — the one door onto every card. A card IS a tile, idempotent
+  by id; bodies are registered per class and an unregistered class renders a
+  stated gap. `CardHost` carries the factory above every tile.
+- `card_chrome.dart` — the shared card frame: header, short primary path, ONE
+  fold, footer. Plus the shared instruments (field, chips, links, compose,
+  colour, menu) so no site spells a control's shape.
+- `coordinate_field.dart`, `staple_editor.dart`, `connection_picker.dart`,
+  `state_control.dart`, `weight_explainer.dart`, `object_card.dart` — the
+  variable-precision coordinate field; THE placement interface, where no staple
+  is special and both ends of every connection are navigable; windowed typeahead
+  that never enumerates; state as a chooser over state frames; the weight
+  derivation shown ring by ring; the object card itself.
+- `frame_card.dart`, `law_editor.dart`, `boundary_series_editor.dart`,
+  `frames_browser.dart` — a frame's identity and its GROUP display handling,
+  with basis guidance; the calendar structure as the coordinate law; observed
+  boundary series; the one frames surface.
+- `document_card.dart`, `settings_card.dart`, `theme_card.dart` — the document,
+  its ICS boundary and its layout presets; every tunable as a designed control;
+  the palette, with Apply and Save as separate verbs.
+
+#### `host/`
+
+- `file_picker.dart` — the host's file dialog with NO PLUGIN and no package:
+  `dart:ffi` into `comdlg32` on Windows, a stated refusal elsewhere.
+
+#### `app/tool/` and `app/test/`
+
+`tool/` holds the differential harnesses that prove the Dart against the
+JavaScript it was ported from (see its README) — load-bearing with no callers.
+`test/` is the spec: generative properties at `specSeed = 20260827`, widget tests
+over in-memory fakes (`test/store/harness.dart`), never real file I/O inside
+`testWidgets`.
+
+### `src/` — the JavaScript reference build (retiring)
+
+The web renderer was ruled dead 2026-08-27 ("exit two"). `src/`, `tools/`,
+`test/` and `pocket-instrument.html` remain only as the differential oracle for
+`app/tool/` and as the reference for WHAT the old surface displayed — never for
+how. They are deleted when the harnesses no longer need them. The map below
+describes them as they stand.
 
 - `coordinate-law.js` — the single coordinate-arithmetic engine: the transition
   registry, the registered CLDR calendar families, and the `CoordinateLaw` that
@@ -962,13 +1162,16 @@ a published ICS URL.
 
 ### Lens extension contract
 
-To add a lens: one `LENS_CATALOG` entry in `src/session.js` (title, backing
-projection, declared capabilities), a renderer in `src/projections.js`, and
-serializable settings via `ViewSession.toJSON()`. A newly registered lens is
-placed after a user's persisted ordering without resetting it. A renderer
-that cannot support the current document must use the projection's explicit
-visible error state — it must not break other lenses or invent a coordinate
-conversion.
+To add a lens: one `LensSpec` in `app/lib/session/lens_catalog.dart` (title,
+description, `isTimeSurface`, declared `ControlSpec`s whose keys are settings,
+`spanUnit`/`spanFormula`, optional `scaleKey`), a `LensPainter` (or a widget
+lens) registered through `registerLensPainter`/`registerLensWidget` in
+`app/lib/lens/view_tile.dart`, and its defaults map composed into
+`chronologSettings()`. Every number the lens draws with is a named setting. A
+newly registered lens is placed after a user's persisted ordering without
+resetting it. A lens that cannot support the current document paints the
+explicit refusal in the law's vocabulary — it must not break other lenses or
+invent a coordinate conversion.
 
 ## Standing rules
 
@@ -980,13 +1183,23 @@ conversion.
 - Only two network contexts matter: **Local** (this machine, `127.0.0.1`
   only) and **WAN** (real sync between instances, future work — see
   ROADMAP.md). There is no LAN tier; don't reintroduce one.
-- Pure Node, zero external dependencies. Keep it that way.
+- Flutter/Dart, one binary, no server. `lib/core/` is pure Dart. Zero Flutter
+  plugins, ever (see `app/lib/` above); host capabilities go through
+  `dart:ffi`. The Flutter SDK lives at `~/.flutter/flutter/bin` and is on the
+  cmd PATH only — prefix it in any other shell.
+- Everything is a tile; every tunable is a named setting whose value is an
+  expression in the one math; no confirmation dialogs — every operation is
+  undoable instead.
 - Pre-alpha: break compatibility rather than accrete legacy shims.
 - `LEXICON.md` is the owner's voice — agents never edit it unprompted, even
   when it references something that has since moved or been deleted.
   Additions happen only at the owner's direction, in his words.
 - `GUI_Mockup/` images are live design references — never delete them.
-- The doc set is exactly four files: this file, `README.md`,
-  `ROADMAP.md`, and `LEXICON.md`. Don't create new `.md` files.
-- Prefer behavioral tests over source-text string assertions.
-- Run `npm test` and `npm run check` before finishing work.
+- The doc set is this file, `README.md`, `ROADMAP.md`, `LEXICON.md`,
+  `ISSUES.md` (the living tracker — items carry date tags and are resolved in
+  place; never mint dated issue files) and `WHAT_RIDES.md`. Don't create new
+  `.md` files without the owner's direction.
+- Prefer behavioral tests over source-text string assertions; tests are
+  generative properties at `specSeed`, never pinned arbitrary facts.
+- Run `flutter analyze` and `flutter test` in `app/` before finishing work;
+  `npm test` covers the retiring JavaScript oracle.

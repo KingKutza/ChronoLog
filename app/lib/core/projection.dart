@@ -50,6 +50,7 @@ import 'era_chain.dart';
 import 'eras.dart' show firstMatch, refusalText;
 import 'exact.dart';
 import 'falloff.dart';
+import 'frame_projection.dart';
 import 'indexes.dart';
 import 'math.dart';
 import 'object_kinds.dart';
@@ -263,6 +264,14 @@ typedef _Explicit = ({List<Fact> facts, Rational maxDuration, String? error});
 
 // --- The engine -------------------------------------------------------------
 
+/// One edge of the connection graph, in the vocabulary of the connection that
+/// made it. A kind is a string, not an enum: an unfamiliar connection is data a
+/// later surface may learn to draw rather than a crash.
+typedef GraphEdge = ({String from, String to, String kind});
+
+const String containsEdge = 'contains', stapleEdge = 'staple';
+const String membershipEdge = 'membership', placementEdge = 'placement';
+
 class ProjectionEngine {
   ProjectionEngine(Document document, {AuthoredDepthOf? precisionOf})
     : precisionOf = precisionOf ?? authoredDepth {
@@ -292,6 +301,8 @@ class ProjectionEngine {
   /// about frames; keeping the same map object between edits that touched no
   /// frame is what keeps the law cache warm.
   late Map<String, Object?> _raw;
+
+  FrameProjection? _frameProjection;
 
   final Map<String, List<Fact>> _explicit = {};
   final Map<String, Rational> _maxDuration = {};
@@ -412,6 +423,7 @@ class ProjectionEngine {
     _errors.clear();
     _reach.clear();
     _above.clear();
+    _frameProjection = null;
     if (doomed == null) {
       _series.clear();
       _windows.clear();
@@ -479,10 +491,76 @@ class ProjectionEngine {
 
   List<Pattern> matchingPatterns(String frameId) => indexes.patternsFor(frameId);
 
+  // --- The whole connection graph -------------------------------------------
+
+  /// Cross-frame correspondence over THIS document, built once per generation
+  /// and sharing this engine's law cache. One instance, so no surface builds a
+  /// second by deep-copying the document to ask one question.
+  FrameProjection get frameProjection => _frameProjection ??= FrameProjection({
+    ..._raw,
+    'relations': {for (final entry in document.relations.entries) entry.key: entry.value.toJson()},
+  }, laws: laws);
+
+  /// The frame whose declaration actually governs [frameId]. Two frames
+  /// resolving to one space correspond by identity and need no staple.
+  String coordinateSpaceOf(String frameId) => frameProjection.coordinateSpaceOf(frameId);
+
+  /// Every connection one record has, as edges away from it -- the whole graph,
+  /// under the honest name. Deterministic: ids sort, so two runs over one
+  /// document draw the same picture.
+  ///
+  /// CONNECTION IS NOT INCLUSION: this is the graph, not the projection. Both
+  /// ends of every staple appear from either side by construction.
+  List<GraphEdge> connectionsOf(String id) {
+    final edges = <GraphEdge>[
+      for (final child in indexes.childrenOf(id)) (from: id, to: child, kind: containsEdge),
+      for (final parent in indexes.parentsOf(id)) (from: parent, to: id, kind: containsEdge),
+      for (final group in indexes.directGroupsOf(id)) (from: id, to: group, kind: membershipEdge),
+    ];
+    for (final staple in indexes.staplesOf(id)) {
+      for (final end in indexes.endsOf(staple)) {
+        if (end.id != id) edges.add((from: id, to: end.id, kind: stapleEdge));
+      }
+    }
+    if (document.events.containsKey(id)) {
+      for (final frame in indexes.framesOf(id)) {
+        edges.add((from: id, to: frame, kind: placementEdge));
+      }
+    } else {
+      for (final member in indexes.memberObjects(id).toList()..sort()) {
+        edges.add((from: member, to: id, kind: membershipEdge));
+      }
+      for (final attachment in indexes.attachmentsOf(id)) {
+        if (attachment.event case final String event) {
+          edges.add((from: event, to: id, kind: placementEdge));
+        }
+      }
+    }
+    return edges;
+  }
+
+  /// A GROUP DISPLAY PROPERTY, resolved for one object: the object's own
+  /// `display.<field>` first, then [nearest] where a caller knows which frame
+  /// supplied the fact, then every frame bearing on the object by increasing
+  /// graph distance with ties broken by stable id. Null when nobody authored
+  /// one, which is honest -- the caller's shipped default answers instead.
+  ///
+  /// FRAMES ARE GROUPS (ruled 2026-08-19), so handling -- zone fill, sigil,
+  /// falloff half-distance, Strategic promotion -- is authored on a group and
+  /// read here, ONCE, never as a per-lens knob.
+  Object? authoredHandling(String objectId, String field, {String? nearest}) {
+    final own = obj(document.events[objectId]?.extra['display'])?[field];
+    if (own != null) return own;
+    final rings = modifyingFrames(objectId).entries.toList()
+      ..sort((a, b) => a.value != b.value ? a.value.compareTo(b.value) : a.key.compareTo(b.key));
+    for (final id in [?nearest, for (final ring in rings) ring.key]) {
+      final authored = obj(document.frames[id]?.extra['display'])?[field];
+      if (authored != null) return authored;
+    }
+    return null;
+  }
+
   // --- Which frames bear on an object ---------------------------------------
-  //
-  // RESERVED: a genuine whole-connection-graph accessor belongs under the honest
-  // name `connectionsOf` and does not exist yet -- the Tree lens will want one.
 
   /// The frames that may MODIFY this object, and in HOW MANY HOPS.
   ///

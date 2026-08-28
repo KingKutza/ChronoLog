@@ -42,6 +42,11 @@ abstract interface class StoreFiles {
 
   /// Remove the file if it is there. An absent file is already the outcome.
   Future<void> delete(String path);
+
+  /// The file names a directory holds, without their paths, in name order. An
+  /// absent directory holds nothing, which is an answer rather than an error.
+  /// The ONE listing: nothing above this reaches for dart:io to find a file.
+  Future<List<String>> namesIn(String path);
 }
 
 class IoStoreFiles implements StoreFiles {
@@ -83,6 +88,16 @@ class IoStoreFiles implements StoreFiles {
   Future<void> delete(String path) async {
     final file = File(path);
     if (await file.exists()) await file.delete();
+  }
+
+  @override
+  Future<List<String>> namesIn(String path) async {
+    final directory = Directory(path);
+    if (!await directory.exists()) return const [];
+    return [
+      for (final entry in await directory.list().toList())
+        if (entry is File) entry.uri.pathSegments.last,
+    ]..sort();
   }
 
   static Future<void> _write(String path, FileMode mode, List<int> bytes) async {
