@@ -10,6 +10,8 @@
 // ONE class, nothing floats, nothing overlaps, no flow raises a dialog, and the
 // bars describe the FOCUSED VIEW TILE.
 
+import 'dart:convert';
+
 import 'package:chronolog/app.dart';
 import 'package:chronolog/chrome/context_bar.dart';
 import 'package:chronolog/chrome/document_bar.dart';
@@ -18,10 +20,12 @@ import 'package:chronolog/chrome/view_bar.dart';
 import 'package:chronolog/core/object_kinds.dart';
 import 'package:chronolog/edit/editor.dart';
 import 'package:chronolog/host/file_picker.dart';
+import 'package:chronolog/lens/theme.dart';
 import 'package:chronolog/lens/view_tile.dart';
 import 'package:chronolog/session/lens_catalog.dart';
 import 'package:chronolog/stage/layout_tree.dart';
 import 'package:chronolog/stage/tile.dart';
+import 'package:chronolog/stage/stage_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -63,6 +67,42 @@ Future<void> pumpWorkspace(WidgetTester tester, Workspace workspace) async {
 Rect rectOf(WidgetTester tester, String id) => tester.getRect(find.byKey(ValueKey(id)));
 
 void main() {
+  testWidgets('a first run lays the shipped palettes down as files a person can edit', (
+    tester,
+  ) async {
+    tester.view.physicalSize = _surface;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final disk = MemoryFiles();
+    final workspace = await Workspace.open(
+      dataRoot: _root,
+      files: disk,
+      scheduler: ManualScheduler(),
+      picker: const RefusedFilePicker('no dialog in a spec'),
+    );
+    addTearDown(workspace.dispose);
+    for (final palette in shipped.values) {
+      final text = disk.find('${palette.name}.json');
+      expect(text, isNotNull, reason: '${palette.name} shipped but was never written');
+      final read = ChronoTheme.fromJson(Map<String, Object?>.from(jsonDecode(text!) as Map));
+      for (final field in themeFields) {
+        expect(hexOf(read.palette[field]!), hexOf(palette.palette[field]!), reason: field);
+      }
+    }
+    // An edited theme is the user's. Booting again must not put the shipped
+    // one back over it.
+    final written = disk.contents.keys.firstWhere((key) => key.endsWith('paper.json'));
+    disk.write(written, '{"name":"paper","ground":"#123456"}');
+    final second = await Workspace.open(
+      dataRoot: _root,
+      files: disk,
+      scheduler: ManualScheduler(),
+      picker: const RefusedFilePicker('no dialog in a spec'),
+    );
+    addTearDown(second.dispose);
+    expect(disk.find('paper.json'), contains('123456'));
+  });
+
   testWidgets('a first run establishes an empty document and seeds no frames of its own', (
     tester,
   ) async {
@@ -91,7 +131,7 @@ void main() {
     final height = workspace.chrome.px('chrome.barHeight');
     // A BAR IS A TILE: its content thickness is what it arrives at and the
     // least it takes, and the stage divides what is left (ruled 2026-08-28).
-    final full = _surface.width - workspace.chrome.px('stage.grip');
+    final full = _surface.width - workspace.chrome.px('stage.grip') - tileChrome(workspace.chrome);
     for (final bar in [DocumentBar, ViewBar, ContextBar]) {
       expect(tester.getSize(find.byType(bar)).width, closeTo(full, 2), reason: '$bar');
       expect(tester.getSize(find.byType(bar)).height, closeTo(height, 1), reason: '$bar');

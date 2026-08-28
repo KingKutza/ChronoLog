@@ -108,38 +108,12 @@ const Map<String, String> lensTunableDefaults = {
   'lane.minWidth': '18',
 
   // --- Minimap --------------------------------------------------------------
-  // The wave's own numbers live beside the painter that reads them; the rest of
-  // the minimap's settings are here with every other lens number.
+  // EVERY minimap number lives beside the painter that reads it, and is spread
+  // in here so the lens layer still answers for one composed map. Four keys
+  // that nothing read at all -- a drift the painter never had and two opacities
+  // it replaced -- are gone: a shipped default for a setting no surface reads
+  // is a promise the settings card would make and nothing would keep.
   ...minimapTunableDefaults,
-  'minimap.rangeMultiple': '5',
-  'minimap.bandLow': '0.12',
-  'minimap.bandHigh': '0.88',
-  'minimap.anchorLow': '0.25',
-  'minimap.anchorHigh': '0.75',
-  'minimap.bins': '288',
-  'minimap.busyQuantile': '0.9',
-  // The scale ladder, generated: powers of the base interleaved with the
-  // half-step multiple is the 1 2 3 4 6 8 12 16 ... sequence, authored as three
-  // settings rather than tabulated as twenty numbers nobody can edit.
-  'minimap.ladderBase': '2',
-  'minimap.ladderHalfStep': '3',
-  'minimap.ladderRungs': '20',
-  'minimap.particles': '5200',
-  'minimap.particleRadius': '0.7',
-  'minimap.driftSeconds': '18',
-  'minimap.driftAmplitude': '1.5',
-  'minimap.baselineOpacity': '0.46',
-  'minimap.unlitOpacity': '0.2',
-  'minimap.litOpacity': '0.82',
-  'minimap.labelInset': '3',
-  'minimap.labelSize': '9',
-  'minimap.windowStroke': '1.25',
-  'minimap.focusStroke': '1.4',
-  'minimap.budget.hour': '12',
-  'minimap.budget.day': '16',
-  'minimap.budget.month': '14',
-  'minimap.budget.quarter': '18',
-  'minimap.budget.fallback': '12',
 
   // --- Radial and Spiral ----------------------------------------------------
   'radial.outerRadius': '278',

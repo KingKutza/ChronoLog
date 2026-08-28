@@ -9,6 +9,35 @@
 /// Every number the minimap draws with. Composed into `lensTunableDefaults`,
 /// which the session composes into the one settings map.
 const Map<String, String> minimapTunableDefaults = {
+  // --- The range, and the bins the field accumulates into --------------------
+  'minimap.rangeMultiple': '5',
+  'minimap.bandLow': '0.12',
+  'minimap.bandHigh': '0.88',
+  'minimap.anchorLow': '0.25',
+  'minimap.anchorHigh': '0.75',
+  'minimap.bins': '288',
+  'minimap.busyQuantile': '0.9',
+  // The scale ladder, generated: powers of the base interleaved with the
+  // half-step multiple is the 1 2 3 4 6 8 12 16 ... sequence, authored as three
+  // settings rather than tabulated as twenty numbers nobody can edit.
+  'minimap.ladderBase': '2',
+  'minimap.ladderHalfStep': '3',
+  'minimap.ladderRungs': '20',
+  'minimap.particles': '5200',
+  'minimap.particleRadius': '0.7',
+  'minimap.baselineOpacity': '0.46',
+
+  // --- The labels and the window box ----------------------------------------
+  'minimap.labelInset': '3',
+  'minimap.labelSize': '9',
+  'minimap.windowStroke': '1.25',
+  'minimap.focusStroke': '1.4',
+  'minimap.budget.hour': '12',
+  'minimap.budget.day': '16',
+  'minimap.budget.month': '14',
+  'minimap.budget.quarter': '18',
+  'minimap.budget.fallback': '12',
+
   // --- The curve ------------------------------------------------------------
   // The kernel is a triangle over this many bins: neighbouring activity adds and
   // the crest saturates, which is what makes the result a wave rather than a
@@ -40,14 +69,18 @@ const Map<String, String> minimapTunableDefaults = {
   'minimap.grainPerPixel': '0.13',
   // The lit fraction and how much larger a lit grain is. A grain NEVER moves
   // along time: a travelling grain says an event moved, and none did.
-  'minimap.glint': '0.05',
+  //
+  // "It may be a bit much, but it is very very cool" (Don, 2026-08-28): the
+  // wave and the glitter ride, the motion is calmed. A third fewer grains
+  // glint, and both periods are a half again as long.
+  'minimap.glint': '0.033',
   'minimap.glintScale': '2',
 
   // --- The motion, which has no period --------------------------------------
   // One grain's own twinkle period, and how widely the grains' rates differ
   // around it. Rates that differ are rates with no common multiple, so the
   // field never resets in unison and there is no loop to see.
-  'minimap.twinkleSeconds': '24',
+  'minimap.twinkleSeconds': '36',
   'minimap.rateSpread': '0.7',
   // How deeply brightness swings, and how many brightness buckets the draw
   // quantizes to -- thousands of independent twinkles for a handful of calls.
@@ -58,7 +91,7 @@ const Map<String, String> minimapTunableDefaults = {
   'minimap.jitter': '0',
   // The band's slow breath, across the axis and uniform along it.
   'minimap.breathe': '0.03',
-  'minimap.breatheSeconds': '37',
+  'minimap.breatheSeconds': '56',
 
   // --- Countable versus dense -----------------------------------------------
   // Up to this many placed facts within this many pixels, every fact is drawn

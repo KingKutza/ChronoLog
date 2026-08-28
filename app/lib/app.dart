@@ -189,6 +189,7 @@ class Workspace {
       theme: theme,
       load: load,
     );
+    await _layTheThemes(session);
     await workspace._dressIn(settings.text('theme.name'));
     settings.addListener(workspace._themeNamed);
     editor.changes.addListener(workspace._framesChanged);
@@ -215,6 +216,19 @@ class Workspace {
     }
     if (findNode(stage.root, stage.focusedId ?? '') == null) {
       stage.focusedId = stage.focusedViewTile ?? edgeLeaf(stage.root, false)?.id;
+    }
+  }
+
+  /// THE SHIPPED PALETTES ARE FILES FROM THE FIRST RUN. A theme the program
+  /// knows and the disk does not is not an authoring path: `themes/` shipped
+  /// empty, so a person who wanted to move one colour had nothing to open.
+  /// Written only where the name is absent, so an edited `paper.json` is never
+  /// overwritten by the default it was edited away from.
+  static Future<void> _layTheThemes(SessionFiles files) async {
+    await files.ensure();
+    final present = (await files.themeNames()).toSet();
+    for (final palette in shipped.values) {
+      if (!present.contains(palette.name)) await files.saveTheme(palette);
     }
   }
 

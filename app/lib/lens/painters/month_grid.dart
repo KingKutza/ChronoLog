@@ -47,7 +47,7 @@ import 'wall.dart';
 /// for being named by a catalog control as well.
 const Map<String, String> gridTunableDefaults = {
   'grid.header': '18',
-  'grid.gutter': '58',
+  'grid.gutter': '74',
   'grid.pad': '3',
   'grid.rule': '1',
   'grid.ruleOpacity': '0.55',
@@ -60,12 +60,12 @@ const Map<String, String> gridTunableDefaults = {
   'grid.numberAt': '22',
   'grid.overflowSize': '9',
   'grid.pipSize': '7',
-  'grid.washWeekend': '0.16',
-  'grid.washToday': '0.13',
+  'grid.washWeekend': '0.07',
+  'grid.washToday': '0.1',
   // The record slash already says "this is behind us"; a wash saying it again
   // is the same claim twice, so it ships off (ruled 2026-08-28).
   'grid.washPast': '0',
-  'grid.slashPast': '0.22',
+  'grid.slashPast': '0.14',
   'grid.washSpectrum': '0.1',
   // The weekend as AUTHORED cycle positions, never a hardcoded Saturday and
   // Sunday: a calendar whose rest days fall elsewhere says so here, and a count
@@ -223,8 +223,13 @@ List<Heading> weekdayHeadings(List<String> names, int first, {bool initials = fa
     ),
 ];
 
-/// The one label call every grid draws through: one line in the data font,
-/// clipped to its own box.
+/// The one label call every lens draws through, clipped to its own box.
+///
+/// TWO FACES, ONE RULE (ruled 2026-08-28): [data] is the monospace role and is
+/// for COORDINATES, COUNTS AND TIMES -- a clock reading, a day number, an "N+"
+/// lower bound. Everything a person reads as prose -- a title, a weekday name, a
+/// month -- is the humanist face and is the default, because a surface that
+/// drew every string as data came up in a typewriter from end to end.
 void paintLabel(
   Canvas canvas,
   ChronoTheme theme,
@@ -233,12 +238,13 @@ void paintLabel(
   Color color,
   double size, {
   bool center = false,
+  bool data = false,
 }) {
   if (text.isEmpty || box.width <= 0) return;
   final painter = TextPainter(
     text: TextSpan(
       text: text,
-      style: theme.data.copyWith(color: color, fontSize: size),
+      style: (data ? theme.data : theme.ui).copyWith(color: color, fontSize: size),
     ),
     textDirection: TextDirection.ltr,
     maxLines: 1,
@@ -246,6 +252,11 @@ void paintLabel(
   )..layout(maxWidth: box.width);
   painter.paint(canvas, Offset(box.left + (center ? (box.width - painter.width) / 2 : 0), box.top));
 }
+
+/// A rule laid on the half-pixel, so a one-device-pixel line lands on one pixel
+/// instead of being resolved as two grey ones. Every hairline in every lens goes
+/// through this: the blur is a large part of what read as coarse.
+double crisp(double at) => at.roundToDouble() + 1 / 2;
 
 /// A flat tint over a region: how a weekend, a spent day, today, a contended
 /// interval and a ToDo spectrum all read as ground rather than as marks.
@@ -436,7 +447,9 @@ abstract class DayGridPainter extends LensPainter {
     Color color,
     String key, {
     bool center = false,
-  }) => paintLabel(canvas, scene.theme, text, box, color, scene.px(key), center: center);
+    bool data = false,
+  }) =>
+      paintLabel(canvas, scene.theme, text, box, color, scene.px(key), center: center, data: data);
 
   void _wash(Canvas canvas, Rect box, Color color, String key) =>
       paintWash(canvas, box, color, scene.px(key));
@@ -469,7 +482,7 @@ abstract class DayGridPainter extends LensPainter {
       );
     }
     canvas.drawRect(
-      cell,
+      Rect.fromLTRB(crisp(cell.left), crisp(cell.top), crisp(cell.right), crisp(cell.bottom)),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = scene.px('grid.rule')
@@ -483,6 +496,7 @@ abstract class DayGridPainter extends LensPainter {
         Rect.fromLTWH(cell.left + pad, top, cell.width - pad * 2, scene.px('grid.numberSize')),
         today == day ? scene.theme.primary : scene.theme.muted,
         'grid.numberSize',
+        data: true,
       );
       top += scene.px('grid.numberSize') + pad;
     }
@@ -520,6 +534,7 @@ abstract class DayGridPainter extends LensPainter {
       ),
       scene.theme.muted,
       'grid.overflowSize',
+      data: true,
     );
   }
 

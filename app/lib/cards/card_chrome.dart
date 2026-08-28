@@ -80,15 +80,16 @@ class CardShell extends StatefulWidget {
 class _CardShellState extends State<CardShell> {
   bool _open = false;
 
-  /// The header and the footer are the same band, ruled on opposite edges.
+  /// The header and the footer are the same band, ruled on opposite edges and
+  /// standing on `surface` -- chrome's own tone -- so the card's body reads as
+  /// the sheet between them.
   Widget _band(BuildContext context, Widget child, {required bool top}) {
-    final side = BorderSide(
-      color: ChronoTheme.of(context).hair,
-      width: ChromeScope.of(context).px('chrome.hair'),
-    );
+    final theme = ChronoTheme.of(context);
+    final side = BorderSide(color: theme.hair, width: ChromeScope.of(context).px('chrome.hair'));
     return Container(
       padding: EdgeInsets.all(cardPx(context, 'card.pad')),
       decoration: BoxDecoration(
+        color: theme.surface,
         border: top ? Border(top: side) : Border(bottom: side),
       ),
       child: child,
@@ -99,8 +100,11 @@ class _CardShellState extends State<CardShell> {
   Widget build(BuildContext context) {
     final chrome = ChromeScope.of(context);
     final theme = ChronoTheme.of(context);
-    return Container(
-      color: theme.surface,
+    // The tile under this already paints `paper`; a card that painted its own
+    // ground a second time is where the three surface roles stopped meaning
+    // elevation and started meaning nothing.
+    return DecoratedBox(
+      decoration: BoxDecoration(color: theme.paper),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -117,7 +121,7 @@ class _CardShellState extends State<CardShell> {
                   child: Text(
                     widget.title,
                     overflow: TextOverflow.ellipsis,
-                    style: bodyStyle(context),
+                    style: bodyStyle(context).copyWith(fontSize: chrome.px('chrome.title')),
                   ),
                 ),
                 if (widget.dirty)

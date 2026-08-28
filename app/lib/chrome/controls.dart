@@ -25,20 +25,36 @@ import 'menus.dart';
 
 /// Chrome numbers, as named settings. Motion lives in the lens defaults (one
 /// ratified curve for the whole app), so nothing here restates it.
+/// ONE SPACING UNIT (ruled 2026-08-28). Every gap, pad, height and radius below
+/// is a multiple of `chrome.unit`, WRITTEN as that multiplication rather than as
+/// the number it comes to, so the rhythm is visible in the settings file and
+/// moving the unit moves the whole grid. Type is one scale off `chrome.body` by
+/// the same rule.
 const Map<String, String> chromeTunableDefaults = {
-  'chrome.barHeight': '34',
-  'chrome.tabHeight': '26',
-  'chrome.gap': '6',
-  'chrome.pad': '8',
-  'chrome.corner': '3',
+  // Nothing reads this one: it is the grid ITSELF, declared so the settings
+  // card can name it and so the suite can hold every spacing below to a whole
+  // multiple of it. A number that only a test reads still does a job.
+  'chrome.unit': '2',
+  'chrome.barHeight': '2 * 16',
+  'chrome.gap': '2 * 3',
+  'chrome.pad': '2 * 5',
+  'chrome.corner': '2 * 3',
   'chrome.hair': '1',
-  'chrome.focusRing': '1.5',
-  'chrome.label': '11',
+  'chrome.focusRing': '3/2',
+  // The least a control may be: a hand's target, not a glyph's box.
+  'chrome.hit': '2 * 14',
+  'chrome.label': '13 * 6/7',
   'chrome.body': '13',
-  'chrome.menuWidth': '260',
-  'chrome.rowHeight': '28',
+  'chrome.title': '13 * 8/7',
+  'chrome.menuWidth': '2 * 130',
+  'chrome.rowHeight': '2 * 14',
   'chrome.labelCap': '28',
   'chrome.frameRows': '12',
+  // A control is GHOST by default: it earns a ground under the pointer and a
+  // tint when it is the one in force. A border on every button is what made the
+  // surface read as boxes drawn on boxes.
+  'chrome.hoverWash': '1/16',
+  'chrome.activeWash': '0.14',
 };
 
 /// Chrome text settings: not arithmetic, so not tunables.
@@ -125,8 +141,10 @@ TextStyle bodyStyle(BuildContext c, {Color? color}) => ChronoTheme.of(c).ui
 TextStyle dataStyle(BuildContext c, {Color? color}) => ChronoTheme.of(c).data
     .copyWith(fontSize: ChromeScope.of(c).px('chrome.body'), color: color ?? ChronoTheme.of(c).ink);
 
-/// The one chip every control wears: a hairline body, a small muted label, and
-/// whatever the control puts beside it.
+/// The one chip every control wears: GHOST by default -- no border, no ground --
+/// taking an ink wash under the pointer and the primary's own tint when it is
+/// the choice in force. The label is small and muted; the control sits beside
+/// it.
 Widget controlChip(
   BuildContext c, {
   String label = '',
@@ -139,19 +157,9 @@ Widget controlChip(
   final chrome = ChromeScope.of(c);
   final theme = ChronoTheme.of(c);
   final live = onTap != null || inert;
-  final body = AnimatedContainer(
-    duration: chrome.motion,
-    curve: chrome.curve,
-    height: chrome.px('chrome.rowHeight'),
-    padding: EdgeInsets.symmetric(horizontal: chrome.px('chrome.pad')),
-    decoration: BoxDecoration(
-      color: active ? theme.primary.withValues(alpha: 0.12) : theme.surface,
-      border: Border.all(
-        color: active ? theme.primary : theme.hair,
-        width: chrome.px('chrome.hair'),
-      ),
-      borderRadius: BorderRadius.circular(chrome.px('chrome.corner')),
-    ),
+  final body = _Chip(
+    active: active,
+    onTap: onTap,
     // A chip is a tile's content and a tile is any width, so the chip NARROWS
     // rather than overflowing: the name ellipsizes and the control scrolls
     // inside its own body. Nothing is clipped away silently -- what does not fit
@@ -176,8 +184,59 @@ Widget controlChip(
       ],
     ),
   );
-  final tapped = onTap == null ? body : InkWell(onTap: onTap, child: body);
-  return hint == null ? tapped : Tooltip(message: hint, child: tapped);
+  return hint == null ? body : Tooltip(message: hint, child: body);
+}
+
+/// The chip's body and its three states. Hover IS a state, so it is a widget
+/// with one; and nothing here snaps between states -- every change of ground
+/// arrives on the ratified curve (ruled 2026-08-28).
+class _Chip extends StatefulWidget {
+  const _Chip({required this.active, required this.onTap, required this.child});
+
+  final bool active;
+  final VoidCallback? onTap;
+  final Widget child;
+
+  @override
+  State<_Chip> createState() => _ChipState();
+}
+
+class _ChipState extends State<_Chip> {
+  bool _over = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final chrome = ChromeScope.of(context);
+    final theme = ChronoTheme.of(context);
+    final hovering = _over && widget.onTap != null;
+    final wash = widget.active
+        ? theme.primary.withValues(alpha: chrome.px('chrome.activeWash'))
+        : (hovering
+              ? theme.ink.withValues(alpha: chrome.px('chrome.hoverWash'))
+              : const Color(0x00000000));
+    final body = AnimatedContainer(
+      duration: chrome.motion,
+      curve: chrome.curve,
+      constraints: BoxConstraints(minHeight: chrome.px('chrome.hit')),
+      padding: EdgeInsets.symmetric(horizontal: chrome.px('chrome.pad')),
+      decoration: BoxDecoration(
+        color: wash,
+        border: Border.all(
+          color: widget.active ? theme.primary : const Color(0x00000000),
+          width: chrome.px('chrome.hair'),
+        ),
+        borderRadius: BorderRadius.circular(chrome.px('chrome.corner')),
+      ),
+      child: widget.child,
+    );
+    if (widget.onTap == null) return body;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _over = true),
+      onExit: (_) => setState(() => _over = false),
+      child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: widget.onTap, child: body),
+    );
+  }
 }
 
 Widget _step(BuildContext c, String glyph, String label, VoidCallback onTap) => Semantics(
@@ -317,7 +376,13 @@ Widget namedAction(
     onTap: onTap,
     child: Text(
       glyph ?? label,
-      style: dataStyle(c, color: onTap == null ? ChronoTheme.of(c).hair : ChronoTheme.of(c).ink),
+      // A WORD IS PROSE; a glyph is a mark. The data face carries coordinates,
+      // counts and times, and nothing else -- a button that wore it because it
+      // was one call away is why the whole chrome came up in a typewriter.
+      style: (glyph == null ? bodyStyle : dataStyle)(
+        c,
+        color: onTap == null ? ChronoTheme.of(c).hair : ChronoTheme.of(c).ink,
+      ),
     ),
   ),
 );

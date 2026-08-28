@@ -38,7 +38,14 @@ import 'layout_tree.dart';
 
 /// Stage geometry, as named settings.
 const Map<String, String> stageTunableDefaults = {
-  'stage.divider': '4',
+  // THE SEAM IS THE GROUND, AND THE GROUND IS THE TARGET. A divider is a
+  // CHANNEL of the stage's own ground between two tiles, wide enough that the
+  // hand catches it without aiming and that the arrangement reads as tiles laid
+  // out rather than as one wall with lines ruled across it. The hairline sits
+  // down the middle of it; the tiles either side are rounded and edged, so what
+  // the eye reads as a fine seam is what the hand grabs.
+  'stage.divider': '2 * 4',
+  'stage.radius': '2 * 3',
   // The hand's target is wider than the painted line, so a seam is easy to
   // catch without drawing a bar of chrome to catch it with.
   'stage.dividerHit': '11',
@@ -96,12 +103,20 @@ Widget _flex(bool horizontal, List<Widget> parts) =>
 Widget _sized(bool horizontal, double extent, Widget child) =>
     SizedBox(width: horizontal ? extent : null, height: horizontal ? null : extent, child: child);
 
+/// What a tile spends on its own frame across BOTH edges of an axis: the
+/// hairline that draws its boundary. The standoff is the divider's channel and
+/// belongs to the container, not to the tile.
+double tileChrome(Chrome chrome) => chrome.px('chrome.hair') * 2;
+
 /// The LEAST a node may be given along an axis -- its content thickness. A bar
-/// knows how thick it needs to be; every other tile takes what it is given.
+/// knows how thick it needs to be; every other tile takes what it is given. A
+/// bar's ask is its CONTENT's thickness plus its own frame, so widening the
+/// inset never eats into the bar (ruled 2026-08-28).
 double leastExtent(Chrome chrome, LayoutNode node, bool horizontal) {
   if (node is TileLeaf) {
     if (node.type != 'bar') return 0;
-    return horizontal ? chrome.px('stage.barWidth') : chrome.px('chrome.barHeight');
+    return tileChrome(chrome) +
+        (horizontal ? chrome.px('stage.barWidth') : chrome.px('chrome.barHeight'));
   }
   if (node is! Branch || node.children.isEmpty) return 0;
   final along = node.mode == 'split' && (node.axis == 'row') == horizontal;
@@ -696,6 +711,7 @@ class _TileState extends State<_Tile> {
               Expanded(child: ground),
             ],
           );
+    final radius = BorderRadius.circular(chrome.px('stage.radius'));
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTapDown: (_) => chrome.stage.focus(id),
@@ -713,20 +729,28 @@ class _TileState extends State<_Tile> {
           setState(() => _zone = null);
           chrome.stage.move(details.data, id, zone);
         },
-        builder: (context, candidate, _) => DecoratedBox(
-          // Selection and focus are INK, never a colour.
+        builder: (context, candidate, _) => AnimatedContainer(
+          duration: chrome.motion,
+          curve: chrome.curve,
+          // Selection and focus are INK, never a colour -- and at the SAME
+          // weight as the resting hairline, so taking focus moves no pixel.
           decoration: BoxDecoration(
+            color: theme.paper,
+            borderRadius: radius,
             border: Border.all(
-              color: focused ? theme.strong : const Color(0x00000000),
-              width: chrome.px('chrome.focusRing'),
+              color: focused ? theme.ink : theme.hair,
+              width: chrome.px('chrome.hair'),
             ),
           ),
-          child: Stack(
-            children: [
-              Positioned.fill(child: stack),
-              if (candidate.isNotEmpty && _zone != null)
-                Positioned.fill(child: _preview(context, _zone!)),
-            ],
+          child: ClipRRect(
+            borderRadius: radius,
+            child: Stack(
+              children: [
+                Positioned.fill(child: stack),
+                if (candidate.isNotEmpty && _zone != null)
+                  Positioned.fill(child: _preview(context, _zone!)),
+              ],
+            ),
           ),
         ),
       ),

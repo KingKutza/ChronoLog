@@ -82,9 +82,15 @@ const Map<String, String> intimateTunableDefaults = {
   'intimate.pad': '4',
   'intimate.markMinHeight': '13',
   'intimate.grab': '9',
-  'intimate.radius': '3',
-  'intimate.fill': '0.16',
-  'intimate.edge': '0.7',
+  'intimate.radius': '4',
+  'intimate.fill': '0.12',
+  // THE LEFT RULE is what says whose a block is: the authored colour at full
+  // strength down its leading edge, with the body a wash of the same colour
+  // over paper and the boundary a hairline. A hard border in the full colour
+  // all the way round is what made every event read as a grey box.
+  'intimate.rule': '3',
+  'intimate.edge': '0.3',
+  'intimate.timeSize': '9',
   'intimate.midnightRule': '1.6',
   'intimate.hourRule': '1',
   'intimate.hourOpacity': '0.5',
@@ -190,6 +196,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       }
       _paintColumn(canvas, size, column, blocks, floats);
     }
+    _paintColumnNames(canvas);
     final at = nowIn(law, scene.nowDays);
     for (final column in at == null ? const <int>[] : _columnsAt(at)) {
       final y = _y(column, at!);
@@ -285,19 +292,6 @@ class IntimatePainter extends LensPainter implements ManyPositions {
         _paintMidnight(canvas, size, column, day + BigInt.from(column));
       }
     }
-    // WHICH DAY IS THIS COLUMN? A window that never crosses midnight would
-    // otherwise be three unnamed columns of hours.
-    final pad = scene.px('intimate.pad');
-    for (var column = 0; column < _columns; column++) {
-      _text(
-        canvas,
-        dayLabel(scene.law, law.dayOf(_columnTop(column) + _visible / Rational.fromInt(2))),
-        Offset(_left(column) + pad, pad),
-        scene.theme.strong,
-        'intimate.labelSize',
-        width: _columnWidth - pad * 2,
-      );
-    }
     if (step <= Rational.zero) return;
     // Only the rules the window actually holds: at a minute a rule, a day has
     // a thousand of them and the screen has sixteen.
@@ -308,7 +302,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       final at = Rational(index) * step;
       final y = _y(0, at);
       if (y < 0 || y > size.height) continue;
-      canvas.drawLine(Offset(_railWidth, y), Offset(size.width, y), rule);
+      canvas.drawLine(Offset(_railWidth, crisp(y)), Offset(size.width, crisp(y)), rule);
       if (index % BigInt.from(every < 1 ? 1 : every) != BigInt.zero) continue;
       _text(
         canvas,
@@ -316,16 +310,35 @@ class IntimatePainter extends LensPainter implements ManyPositions {
         Offset(scene.px('intimate.pad'), y),
         scene.theme.muted,
         'intimate.labelSize',
+        data: true,
       );
     }
     // The seam between one day and the next, drawn as the rule it is.
     for (var column = 1; column < _columns; column++) {
       canvas.drawLine(
-        Offset(_left(column), 0),
-        Offset(_left(column), size.height),
+        Offset(crisp(_left(column)), 0),
+        Offset(crisp(_left(column)), size.height),
         Paint()
           ..strokeWidth = scene.px('intimate.hourRule')
           ..color = scene.theme.hair,
+      );
+    }
+  }
+
+  /// WHICH DAY IS THIS COLUMN? A window that never crosses midnight would
+  /// otherwise be several unnamed columns of hours. Drawn AFTER the blocks: a
+  /// day-long span used to cover the only thing naming the day it covers.
+  void _paintColumnNames(Canvas canvas) {
+    final pad = scene.px('intimate.pad');
+    for (var column = 0; column < _columns; column++) {
+      _text(
+        canvas,
+        dayLabel(scene.law, law.dayOf(_columnTop(column) + _visible / Rational.fromInt(2))),
+        Offset(_left(column) + pad, pad),
+        scene.theme.strong,
+        'intimate.labelSize',
+        width: _columnWidth - pad * 2,
+        data: true,
       );
     }
   }
@@ -340,8 +353,8 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     if (y < 0 || y > size.height) return;
     final left = _left(column), right = left + _columnWidth;
     canvas.drawLine(
-      Offset(left, y),
-      Offset(right, y),
+      Offset(left, crisp(y)),
+      Offset(right, crisp(y)),
       Paint()
         ..strokeWidth = scene.px('intimate.midnightRule')
         ..color = scene.theme.strong,
@@ -354,6 +367,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       scene.theme.muted,
       'intimate.labelSize',
       width: _columnWidth - pad * 2,
+      data: true,
     );
     _text(
       canvas,
@@ -362,6 +376,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       scene.theme.ink,
       'intimate.labelSize',
       width: _columnWidth - pad * 2,
+      data: true,
     );
   }
 
@@ -495,6 +510,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
         scene.theme.muted,
         'intimate.labelSize',
         width: width,
+        data: true,
       );
     }
   }
@@ -522,12 +538,21 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       final grammar = zoneBand(box, color, zoneSegment(block.segment), scene.theme, scene.tunable);
       canvas.drawRRect(grammar.shape, grammar.fill);
       canvas.drawRRect(grammar.shape, grammar.edge);
-    } else {
+    }
+    final rule = zoned ? 0.0 : scene.px('intimate.rule');
+    if (!zoned) {
       final shape = RRect.fromRectAndRadius(box, Radius.circular(scene.px('intimate.radius')));
       canvas.drawRRect(
         shape,
         Paint()..color = Color.lerp(scene.theme.paper, color, scene.px('intimate.fill'))!,
       );
+      // The left rule, in the authored colour at full strength: the one place a
+      // block states whose it is, so the body can stay a wash and the boundary
+      // a hairline.
+      canvas.save();
+      canvas.clipRRect(shape);
+      canvas.drawRect(Rect.fromLTWH(box.left, box.top, rule, box.height), Paint()..color = color);
+      canvas.restore();
       canvas.drawRRect(
         shape,
         Paint()
@@ -538,17 +563,32 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     }
     final spec = markSpecFor(scene, law, fact, block.weight, color);
     final pad = scene.px('intimate.pad'), pip = scene.px('intimate.pip');
-    spec.paint(canvas, Rect.fromLTWH(box.left + pad, box.top + pad, pip, pip), fact);
+    final inset = box.left + rule + pad;
+    spec.paint(canvas, Rect.fromLTWH(inset, box.top + pad, pip, pip), fact);
     if (!zoneTitled(zoneSegment(block.segment))) return;
     final title = '${fact.event.payload?['title'] ?? ''}';
+    final titleSize = scene.px('intimate.titleSize'), timeSize = scene.px('intimate.timeSize');
     _text(
       canvas,
       title,
-      Offset(box.left + pad * 2 + pip, box.top + pad),
+      Offset(inset + pad + pip, box.top + pad),
       scene.theme.ink.withValues(alpha: spec.opacity),
       'intimate.titleSize',
-      width: box.width - pad * 3 - pip,
+      width: box.right - pad - (inset + pad + pip),
     );
+    // WHEN, in the data face, once the block is tall enough to say it without
+    // crowding the name. A clock reading is a coordinate, not prose.
+    if (box.height >= titleSize + timeSize + pad * 3) {
+      _text(
+        canvas,
+        law.clockLabel(law.minuteOfDay(block.start)),
+        Offset(inset, box.top + pad + titleSize + pad / 2),
+        scene.theme.muted.withValues(alpha: spec.opacity),
+        'intimate.timeSize',
+        width: box.width - rule - pad * 2,
+        data: true,
+      );
+    }
     // THE GRAB STRIP: the block's leading edge is what a drag moves. Its body is
     // empty to the pointer, which is what lets a create-drag pass through an
     // occupied span (ROADMAP #7).
@@ -558,15 +598,23 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     hits.add((bounds: box, shape: grab, fact: fact, identity: fact.identity));
   }
 
-  void _text(Canvas canvas, String text, Offset at, Color color, String key, {double? width}) =>
-      paintLabel(
-        canvas,
-        scene.theme,
-        text,
-        Rect.fromLTWH(at.dx, at.dy, width ?? scene.size.width, scene.px(key) * 2),
-        color,
-        scene.px(key),
-      );
+  void _text(
+    Canvas canvas,
+    String text,
+    Offset at,
+    Color color,
+    String key, {
+    double? width,
+    bool data = false,
+  }) => paintLabel(
+    canvas,
+    scene.theme,
+    text,
+    Rect.fromLTWH(at.dx, at.dy, width ?? scene.size.width, scene.px(key) * 2),
+    color,
+    scene.px(key),
+    data: data,
+  );
 
   /// The eye and the drop, side by side: every column a day is showing in, and
   /// the day a point in one of them names.

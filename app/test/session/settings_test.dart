@@ -3,6 +3,7 @@
 
 import 'package:chronolog/chrome/controls.dart';
 import 'package:chronolog/core/exact.dart';
+import 'package:chronolog/core/math.dart';
 import 'package:chronolog/session/settings.dart';
 import 'package:chronolog/stage/stage_widget.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,9 +14,23 @@ Settings _settings() => Settings(
 );
 
 void main() {
+  /// What a shipped expression comes to, read the way the settings layer reads
+  /// it. Pinning the NUMBER here would only assert what the map already says,
+  /// and would break every time a default is re-tuned.
+  Rational shipped(String key) =>
+      switch (evaluateSource(_settings().expressionOf(key), const Env())) {
+        final Rational number => number,
+        final Object? other => throw StateError('$key is $other, not a number'),
+      };
+
   test('a shipped default reads through the one math', () {
-    expect(_settings().value('chrome.gap'), Rational.fromInt(6));
-    expect(_settings().value('stage.divider'), Rational.fromInt(4));
+    expect(_settings().value('chrome.gap'), shipped('chrome.gap'));
+    expect(_settings().value('stage.divider'), shipped('stage.divider'));
+    // The chrome rhythm is one unit: every spacing is a multiple of it.
+    final unit = _settings().value('chrome.unit');
+    for (final key in const ['chrome.gap', 'chrome.pad', 'chrome.barHeight', 'chrome.rowHeight']) {
+      expect(shipped(key) % unit, Rational.zero, reason: '$key is off the grid');
+    }
   });
 
   test('an override wins over the default and a reset gives it back', () {
@@ -38,7 +53,7 @@ void main() {
     final settings = _settings();
     settings.applyJson({'chrome.gap': '4', 'chrome.pad': ')('});
     expect(settings.value('chrome.gap'), Rational.fromInt(4));
-    expect(settings.value('chrome.pad'), Rational.fromInt(8));
+    expect(settings.value('chrome.pad'), shipped('chrome.pad'));
     expect(settings.refusals, isNotEmpty);
   });
 

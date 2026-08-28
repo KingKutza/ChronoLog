@@ -12,6 +12,7 @@ import 'package:chronolog/session/lens_catalog.dart';
 import 'package:chronolog/session/view_state.dart';
 import 'package:chronolog/stage/layout_tree.dart';
 import 'package:chronolog/stage/tile.dart';
+import 'package:chronolog/stage/stage_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -59,7 +60,7 @@ void main() {
     // A bar arrives at its own content thickness -- its shipped share is under
     // that, so the minimum is what it takes -- and keeps its grip beside it.
     final height = chrome.px('chrome.barHeight');
-    final full = _surface.width - chrome.px('stage.grip');
+    final full = _surface.width - chrome.px('stage.grip') - tileChrome(chrome);
     for (final bar in [DocumentBar, ViewBar, ContextBar]) {
       expect(tester.getSize(find.byType(bar)).width, closeTo(full, 2), reason: '$bar');
       expect(tester.getSize(find.byType(bar)).height, closeTo(height, 1), reason: '$bar');

@@ -139,7 +139,12 @@ class ChronoSurface extends StatelessWidget {
       child: Material(color: palette.ground, child: const StageView()),
     );
     return Theme(
-      data: ThemeData(extensions: [palette], scaffoldBackgroundColor: palette.ground),
+      // ONE THEME BUILDER. A bare ThemeData here carried the palette and let
+      // Material answer for everything else, so tooltips, splashes and text
+      // selection came up in the framework's blue under a hand-authored
+      // palette. `themeDataFor` is the one place a ChronoTheme becomes a
+      // ThemeData, and this is one of its two callers.
+      data: themeDataFor(palette),
       child: ChromeScope(
         chrome: chrome,
         child: cards == null
