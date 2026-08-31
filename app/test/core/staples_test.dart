@@ -166,7 +166,13 @@ void main() {
       expect(stapleKind('anchor')!.anchors, isTrue);
       expect(stapleKind('correspondence')!.anchors, isFalse);
       expect(stapleKind('correspondence')!.partitions, isFalse);
-      expect(stapleKind('succession')!.positions, isFalse);
+      // DISSOLVED (8.31): `succession` selects no derivation any more. Its ends
+      // speak the point vocabulary every frame end now speaks, so the word is a
+      // label a file may carry and nothing here reads it as a case.
+      expect(stapleKind('succession')!.positions, isTrue);
+      expect(stapleKind('succession')!.partitions, isFalse);
+      expect(stapleKind('succession')!.anchors, isFalse);
+      expect(stapleKind('succession')!.carriesRule, isFalse);
       expect(stapleKind('not-a-kind'), isNull);
       expect(stapleKind(null), isNull);
     });

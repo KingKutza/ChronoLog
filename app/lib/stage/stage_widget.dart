@@ -6,11 +6,15 @@
 // transform-only and retargets rather than queueing.
 //
 // WHAT YOU DRAG IS VISIBLE (ruled 2026-08-28). Every tile wears a permanent
-// handle: a strip carrying one tab per tile in its stack, each with its own
-// label and its own close, the strip itself the thing you drag and the surface
-// you right-click. A bar, which has no thickness to spare, wears the same
-// handle as a grip at its leading end. The hover-reveal box is gone -- an
-// affordance you have to discover by hovering is not an affordance.
+// handle, and which one it wears is what it IS. A tile in a stack wears the
+// stack's strip: one tab per tile, each with its own label and its own close,
+// the strip itself the thing you drag and the surface you right-click. A tile on
+// its own wears a WINDOW BAR instead -- its name and a triple dot, no tab shape
+// and no close -- because "1 tab is not a tab it is just a window" (Don,
+// 2026-08-31), and closing is one of the verbs the handle offers rather than a
+// mark you can hit by accident. A bar, which has no thickness to spare, wears
+// the same verbs as a grip at its leading end. The hover-reveal box is gone --
+// an affordance you have to discover by hovering is not an affordance.
 //
 // A BAR IS A TILE LIKE ANY OTHER. Its content thickness is what it takes when
 // it is first placed and the LEAST it will ever take; above that it is dragged,
@@ -49,10 +53,19 @@ const Map<String, String> stageTunableDefaults = {
   // The hand's target is wider than the painted line, so a seam is easy to
   // catch without drawing a bar of chrome to catch it with.
   'stage.dividerHit': '11',
-  'stage.strip': '22',
+  // A STACK'S strip. Tall enough to hold a hand's target: the close on a tab is
+  // a thing you hit without aiming ("Bigger x on the tabs", Don 2026-08-31), and
+  // a strip shorter than `chrome.hit` could not carry one.
+  'stage.strip': '2 * 16',
   // The grip a bar wears instead of a strip: its leading end, costing the bar
   // no thickness at all.
   'stage.grip': '12',
+  // The two marks the stage draws with -- the close on a tab and the handle on a
+  // window -- at the size the MARK is drawn, inside the hand's target it sits in.
+  'stage.mark': '2 * 9',
+  // The air after a lone window's handle, so the mark is not flush against the
+  // tile's own edge.
+  'stage.handleInset': '2 * 2',
   // A bar's least thickness across its container's axis: its height in a
   // column, its width in the rarer row. A floor, never a fixed size.
   'stage.barWidth': '240',
@@ -90,8 +103,16 @@ class StageView extends StatelessWidget {
   );
 }
 
+/// IS THIS A STACK? "1 tab is not a tab it is just a window" (Don, 2026-08-31).
+/// A tab strip is what tells two or more tiles apart, so one child is not a
+/// stack, wears no strip, and renders as the plain window it is -- whether it
+/// was born alone or was left alone when its neighbour closed.
+bool isStack(LayoutNode? node) =>
+    node is Branch && node.mode == 'tabs' && node.children.length > 1;
+
 Widget _node(BuildContext c, LayoutNode node) => switch (node) {
   TileLeaf leaf => _Tile(key: ValueKey(leaf.id), leaf: leaf),
+  Branch b when b.mode == 'tabs' && b.children.length == 1 => _node(c, b.children.first),
   Branch b when b.mode == 'tabs' => _tabs(c, b),
   Branch b when b.mode == 'dwindle' => _dwindle(c, b, 0, b.axis),
   Branch b => _split(c, b),
@@ -460,8 +481,9 @@ List<MenuRow> stripMenu(BuildContext c, TileLeaf leaf) {
   ];
 }
 
-/// THE handle: what you drag a tile by and what you right-click on. A strip
-/// wears it across the top; a bar wears it as a grip at its leading end.
+/// THE handle: what you drag a tile by and what you right-click on. A stack's
+/// strip wears it across the top, a lone window's bar does the same, and a bar
+/// wears it as a grip at its leading end.
 Widget tileGrab(BuildContext context, TileLeaf leaf, Widget child) {
   final chrome = ChromeScope.of(context);
   final theme = ChronoTheme.of(context);
@@ -505,9 +527,177 @@ void dropOnHandle(BuildContext context, TileLeaf leaf, String from, {Branch? sta
   stage.move(from, leaf.id, 'center');
 }
 
-/// The always-visible strip: one tab per tile in the stack, the active one
-/// distinguished by INK rather than by colour, each with its own close, and the
-/// whole strip the handle you drag the tile by.
+/// The two marks the stage draws: the close on a tab, and the handle a window
+/// or a bar is dragged by.
+const String closeMark = '×', handleMark = '⋮';
+
+/// A MARK THAT IS ITS OWN HIT TARGET. The glyph is laid out AT the target size
+/// rather than sitting in a box beside one, so what the eye aims at and what the
+/// pointer lands on are the same rectangle -- which is the whole of "Bigger x on
+/// the tabs" (Don, 2026-08-31). Both sizes are settings, like every other number
+/// the stage draws with.
+Widget stageMark(BuildContext context, String glyph, {Color? color}) {
+  final chrome = ChromeScope.of(context);
+  final target = chrome.px('chrome.hit'), mark = chrome.px('stage.mark');
+  return ConstrainedBox(
+    constraints: BoxConstraints.tightFor(width: target, height: target),
+    child: Text(
+      glyph,
+      textAlign: TextAlign.center,
+      style: labelStyle(context, color: color).copyWith(
+        fontSize: mark,
+        // The line box IS the target, so the mark rides in the middle of it
+        // rather than at the top of a box twice its height.
+        height: mark <= 0 ? null : target / mark,
+      ),
+    ),
+  );
+}
+
+/// The wash a handle or a tab takes while a drop hovers it.
+class _Ground extends StatelessWidget {
+  const _Ground({required this.washed, required this.child});
+
+  final bool washed;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final chrome = ChromeScope.of(context);
+    final theme = ChronoTheme.of(context);
+    return AnimatedContainer(
+      duration: chrome.motion,
+      curve: chrome.curve,
+      decoration: BoxDecoration(
+        color: washed
+            ? theme.ink.withValues(alpha: chrome.px('stage.dropWash'))
+            : const Color(0x00000000),
+        borderRadius: BorderRadius.circular(chrome.px('chrome.corner')),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// A stage control: GHOST until the pointer is on it, then an ink wash on the
+/// ratified curve, exactly like every other chip in the app. No border and no
+/// ground at rest -- a mark, and the room around it to hit.
+class _Control extends StatefulWidget {
+  const _Control({required this.glyph, required this.semantics, this.onTap});
+
+  final String glyph, semantics;
+  final VoidCallback? onTap;
+
+  @override
+  State<_Control> createState() => _ControlState();
+}
+
+class _ControlState extends State<_Control> {
+  bool _over = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final chrome = ChromeScope.of(context);
+    final theme = ChronoTheme.of(context);
+    return Semantics(
+      label: widget.semantics,
+      button: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _over = true),
+        onExit: (_) => setState(() => _over = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          // No confirmation, anywhere: reversibility over interruption.
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: chrome.motion,
+            curve: chrome.curve,
+            decoration: BoxDecoration(
+              color: _over
+                  ? theme.ink.withValues(alpha: chrome.px('chrome.hoverWash'))
+                  : const Color(0x00000000),
+              borderRadius: BorderRadius.circular(chrome.px('chrome.corner')),
+            ),
+            child: stageMark(context, widget.glyph, color: _over ? theme.ink : theme.strong),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A LONE WINDOW'S BAR. "1 tab is not a tab it is just a window" (Don,
+/// 2026-08-31): so a tile that is not in a stack wears no tab and no close --
+/// closing is one of the verbs its handle offers, and a mark you can hit by
+/// accident has no business on a window that has nothing to be told apart from.
+///
+/// What it keeps is the half of a handle that IS a handle: its own NAME, so you
+/// can see which tile you are about to grab, and the triple dot a bar's grip
+/// wears, with the same verbs behind it. The whole bar is the thing you drag and
+/// the surface you right-click, exactly as a strip is.
+Widget windowBar(BuildContext context, TileLeaf leaf) {
+  final chrome = ChromeScope.of(context);
+  final theme = ChronoTheme.of(context);
+  final title = chrome.stage.tiles[leaf.id]?.title ?? leaf.title;
+  final cap = chrome.settings.value('chrome.labelCap').round().toInt();
+  return SizedBox(
+    height: chrome.px('stage.strip'),
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.surface,
+        border: Border(
+          bottom: BorderSide(color: theme.hair, width: chrome.px('chrome.hair')),
+        ),
+      ),
+      child: DragTarget<String>(
+        onWillAcceptWithDetails: (details) => details.data != leaf.id,
+        onAcceptWithDetails: (details) => dropOnHandle(context, leaf, details.data),
+        builder: (context, candidate, _) => tileGrab(
+          context,
+          leaf,
+          _Ground(
+            washed: candidate.isNotEmpty,
+            // The name and the handle ride at their own width and are CLIPPED
+            // rather than squeezed, exactly as a strip's tabs are: a window is
+            // any width, down to a sliver, and the whole bar stays the thing you
+            // drag whatever survives the clip.
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.centerLeft,
+                maxWidth: double.infinity,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(width: chrome.px('chrome.pad')),
+                    Text(
+                      title.length > cap ? '${title.substring(0, cap)}…' : title,
+                      softWrap: false,
+                      style: labelStyle(context, color: theme.strong),
+                    ),
+                    SizedBox(width: chrome.px('chrome.gap')),
+                    stageMark(context, handleMark, color: theme.strong),
+                    SizedBox(width: chrome.px('stage.handleInset')),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// A STACK'S strip: one tab per tile in it, each with its own close, and the
+/// whole strip the handle the active tile is dragged by. It exists only where
+/// there IS a stack -- two tiles or more.
+///
+/// THE STRIP IS CHROME AND THE ACTIVE TAB IS THE SHEET. Elevation carries the
+/// reading: the strip is `surface`, like every other piece of chrome; the active
+/// tab is the `paper` its body is drawn on, rounded into it and joined to it;
+/// and an ink rule along its top says which one is in force. Colour says nothing
+/// here -- colour is authored frame and group meaning alone.
 class _Strip extends StatelessWidget {
   const _Strip({required this.leaves, required this.activeId, this.branch});
 
@@ -542,6 +732,7 @@ class _Strip extends StatelessWidget {
               maxWidth: double.infinity,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [for (final leaf in leaves) _tab(context, leaf, leaf.id == activeId)],
               ),
             ),
@@ -556,11 +747,16 @@ class _Strip extends StatelessWidget {
     final theme = ChronoTheme.of(context);
     final title = chrome.stage.tiles[leaf.id]?.title ?? leaf.title;
     final cap = chrome.settings.value('chrome.labelCap').round().toInt();
-    final body = Container(
-      padding: EdgeInsets.symmetric(horizontal: chrome.px('chrome.pad')),
+    final corner = Radius.circular(chrome.px('chrome.corner'));
+    final body = AnimatedContainer(
+      duration: chrome.motion,
+      curve: chrome.curve,
+      padding: EdgeInsets.only(left: chrome.px('chrome.pad'), right: chrome.px('chrome.gap')),
       decoration: BoxDecoration(
+        color: active ? theme.paper : const Color(0x00000000),
+        borderRadius: BorderRadius.only(topLeft: corner, topRight: corner),
         border: Border(
-          bottom: BorderSide(
+          top: BorderSide(
             color: active ? theme.ink : const Color(0x00000000),
             width: chrome.px('chrome.focusRing'),
           ),
@@ -574,14 +770,10 @@ class _Strip extends StatelessWidget {
             style: labelStyle(context, color: active ? theme.ink : theme.strong),
           ),
           SizedBox(width: chrome.px('chrome.gap')),
-          Semantics(
-            label: 'Close $title',
-            button: true,
-            // No confirmation, anywhere: reversibility over interruption.
-            child: InkWell(
-              onTap: () => chrome.stage.close(leaf.id),
-              child: Text('×', style: labelStyle(context, color: theme.strong)),
-            ),
+          _Control(
+            glyph: closeMark,
+            semantics: 'Close $title',
+            onTap: () => chrome.stage.close(leaf.id),
           ),
         ],
       ),
@@ -589,24 +781,16 @@ class _Strip extends StatelessWidget {
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) => details.data != leaf.id,
       onAcceptWithDetails: (details) => dropOnHandle(context, leaf, details.data, stack: branch),
-      builder: (context, candidate, _) => tileGrab(
-        context,
-        leaf,
-        candidate.isEmpty
-            ? body
-            : DecoratedBox(
-                decoration: BoxDecoration(
-                  color: theme.ink.withValues(alpha: chrome.px('stage.dropWash')),
-                ),
-                child: body,
-              ),
-      ),
+      builder: (context, candidate, _) =>
+          tileGrab(context, leaf, _Ground(washed: candidate.isNotEmpty, child: body)),
     );
   }
 }
 
 /// A bar's handle: the same verbs, as a grip at its leading end, so chrome is
-/// as movable as anything else without spending a strip's worth of thickness.
+/// as movable as anything else without spending a strip's worth of thickness. A
+/// bar has no room for the hand's target a window's corner handle gets, so the
+/// grip is as wide as the bar can spare and as tall as the bar itself.
 Widget _grip(BuildContext context, TileLeaf leaf) {
   final chrome = ChromeScope.of(context);
   final theme = ChronoTheme.of(context);
@@ -622,7 +806,7 @@ Widget _grip(BuildContext context, TileLeaf leaf) {
             ? theme.surface
             : theme.ink.withValues(alpha: chrome.px('stage.dropWash')),
         alignment: Alignment.center,
-        child: Text('⋮', style: labelStyle(context, color: theme.strong)),
+        child: Text(handleMark, style: labelStyle(context, color: theme.strong)),
       ),
     ),
   );
@@ -688,7 +872,9 @@ class _TileState extends State<_Tile> {
     final theme = ChronoTheme.of(context);
     final id = widget.leaf.id;
     final focused = chrome.stage.focusedId == id;
-    final tabbed = parentOf(chrome.stage.displayRoot, id)?.mode == 'tabs';
+    // A TAB STRIP IS FOR A STACK. In one, the strip above already carries this
+    // tile's tab; alone, it is a window and wears a handle instead.
+    final tabbed = isStack(parentOf(chrome.stage.displayRoot, id));
     final handled = !tabbed && chrome.stage.leaves.length > 1;
     final body =
         chrome.stage.tiles[id]?.build(context) ??
@@ -707,7 +893,7 @@ class _TileState extends State<_Tile> {
           )
         : Column(
             children: [
-              if (handled) _Strip(leaves: [widget.leaf], activeId: id),
+              if (handled) windowBar(context, widget.leaf),
               Expanded(child: ground),
             ],
           );

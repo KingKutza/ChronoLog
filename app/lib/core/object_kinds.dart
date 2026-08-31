@@ -214,9 +214,18 @@ class ObjectFacts {
     final index = staple.endIndexOf(objectId);
     final near = index < 0 ? null : staple.ends[index];
     if (near is! ObjectEnd || endPoint(near) != 'end') return null;
-    final far = staple.otherThan(index);
-    if (far is! FrameEnd) return null;
-    final coordinate = far.position?.coordinate;
+    // N-ARY: the completion instant may be identified with several sheets at
+    // once, and any one of them spells it. The first in authored order that
+    // carries a coordinate is the one this reads -- never "the staple has more
+    // than two ends so it says nothing".
+    final coordinates = [
+      for (final end in staple.othersThan(index))
+        if (end is FrameEnd)
+          if (end.position?.coordinate != null) end,
+    ];
+    if (coordinates.isEmpty) return null;
+    final far = coordinates.first;
+    final coordinate = far.position!.coordinate;
     if (coordinate == null) return null;
     return (
       frame: far.frame,

@@ -19,6 +19,7 @@ import 'package:chronolog/core/coordinate_law.dart';
 import 'package:chronolog/core/era_chain.dart';
 import 'package:chronolog/core/eras.dart';
 import 'package:chronolog/core/exact.dart';
+import 'package:chronolog/core/records.dart';
 import 'package:test/test.dart';
 
 import '../helpers/staple_world.dart';
@@ -166,8 +167,8 @@ void main() {
   });
 
   group('a chain that says two contradictory things refuses', () {
-    test('a fork, a loop, two pins and no pin each refuse, naming the chain '
-        'once', () {
+    test('a branch, a loop, two pins and no pin each answer without inventing '
+        'an order, naming the chain once', () {
       final random = Random(specSeed + 2);
       for (var i = 0; i < iterations; i += 1) {
         final world = tamriel();
@@ -177,15 +178,26 @@ void main() {
         expect(members, hasLength(6));
 
         switch (random.nextInt(4)) {
-          case 0: // A fork: two eras claim the same predecessor.
+          // CORRECTED (8.31 ruling: "a staple only ever works one way"). This
+          // was pinned as a FORK REFUSAL -- "two eras both follow era:first; a
+          // succession chain cannot fork". A branch is not a contradiction: one
+          // era finishing where two begin is the Sundering, and it is legal.
+          // What the derivation may not do is pick one, so a caller wanting ONE
+          // order is told there are two and which they are, while the traversal
+          // itself carries both.
+          case 0:
             world.succeed('era:first', 'era:fourth');
+            final paths = eraChainPaths(world.document, 'era:first');
+            expect(paths, hasLength(2));
+            expect(paths.every((path) => path.contains('era:first')), isTrue);
+            expect(paths.map((path) => path.last).toSet(), {'era:fourth'});
             expect(
               () => eraChainFrames(world.document, 'era:first'),
               throwsA(
                 isA<LawRefusal>().having(
                   (error) => error.message,
                   'message',
-                  contains('cannot fork'),
+                  allOf(contains('lies on 2 successions'), contains('First Era')),
                 ),
               ),
             );
@@ -240,7 +252,11 @@ void main() {
       }
     });
 
-    test('two eras joined only through a non-era frame have two beginnings', () {
+    // CORRECTED (8.31): the refusal was worded as "2 beginnings", which counted
+    // heads -- meaningless now that a branch is legal and a succession may have
+    // several. The defect here is the one that survives the ruling: these eras
+    // are not joined by any succession at all.
+    test('two eras joined only through a non-era frame are not one chain', () {
       final world = World();
       world.era('era:one', key: 'E1', years: '100', anchor: {'year': '1', 'properYear': '1'});
       world.era('era:two', key: 'E2', years: '100');
@@ -255,7 +271,7 @@ void main() {
           isA<LawRefusal>().having(
             (error) => error.message,
             'message',
-            allOf(contains('2 beginnings'), contains('era:two')),
+            allOf(contains('No succession joins'), contains('era:two')),
           ),
         ),
       );
@@ -466,6 +482,228 @@ void main() {
         // The same era-local coordinate now resolves that much later, through a
         // law resolved after the edit.
         expect(_law(world, 'era:third').formatYear(Coordinate.fromJson(civil(433))), '3E 433');
+      }
+    });
+  });
+
+  group('THE SUNDERING -- a succession is one boundary, never a chain of its '
+      'own', () {
+    // RULING (8.31, Don): "a staple only ever works one way." An n-end staple
+    // identifies ALL its points as one point. So three consecutive eras are TWO
+    // staples, and one THREE-end staple is not that chain at all -- it is a
+    // BRANCH: "in the mythic age humans and elves got along then the sundering
+    // came and they have kept separate calendars since. they agree on era 1 and
+    // the sundering when they split but nothing since."
+    //
+    // What was pinned before, and is corrected here: `successionEdges` read one
+    // staple's ends as CONSECUTIVE PAIRS, which said era 2 finished where era 3
+    // began -- an order nobody authored.
+
+    /// The Sundering, as one staple: the mythic age ends, two calendars begin.
+    (World, int, int, int) sundering(Random random) {
+      final world = World();
+      final mythic = 200 + random.nextInt(2000);
+      final human = 100 + random.nextInt(900);
+      final elven = 100 + random.nextInt(900);
+      world.era(
+        'era:mythic',
+        key: 'MA',
+        name: 'Mythic Age',
+        years: '$mythic',
+        anchor: {'year': '1', 'properYear': '1'},
+      );
+      world.era('era:human', key: 'HE', name: 'Human Era', years: '$human');
+      world.era('era:elven', key: 'EE', name: 'Elven Era', years: '$elven');
+      world.staple(
+        kind: 'succession',
+        ends: const [
+          StapleEnd.frame('era:mythic'),
+          StapleEnd.frame('era:human'),
+          StapleEnd.frame('era:elven'),
+        ],
+      );
+      return (world, mythic, human, elven);
+    }
+
+    test('a three-end succession is a branching boundary and not a run of '
+        'consecutive pairs', () {
+      final random = Random(specSeed + 9);
+      for (var i = 0; i < iterations; i += 1) {
+        final (world, _, _, _) = sundering(random);
+        final edges = successionEdges(world.document);
+        // Two edges, both OUT OF the era that finishes. The corrected reading:
+        // ends[0] is the era that finishes and every other end is an era that
+        // begins at that same boundary.
+        expect(edges, hasLength(2));
+        expect(edges.map((edge) => edge.from).toSet(), {'era:mythic'});
+        expect(edges.map((edge) => edge.to).toSet(), {'era:human', 'era:elven'});
+        // The invented order, named so it cannot come back: nothing says the
+        // human era finishes where the elven one begins.
+        expect(
+          edges.any((edge) => edge.from == 'era:human' || edge.from == 'era:elven'),
+          isFalse,
+        );
+
+        // Two paths, sharing their head, with no order between the successors.
+        final paths = eraChainPaths(world.document, 'era:mythic');
+        expect(paths.map((path) => path.join(' > ')).toSet(), {
+          'era:mythic > era:human',
+          'era:mythic > era:elven',
+        });
+        // Each successor lies on exactly ONE succession, so each resolves with
+        // no ambiguity at all.
+        for (final id in ['era:human', 'era:elven']) {
+          expect(eraChainPaths(world.document, id), hasLength(1));
+          expect(eraChainFrames(world.document, id), ['era:mythic', id]);
+        }
+        // The shared era lies on both, and the derivation says so rather than
+        // picking one.
+        expect(
+          () => eraChainFrames(world.document, 'era:mythic'),
+          throwsA(
+            isA<LawRefusal>().having(
+              (error) => error.message,
+              'message',
+              allOf(
+                contains('lies on 2 successions'),
+                contains('Human Era'),
+                contains('Elven Era'),
+              ),
+            ),
+          ),
+        );
+      }
+    });
+
+    test('both calendars resolve through the shared point: era 1 and the split '
+        'agree, and nothing after it does', () {
+      final random = Random(specSeed + 10);
+      for (var i = 0; i < iterations; i += 1) {
+        final (world, mythicYears, humanYears, elvenYears) = sundering(random);
+        final human = eraChain(world.document, 'era:human')!;
+        final elven = eraChain(world.document, 'era:elven')!;
+
+        // ERA 1 IS SHARED, and both chains place it identically -- same range,
+        // derived from the one pin they both carry.
+        expect(human.ordered.first, 'era:mythic');
+        expect(elven.ordered.first, 'era:mythic');
+        expect(human.byFrame['era:mythic']!.firstProper, BigInt.one);
+        expect(
+          human.byFrame['era:mythic']!.lastProper,
+          elven.byFrame['era:mythic']!.lastProper,
+        );
+        expect(human.byFrame['era:mythic']!.lastProper, BigInt.from(mythicYears));
+
+        // THE SPLIT IS ONE POINT: both successors begin at it.
+        final split = BigInt.from(mythicYears) + BigInt.one;
+        expect(human.byFrame['era:human']!.firstProper, split);
+        expect(elven.byFrame['era:elven']!.firstProper, split);
+
+        // AND NOTHING SINCE. Each chain is its own calendar: neither knows the
+        // other's era exists, so neither can name a year in it.
+        expect(human.ordered, ['era:mythic', 'era:human']);
+        expect(elven.ordered, ['era:mythic', 'era:elven']);
+        expect(human.table.era('EE'), isNull);
+        expect(elven.table.era('HE'), isNull);
+        // The same proper year, read by each calendar, gets two different
+        // answers -- and the model reconciles neither.
+        final shorter = humanYears < elvenYears ? humanYears : elvenYears;
+        final after = split + BigInt.from(shorter);
+        expect(human.table.eraAtProperYear(after)?.key, humanYears > shorter ? 'HE' : null);
+        expect(elven.table.eraAtProperYear(after)?.key, elvenYears > shorter ? 'EE' : null);
+      }
+    });
+
+    test('the shared era answers with what every succession agrees on, and '
+        'refuses where they differ', () {
+      final random = Random(specSeed + 11);
+      for (var i = 0; i < iterations; i += 1) {
+        final (world, mythicYears, _, _) = sundering(random);
+        // The shared past has one answer both calendars give, so its own law
+        // still works: era 1 is not made unreadable by the branch after it.
+        final context = frameEraContext(world.document, 'era:mythic')!;
+        expect(context.countable, isTrue);
+        expect(context.identity, 'MA');
+        expect(context.entry!.firstProper, BigInt.one);
+        expect(context.entry!.lastProper, BigInt.from(mythicYears));
+        // And it speaks for NEITHER successor: the run it answers with is the
+        // part every path shares, which stops at the boundary.
+        expect(context.table!.eraKeys(), ['MA']);
+        expect(context.table!.eraAtProperYear(BigInt.from(mythicYears) + BigInt.one), isNull);
+
+        // A pin PAST the branch is a different fact in each succession, so
+        // nothing is agreed and the shared era is told so instead of being
+        // handed one calendar's answer.
+        final moved = World();
+        moved.era('era:mythic', key: 'MA', name: 'Mythic Age', years: '$mythicYears');
+        moved.era(
+          'era:human',
+          key: 'HE',
+          name: 'Human Era',
+          years: '400',
+          anchor: {'year': '1', 'properYear': '900'},
+        );
+        moved.era(
+          'era:elven',
+          key: 'EE',
+          name: 'Elven Era',
+          years: '400',
+          anchor: {'year': '1', 'properYear': '${901 + random.nextInt(500)}'},
+        );
+        moved.staple(
+          kind: 'succession',
+          ends: const [
+            StapleEnd.frame('era:mythic'),
+            StapleEnd.frame('era:human'),
+            StapleEnd.frame('era:elven'),
+          ],
+        );
+        // Each succession on its own still resolves -- one pin each.
+        expect(eraChain(moved.document, 'era:human')!.pin, 'era:human');
+        expect(eraChain(moved.document, 'era:elven')!.pin, 'era:elven');
+        expect(
+          () => frameEraContext(moved.document, 'era:mythic'),
+          throwsA(
+            isA<LawRefusal>().having(
+              (error) => error.message,
+              'message',
+              contains('different place in each'),
+            ),
+          ),
+        );
+      }
+    });
+
+    test('three CONSECUTIVE eras are two staples, and stay one chain', () {
+      final random = Random(specSeed + 12);
+      for (var i = 0; i < iterations; i += 1) {
+        final world = World();
+        final lengths = [for (var era = 0; era < 3; era += 1) 50 + random.nextInt(500)];
+        world.era(
+          'era:one',
+          key: 'E1',
+          years: '${lengths[0]}',
+          anchor: {'year': '1', 'properYear': '1'},
+        );
+        world.era('era:two', key: 'E2', years: '${lengths[1]}', after: 'era:one');
+        world.era('era:three', key: 'E3', years: '${lengths[2]}', after: 'era:two');
+        // Two staples, two edges, one path -- the spelling that means what the
+        // three-end staple does NOT.
+        expect(successionEdges(world.document), hasLength(2));
+        expect(eraChainPaths(world.document, 'era:two'), [
+          ['era:one', 'era:two', 'era:three'],
+        ]);
+        expect(eraChainFrames(world.document, 'era:three'), [
+          'era:one',
+          'era:two',
+          'era:three',
+        ]);
+        final chain = eraChain(world.document, 'era:one')!;
+        expect(chain.byFrame['era:two']!.firstProper, BigInt.from(lengths[0]) + BigInt.one);
+        expect(
+          chain.byFrame['era:three']!.firstProper,
+          BigInt.from(lengths[0] + lengths[1]) + BigInt.one,
+        );
       }
     });
   });

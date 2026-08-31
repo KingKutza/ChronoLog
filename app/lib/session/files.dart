@@ -140,12 +140,22 @@ class SessionFiles {
   }
 }
 
+/// The SETTINGS file, read and watched, ahead of everything else.
+///
+/// Its own call because one of the settings says WHERE THE DOCUMENT LIVES: the
+/// save location is authored (Don, 8.31), so the file that carries it has to be
+/// read before the store is pointed anywhere. Reading it twice would be a
+/// second road to the same state, so `bindSession` does not read it again.
+Future<void> bindSettings(SessionFiles files, Settings settings) async {
+  await files.ensure();
+  await files.bind(files.settings, settings.applyJson);
+}
+
 /// Reads the three files, then writes them back on a debounce whenever what
 /// they hold changes. Both directions, so editing the file by hand and using
 /// the GUI are the same authoring path.
 Future<void> bindSession(SessionFiles files, Settings settings, ViewBook views, Stage stage) async {
-  await files.ensure();
-  await files.bind(files.settings, settings.applyJson);
+  await bindSettings(files, settings);
   await files.bind(files.views, views.applyJson);
   await files.bind(files.layout, stage.applyJson);
   settings.addListener(() => files.requestSave(files.settings, settings.toJson));

@@ -91,7 +91,10 @@ DisplayWeight factDisplayWeight(LensScene scene, Fact fact, {String keyPrefix = 
 /// authored as an expression in the one math like every other setting, and one
 /// that will not read is refused rather than substituted.
 Rational halfDistanceFor(LensScene scene, Fact fact) {
-  final authored = scene.engine.authoredHandling(fact.event.id, 'halfDistance');
+  final authored = scene.engine.authoredHandling(
+    handlingSubject(scene.engine, fact),
+    'halfDistance',
+  );
   if (authored != null) {
     try {
       final read = evaluateSource('$authored', const Env());

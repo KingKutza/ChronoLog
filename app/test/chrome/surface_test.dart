@@ -180,12 +180,15 @@ void main() {
   ) async {
     final chrome = await _pump(tester);
     expect(chrome.stage.leaves.length, greaterThan(1));
-    // A lens and the minimap wear a strip carrying their own name and close;
-    // a bar wears the same handle as a grip, spending none of its thickness.
+    // Every tile names itself in its own chrome, which is the half of the handle
+    // that is a handle: you can see which tile you are about to grab.
     expect(find.text('Minimap'), findsOneWidget);
     expect(find.text('View'), findsWidgets);
-    expect(find.text('×'), findsNWidgets(2), reason: 'each strip carries its own close');
-    expect(find.text('⋮'), findsNWidgets(3), reason: 'one grip per bar');
+    // WHICH MARK a tile wears -- a tab strip with its own close, or the lone
+    // window's triple-dot -- is ruled by ISSUES (8.31, evening) "1 tab is not a
+    // tab it is just a window" and specified in test/chrome/tab_chrome_test.dart.
+    // The counts that used to sit here asserted the pre-ruling shape.
+    expect(find.text('⋮'), findsWidgets, reason: 'a bar wears its grip');
   });
 
   testWidgets('a divider drag resizes, with no ladder of stop points', (tester) async {

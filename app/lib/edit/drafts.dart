@@ -15,10 +15,21 @@ import 'editor.dart';
 /// One open edit session. Idempotent per object: asking for a draft that is
 /// already open hands back the same one rather than a second hold.
 class Draft {
-  Draft._(this.editor, this.objectId, {required this.provisional});
+  Draft._(this.editor, this.objectId, {required this.provisional})
+    : opened = editor.document;
 
   final Editor editor;
   final String objectId;
+
+  /// The document as it stood when this session opened.
+  ///
+  /// WHAT "CHANGES EXIST" MEANS (ISSUES 8.31: "Delete always; when changes
+  /// exist, Save / Apply / Discard"). A document is immutable, so the question
+  /// is an identity check against the one this session started from -- no
+  /// snapshot, no diff, and nothing a card has to remember to mark.
+  final Document opened;
+
+  bool get changed => !identical(opened, editor.document);
 
   /// A provisional object was created BY this draft and has not been kept yet:
   /// discarding the draft removes it, and the cascade takes its placement with

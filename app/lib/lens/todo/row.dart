@@ -27,6 +27,7 @@ import '../../core/todo_shape.dart';
 import '../../edit/editor.dart';
 import '../capacity.dart';
 import '../display_weight.dart';
+import '../mark_gestures.dart';
 import '../marks.dart';
 import '../theme.dart';
 import '../tunables.dart';
@@ -65,10 +66,10 @@ TodoScene todoSceneOfTile(BuildContext context, ViewTileController tile) => Todo
   tunable: tile.tunable,
   view: tile.view,
   selection: tile.selection,
-  onOpen: (id) {
-    final open = tile.objectCard;
-    if (open != null) tile.stage.open(open(id));
-  },
+  onOpen: tile.openObject,
+  // The row is a mark, so it gets the mark vocabulary rather than a tap
+  // handler of its own (ruled 2026-08-31).
+  gestures: (objectId, child) => MarkGestures(tile: tile, objectId: objectId, child: child),
   onProject: tile.project,
 );
 
@@ -93,6 +94,7 @@ class TodoScene {
     this.view = const {},
     this.selection = const {},
     this.onOpen,
+    this.gestures,
     this.onProject,
   });
 
@@ -105,6 +107,11 @@ class TodoScene {
   final Map<String, Object?> view;
   final Set<String> selection;
   final void Function(String objectId)? onOpen;
+
+  /// The pointer vocabulary a row is wrapped in: select, open, menu. Null where
+  /// the surface has no tile behind it, in which case a row is inert chrome and
+  /// says nothing it cannot do.
+  final Widget Function(String objectId, Widget child)? gestures;
 
   /// Add a frame to what this view projects. Null where the surface offers no
   /// such path, in which case a note says where an object went and stops there.
@@ -303,9 +310,8 @@ class _TodoRowState extends State<TodoRow> {
               ),
               SizedBox(width: pad),
               Expanded(
-                child: GestureDetector(
-                  onTap: () => scene.onOpen?.call(entry.id),
-                  child: Text(
+                child: _named(
+                  Text(
                     entry.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -326,6 +332,34 @@ class _TodoRowState extends State<TodoRow> {
         ],
       ),
     );
+  }
+
+  /// The row's name, under the one pointer vocabulary and inside the ink ring
+  /// that says it is selected. A roster row is a mark: single click selects,
+  /// double click opens its card, the secondary button raises the menu with Open
+  /// on it -- the same rules the painted surfaces keep.
+  Widget _named(Widget title) {
+    final selected = scene.selection.contains(entry.id);
+    final ring = tunable(scene.tunable, 'selection.ring').toDouble();
+    final wrapped = Container(
+      padding: EdgeInsets.symmetric(horizontal: scene.px('todo.gap')),
+      decoration: selected
+          ? BoxDecoration(
+              border: Border.all(
+                color: scene.theme.ink.withValues(
+                  alpha: tunable(scene.tunable, 'selection.ringOpacity').toDouble(),
+                ),
+                width: tunable(scene.tunable, 'selection.inner').toDouble(),
+              ),
+              borderRadius: BorderRadius.circular(ring),
+            )
+          : null,
+      child: title,
+    );
+    final gestures = scene.gestures;
+    return gestures == null
+        ? GestureDetector(onTap: () => scene.onOpen?.call(entry.id), child: wrapped)
+        : gestures(entry.id, wrapped);
   }
 
   /// The state chooser: every state frame the document holds, plus a new one by

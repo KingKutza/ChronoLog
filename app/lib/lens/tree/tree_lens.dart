@@ -302,8 +302,21 @@ class _TreeLensState extends State<TreeLens> {
               final hit = _pointer == null ? null : _nodeAt(_pointer!);
               if (hit != null) _open(hit);
             },
-            onSecondaryTapUp: (details) =>
-                showViewContextMenu(context, details.globalPosition, widget.tile),
+            // The menu is raised ON THE NODE under the pointer, so Open is
+            // offered here exactly as it is on a painted mark (ruled 8.31).
+            onSecondaryTapUp: (details) {
+              final id = _nodeAt(_pointer ?? details.localPosition);
+              final node = id == null
+                  ? null
+                  : _graph.nodes.where((entry) => entry.id == id).firstOrNull;
+              showViewContextMenu(
+                context,
+                details.globalPosition,
+                widget.tile,
+                objectId: node != null && node.map != 'frames' ? id : null,
+                frameId: node != null && node.map == 'frames' ? id : null,
+              );
+            },
             onPanStart: (details) => setState(() {
               _dragFrom = _nodeAt(_pointer ?? details.localPosition);
               _dragAt = details.localPosition;

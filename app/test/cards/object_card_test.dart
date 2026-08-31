@@ -25,15 +25,6 @@ import '../core/corpus.dart';
 import 'harness.dart';
 import 'object_harness.dart';
 
-/// Opens the one fold. The shell draws its own caret into the label, so the
-/// label is matched by what it says rather than by an exact string.
-Future<void> tapFold(WidgetTester tester) async {
-  final finder = find.textContaining('Everything else').first;
-  await tester.ensureVisible(finder);
-  await tester.tap(finder, warnIfMissed: false);
-  await tester.pumpAndSettle();
-}
-
 /// Two objects on one frame, and the frame's own law. The smallest world in
 /// which a connection has two ends worth navigating.
 ({Document document, String frame, String a, String b}) pair() {
@@ -398,7 +389,8 @@ void main() {
           id: world.a,
           shell: true,
         );
-        await tapFold(tester);
+        // TWO REGIONS, NO FOLD (ISSUES 8.31): the properties are in the open,
+        // so the duration row is either on the card or is not offered at all.
         expect(
           find.text('Duration'),
           objectKinds[kind]!.zeroDuration ? findsNothing : findsOneWidget,

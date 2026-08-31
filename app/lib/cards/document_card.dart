@@ -16,12 +16,25 @@
 // support this machine's policy forbids, and a feature that cannot be built is
 // not a feature.
 //
-// THE PATH FIELD IS THE ALWAYS-VALID SECOND ROAD. `document.icsPath` defaults
-// to the app's own data directory; a path naming a directory lists the .ics
-// files in it to pick from, and a path naming a file is that file. Export
-// writes to that path, or to `<title>.ics` inside it when it is a directory,
-// and SHOWS the path it wrote. So a platform with no dialog loses a
+// THE PATH FIELD IS THE ALWAYS-VALID SECOND ROAD. A path naming a directory
+// lists the .ics files in it to pick from, and a path naming a file is that
+// file. Export writes to that path, or to `<title>.ics` inside it when it is a
+// directory, and SHOWS the path it wrote. So a platform with no dialog loses a
 // convenience, never the boundary.
+//
+// TWO AUTHORED LOCATIONS, NEITHER A SINGLETON (Don, 8.31: "I don't appear to be
+// able to set a save location, only a location to look for .ics file and even
+// then only one such location"):
+//
+//   `document.saveAt` is WHERE THE CHRONOLOG SAVES. Empty means beside the app,
+//   which is the portable default and not a blessed directory. Writing a path
+//   here MOVES the document -- through the journal machinery, so it is still an
+//   update path -- and a directory another chronolog occupies is refused in
+//   words rather than overwritten.
+//
+//   `document.icsPaths` is WHERE CALENDARS ARE LOOKED FOR, one location PER
+//   LINE. A list, because a person has a work feed and a home feed and no
+//   reason to choose between them.
 
 import 'dart:io';
 
@@ -35,16 +48,26 @@ import '../host/file_picker.dart';
 import '../lens/theme.dart';
 import '../store/data_dir.dart';
 import '../store/document_store.dart';
+import '../store/journal.dart';
 import 'card_chrome.dart';
 
 /// The settings this card authors that are not arithmetic. Reading a path as
 /// algebra would be a category error, so it is a TEXT setting.
-const Map<String, String> frameCardTextDefaults = {'document.icsPath': ''};
-
-/// Where ICS crosses, resolved: the authored path, or the data root when the
-/// author has written none.
-String icsPathOf(String? authored, String root) =>
-    (authored ?? '').trim().isEmpty ? root : authored!.trim();
+const Map<String, String> frameCardTextDefaults = {
+  'document.icsPaths': '',
+  'document.saveAt': '',
+  // WHAT THE COLOUR PICKER OFFERS: authored colour names, not a closed set of
+  // legal colours. The field takes any name or hex the reader knows; this is
+  // the short way in, and a person who wants another palette writes one.
+  'card.palette':
+      'crimson orangered orange gold yellowgreen seagreen teal steelblue '
+          'royalblue slateblue rebeccapurple orchid sienna olive slategray dimgray',
+  // WHAT THE CARD'S X DOES, by name (ISSUES 8.31: "what the card's X does by
+  // default is a settings key -- Don's instinct: save, but that is just a
+  // setting"). The value names one of the card's own verbs; a name no card
+  // offers is refused in words rather than guessed at.
+  'card.closeVerb': 'save',
+};
 
 /// The .ics files a directory holds, by full path, in name order. A path that
 /// is not a directory yields nothing: it is already the answer.
@@ -108,15 +131,41 @@ class _DocumentCardState extends State<DocumentCard> {
       return setState(() => _note = 'No file dialog here — use the path below.');
     }
     final root = widget.root ?? resolveDataRoot();
-    final at = icsPathOf(ChromeScope.of(context).settings.text('document.icsPath'), root);
+    final at = authoredPaths(
+      ChromeScope.of(context).settings.text('document.icsPaths'),
+      root,
+    ).first;
     final picked = saving
-        ? await picker.save(initialPath: at, suggestedName: '${declaredTitle(editor.document)}.ics')
+        ? await picker.save(
+            initialPath: at,
+            suggestedName: '${declaredTitle(editor.document)}.ics',
+            extensions: const ['ics'],
+          )
         : await picker.open(initialPath: at, extensions: const ['ics']);
     if (picked.refusal.isNotEmpty) return setState(() => _note = picked.refusal);
     final path = picked.path;
     if (path == null) return;
     if (saving && frameId != null) return _export(editor, frameId, path);
     if (!saving) return _import(editor, path);
+  }
+
+  /// WHERE THE CHRONOLOG SAVES, chosen. The host's dialog names a FILE; the
+  /// location is the directory that file sits in, because the document's own
+  /// file names are the store's and not the author's to pick. Writing the
+  /// setting is the whole act -- the workspace watches it and moves the
+  /// document, so the card and `chronolog.settings` are the same road.
+  Future<void> _chooseSaveLocation(Chrome chrome, String at) async {
+    final picker = widget.picker;
+    if (picker == null) {
+      return setState(() => _note = 'No file dialog here — write the path below.');
+    }
+    final picked = await picker.save(initialPath: at, suggestedName: snapshotFileName);
+    if (picked.refusal.isNotEmpty) return setState(() => _note = picked.refusal);
+    final path = picked.path;
+    if (path == null) return;
+    final chosen = parentDirectory(path);
+    chrome.settings.setText('document.saveAt', chosen);
+    setState(() => _note = 'The chronolog saves to $chosen.');
   }
 
   Future<void> _export(Editor editor, String frameId, String path) async {
@@ -141,8 +190,11 @@ class _DocumentCardState extends State<DocumentCard> {
     }
     final status = editor.store.status;
     final root = widget.root ?? resolveDataRoot();
-    final ics = icsPathOf(chrome.settings.text('document.icsPath'), root);
-    final found = icsFilesIn(ics);
+    // WHERE THE DOCUMENT SAVES, and WHERE CALENDARS ARE LOOKED FOR: one
+    // resolver, two authored settings, and the second one is a LIST.
+    final saveAt = authoredPath(chrome.settings.text('document.saveAt'), root);
+    final locations = authoredPaths(chrome.settings.text('document.icsPaths'), root);
+    final found = {for (final at in locations) at: icsFilesIn(at)};
     final calendars = [
       for (final frame in editor.document.frames.values)
         if (frame.traits.contains('calendar')) frame,
@@ -183,8 +235,48 @@ class _DocumentCardState extends State<DocumentCard> {
             namedAction(context, 'Save now', onTap: () => editor.store.save(force: true)),
           ]),
         ),
+        cardTextRow(
+          context,
+          'Saves to',
+          chrome.settings.text('document.saveAt'),
+          (text) => setState(() => chrome.settings.setText('document.saveAt', text)),
+          hint: root,
+          mono: true,
+          width: double.infinity,
+        ),
+        cardWrap(context, [
+          namedAction(
+            context,
+            'Choose a folder…',
+            hint: 'The dialog this host provides, where it provides one',
+            onTap: () => _chooseSaveLocation(chrome, saveAt),
+          ),
+          namedAction(
+            context,
+            'Beside the app',
+            hint: root,
+            onTap: chrome.settings.text('document.saveAt').trim().isEmpty
+                ? null
+                : () => setState(() => chrome.settings.setText('document.saveAt', '')),
+          ),
+        ]),
+        cardNote(
+          context,
+          // WHERE IT ACTUALLY IS, read off the store rather than off the field:
+          // a refused move leaves the words in the box and the document where it
+          // was, and a card that reported the box would be lying.
+          'Saving to ${editor.store.journal.dataRoot}. An empty path is beside'
+          ' the app, which is where a'
+          ' portable chronolog lives by default; any other path is yours. Moving'
+          ' writes the document at the new place and leaves the old files where'
+          ' they are.',
+        ),
         if (_note != null) cardNote(context, _note!),
         for (final warning in _warnings) cardNote(context, warning, refusal: true),
+        // The settings layer's own refusals for these keys -- a save location
+        // another chronolog already occupies says so here.
+        for (final line in chrome.settings.refusals)
+          if (line.startsWith('document.')) cardNote(context, line, refusal: true),
       ],
       fold: [
         cardRow(
@@ -202,16 +294,18 @@ class _DocumentCardState extends State<DocumentCard> {
         cardTextRow(
           context,
           'Calendars at',
-          chrome.settings.text('document.icsPath'),
-          (text) => setState(() => chrome.settings.setText('document.icsPath', text)),
+          chrome.settings.text('document.icsPaths'),
+          (text) => setState(() => chrome.settings.setText('document.icsPaths', text)),
           hint: root,
           mono: true,
           width: double.infinity,
+          lines: cardPx(context, 'card.textLines').round(),
         ),
         cardNote(
           context,
-          'A folder lists the .ics files in it; a file is that file. Export'
-          ' writes there, and says the path it wrote.',
+          'ONE LOCATION PER LINE, as many as you keep calendars in. A folder'
+          ' lists the .ics files in it; a file is that file. Export writes to'
+          ' the first location, and says the path it wrote.',
         ),
         cardWrap(context, [
           namedAction(
@@ -220,21 +314,30 @@ class _DocumentCardState extends State<DocumentCard> {
             hint: 'The dialog this host provides, where it provides one',
             onTap: () => _browse(editor, saving: false),
           ),
-          for (final file in found)
-            namedAction(
-              context,
-              'Import ${file.split(Platform.pathSeparator).last}',
-              hint: file,
-              onTap: () => _import(editor, file),
-            ),
-          if (found.isEmpty)
-            namedAction(context, 'Import this file', hint: ics, onTap: () => _import(editor, ics)),
+          for (final entry in found.entries) ...[
+            for (final file in entry.value)
+              namedAction(
+                context,
+                'Import ${file.split(Platform.pathSeparator).last}',
+                hint: file,
+                onTap: () => _import(editor, file),
+              ),
+            // A location naming a file, or a folder holding no calendar, is
+            // still a location: it offers itself rather than vanishing.
+            if (entry.value.isEmpty)
+              namedAction(
+                context,
+                'Import ${entry.key.split(Platform.pathSeparator).last}',
+                hint: entry.key,
+                onTap: () => _import(editor, entry.key),
+              ),
+          ],
           for (final frame in calendars) ...[
             namedAction(
               context,
               'Export ${frame.title ?? frame.id}',
               hint: 'Rules where ICS can say them, occurrences where it cannot',
-              onTap: () => _export(editor, frame.id, ics),
+              onTap: () => _export(editor, frame.id, locations.first),
             ),
             namedAction(
               context,

@@ -45,6 +45,7 @@
 
 import 'coordinate_entry.dart';
 import 'coordinate_law.dart';
+import 'correspondence.dart';
 import 'document.dart';
 import 'era_chain.dart';
 import 'eras.dart' show firstMatch, refusalText;
@@ -303,6 +304,7 @@ class ProjectionEngine {
   late Map<String, Object?> _raw;
 
   FrameProjection? _frameProjection;
+  Correspondences? _correspondences;
 
   final Map<String, List<Fact>> _explicit = {};
   final Map<String, Rational> _maxDuration = {};
@@ -424,6 +426,7 @@ class ProjectionEngine {
     _reach.clear();
     _above.clear();
     _frameProjection = null;
+    _correspondences = null;
     if (doomed == null) {
       _series.clear();
       _windows.clear();
@@ -500,6 +503,12 @@ class ProjectionEngine {
     ..._raw,
     'relations': {for (final entry in document.relations.entries) entry.key: entry.value.toJson()},
   }, laws: laws);
+
+  /// The evaluable correspondence over THIS document, built once per generation
+  /// on this engine's own substrate instance. [frameProjection] answers WHETHER
+  /// two frames correspond; this answers WHERE an instant on one lands on the
+  /// other, from the same authored staple set.
+  Correspondences get correspondences => _correspondences ??= Correspondences(staples);
 
   /// The frame whose declaration actually governs [frameId]. Two frames
   /// resolving to one space correspond by identity and need no staple.

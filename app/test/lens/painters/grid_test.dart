@@ -9,6 +9,8 @@ import 'dart:ui';
 
 import 'package:chronolog/core/exact.dart';
 import 'package:chronolog/lens/capacity.dart';
+import 'package:chronolog/lens/ladder.dart';
+import 'package:chronolog/lens/law_context.dart';
 import 'package:chronolog/lens/lens_painter.dart';
 import 'package:chronolog/lens/painters/intimate.dart';
 import 'package:chronolog/lens/painters/month_grid.dart';
@@ -262,12 +264,16 @@ void main() {
     expect(painter.projectAll(at).length, greaterThan(1), reason: 'one time, many positions');
   });
 
-  test('the rule ladder runs both ways: rules stay near their target spacing', () {
+  test('the rule ladder runs both ways and is TWO-TIER at every rung', () {
     // Don, 2026-08-28: "as I zoom in so that an hour or a minute fills the
-    // screen, I don't get new more granular lines". One function of pixels per
-    // hour, run in BOTH directions.
+    // screen, I don't get new more granular lines". Extended 8.31: every rung
+    // pairs a major with a minor, and the major is a whole number of minors, so
+    // the surface never reads as one flat tone. One function of pixels per hour,
+    // run in BOTH directions, over a law that is not ours as well as one that is.
+    final minorTarget = ladderPixels(allTunables, 'rule.minorSpacing');
+    final majorTarget = ladderPixels(allTunables, 'rule.majorSpacing');
     for (final hours in [null, 23]) {
-      for (final pixels in [4, 12, 42, 160, 700, 4000]) {
+      for (final pixels in [1, 4, 12, 42, 160, 700, 4000, 90000]) {
         final scene = sceneOf(
           randomWorld(specSeed, count: 4, hoursPerDay: hours).document,
           const ['calendar:a'],
@@ -275,16 +281,124 @@ void main() {
         );
         final painter = IntimatePainter(scene);
         render(painter, surface);
-        final target = scene.px('intimate.ruleSpacing');
-        final step = painter.ruleHours(pixels.toDouble());
-        final spacing = step.toDouble() * pixels;
+        final rung = painter.rung(pixels.toDouble());
         expect(
-          spacing >= target / 2 && spacing <= target * 2,
+          rung.major > rung.minor,
           isTrue,
-          reason: 'at $pixels px an hour the rules sat $spacing apart, not near $target',
+          reason: 'at $pixels px an hour the rung was flat',
         );
+        expect(
+          (rung.major % rung.minor).isZero,
+          isTrue,
+          reason: 'at $pixels px an hour ${rung.major} is not whole minors of ${rung.minor}',
+        );
+        for (final pair in [(rung.minor, minorTarget), (rung.major, majorTarget)]) {
+          expect(
+            pair.$1.toDouble() * pixels >= pair.$2 - 1e-9,
+            isTrue,
+            reason: 'at $pixels px an hour a tier sat '
+                '${pair.$1.toDouble() * pixels}px apart, under ${pair.$2}',
+          );
+        }
       }
     }
+  });
+
+  test('a day grid pans in whole cells and promises nothing it cannot keep', () {
+    // The 8.31 pan class, audited on the grid family: a cell is a whole day, so
+    // the window cannot hold a third of one. Nothing is shown sliding, the
+    // commit is the whole motion, and the gesture is not dead.
+    final document = randomWorld(specSeed, count: 40).document;
+    for (final build in [TacticalPainter.new, StrategicPainter.new, WallPainter.new]) {
+      final painter = build(sceneOf(document, const ['calendar:a']));
+      render(painter, surface);
+      expect(painter.bleed, Offset.zero, reason: 'a grid previews nothing');
+      for (final shift in [const Offset(0, -120), const Offset(0, 200)]) {
+        final landing = painter.panLanding(shift);
+        expect(landing.shown, Offset.zero);
+        expect(landing.days.isZero, isFalse, reason: 'a pan of $shift moved nothing at all');
+      }
+    }
+  });
+
+  test('at rest the minors are the lens own increment and the majors the law hour', () {
+    // Don, 8.31: "at rest: minors at the authored increment, e.g. the set 15m,
+    // majors at the hour." Both sides derived and neither pinned -- the
+    // increment is the grain this lens declares, the hour is the law's own.
+    for (final hours in [null, 23]) {
+      final scene = sceneOf(
+        randomWorld(specSeed, count: 4, hoursPerDay: hours).document,
+        const ['calendar:a'],
+      );
+      final painter = IntimatePainter(scene);
+      render(painter, surface);
+      final law = LawContext(scene.law);
+      expect(painter.railRung.minor, law.daysOfMinute(scene.setting('intimate.grain')));
+      expect(painter.railRung.major, law.daysOfMinute(law.minutesPerHour));
+    }
+  });
+
+  test('a bleeding surface paints PAST its own edge, so a pan slides content in', () {
+    // The other half of the 8.31 pan report: "when I drag, the white space moves
+    // on the edge vs a drag preview of the new position." A transform can only
+    // slide in pixels that exist, so the rail is drawn past the viewport by the
+    // bleed -- and a mark that sits in that margin is drawn, hit-listed and
+    // ready to arrive.
+    const hourPixels = 60;
+    final world = Scene()..calendar('calendar:a');
+    // One hour past the bottom edge, which the bleed still covers.
+    final past = (surface.height / 2 / hourPixels).ceil() + 1;
+    world.place('calendar:a', civil(2026, 8, 18, past), title: 'Just below');
+    final scene = sceneOf(
+      world.document,
+      const ['calendar:a'],
+      view: {'hourPixels': hourPixels},
+      size: surface,
+    );
+    final painter = IntimatePainter(scene);
+    render(painter, surface);
+    expect(painter.bleed.dy > 0, isTrue, reason: 'Intimate bleeds down its rail');
+    expect(
+      past * hourPixels < surface.height / 2 + painter.bleed.dy,
+      isTrue,
+      reason: 'the spec placed its mark outside the bled margin',
+    );
+    final below = painter.hits.where((hit) => hit.bounds.top > surface.height);
+    expect(below, isNotEmpty, reason: 'nothing was painted past the edge to slide in');
+  });
+
+  test('a pan commits exactly the shift it showed: the repaint moves fidelity, never position', () {
+    // Don, 2026-08-31: "I drag up and right, and then it snaps back to basically
+    // the same position when I release." The painter answers with the focus
+    // movement AND what the eye may be shown; the law is that the two agree --
+    // painting again with the committed focus puts the watched time exactly the
+    // shown offset from where it was.
+    final random = Random(specSeed);
+    final document = randomWorld(specSeed, count: 40).document;
+    var checked = 0;
+    for (var index = 0; index < 16; index += 1) {
+      final scene = sceneOf(document, const ['calendar:a']);
+      final before = IntimatePainter(scene);
+      render(before, surface);
+      final shift = Offset(random.nextDouble() * 500 - 250, random.nextDouble() * 200 - 100);
+      final landing = before.panLanding(shift);
+      final watched = before.unproject(Offset(surface.width / 2, surface.height / 2));
+      expect(watched, isNotNull);
+      final was = before.projectAll(watched!);
+      final after = IntimatePainter(scene.copyWith(focusDays: scene.focusDays + landing.days));
+      render(after, surface);
+      final now = after.projectAll(watched);
+      expect(was, isNotEmpty);
+      expect(now, isNotEmpty, reason: 'a pan of $shift lost the time it was panning');
+      expect(
+        now.any((point) => was.any((from) => (point - (from + landing.shown)).distance < 1)),
+        isTrue,
+        reason: 'a pan of $shift showed ${landing.shown} and settled at '
+            '${now.first - was.first}',
+      );
+      checked += 1;
+    }
+    expect(checked, 16);
   });
 
   test('Intimate orders every lane in time', () {
@@ -302,7 +416,11 @@ void main() {
     }
   });
 
-  test('a mark is grabbed by its leading edge, so a create-drag passes through', () {
+  test('a mark is grabbed by its leading edge and CLICKED anywhere on its body', () {
+    // Two regions, two questions (ISSUES 8.31): the strip is what a drag takes
+    // hold of, so a create-drag passes through an occupied span; the body is
+    // what a click, a menu and the cursor mean, so an event can be selected and
+    // opened from anywhere on it.
     final scene = sceneOf(randomWorld(specSeed, count: 400).document, const ['calendar:a']);
     final painter = IntimatePainter(scene);
     render(painter, surface);
@@ -310,15 +428,21 @@ void main() {
     expect(wide, isNotEmpty);
     for (final hit in wide.take(4)) {
       expect(
-        hit.shape!.contains(hit.bounds.centerLeft + const Offset(2, 0)),
+        hit.grab!.contains(hit.bounds.centerLeft + const Offset(2, 0)),
         isTrue,
         reason: 'the leading edge moves it',
       );
       expect(
-        hit.shape!.contains(hit.bounds.center),
+        hit.grab!.contains(hit.bounds.center),
         isFalse,
         reason: 'the body creates through it',
       );
+      expect(
+        hit.shape!.contains(hit.bounds.center),
+        isTrue,
+        reason: 'the body is what a click means',
+      );
+      expect(painter.markAt(hit.bounds.center), isNotNull);
     }
   });
 }

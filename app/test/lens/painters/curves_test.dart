@@ -71,6 +71,29 @@ void paintOn(CustomPainter painter) {
 }
 
 void main() {
+  test('a pan spins the window and promises nothing it cannot keep', () {
+    // The 8.31 pan class, audited on the curves. A ring cannot TRANSLATE, so it
+    // shows no translation -- `shown` is nothing, the commit is the whole motion,
+    // and there is no offset left over to snap back. And it is not dead: the
+    // probe finds a place the surface actually represents, which the hole at the
+    // centre of a spiral is not.
+    for (final seed in seeds(4)) {
+      final world = worldFor(seed);
+      for (final painter in [
+        RadialPainter(sceneOver(world.document, ['calendar:a', 'group:a'])),
+        SpiralPainter(sceneOver(world.document, ['calendar:a'], view: {'inward': 1, 'outward': 2})),
+      ]) {
+        paintOn(painter);
+        expect(painter.bleed, Offset.zero, reason: 'a curve previews nothing');
+        for (final shift in [const Offset(60, 0), const Offset(0, -80), const Offset(-40, 50)]) {
+          final landing = painter.panLanding(shift);
+          expect(landing.shown, Offset.zero);
+          expect(landing.days.isZero, isFalse, reason: 'a pan of $shift moved nothing at all');
+        }
+      }
+    }
+  });
+
   test('the angle mapping is a bijection over the drawn window', () {
     for (final seed in seeds(6)) {
       final world = worldFor(seed, hoursPerDay: seed.isEven ? null : 23);

@@ -49,10 +49,18 @@ class DocumentStore {
     this.delay = const Duration(milliseconds: 350),
     this.establish,
     this.onStatus,
-  }) : _scheduler = scheduler,
-       journal = JournalStore(dataRoot: dataRoot, files: files, scheduler: scheduler);
+  }) : _files = files,
+       _scheduler = scheduler,
+       _journal = JournalStore(dataRoot: dataRoot, files: files, scheduler: scheduler);
 
-  final JournalStore journal;
+  /// The snapshot-and-journal pair this document is written to. Not final: the
+  /// SAVE LOCATION IS THE USER'S TO CHOOSE (Don, 8.31 -- "I don't appear to be
+  /// able to set a save location"), so where the document lives is authored
+  /// data like anything else, and [relocate] is the one door that changes it.
+  JournalStore get journal => _journal;
+
+  JournalStore _journal;
+  final StoreFiles _files;
   final Duration delay;
 
   /// What an empty document is, when no file exists yet. The core's factory
@@ -82,7 +90,7 @@ class DocumentStore {
   /// Open drafts holding autosave off.
   int get deferrals => _deferred;
 
-  int get seq => journal.seq;
+  int get seq => _journal.seq;
 
   SaveStatus get status => _status;
 
@@ -98,7 +106,7 @@ class DocumentStore {
     _log.clear();
     _deferred = 0;
     _emit(SaveState.loading);
-    final result = await journal.load(establish: establish);
+    final result = await _journal.load(establish: establish);
     _document = result.document;
     _emit(SaveState.clean);
     return result;
@@ -191,7 +199,7 @@ class DocumentStore {
     }
     _emit(SaveState.saving);
     try {
-      await journal.append(entries);
+      await _journal.append(entries);
     } catch (error) {
       _log.restore(entries);
       _emit(SaveState.error, error);
@@ -206,9 +214,44 @@ class DocumentStore {
   /// compaction never folds a document the journal has not caught up with.
   Future<int> compact({bool force = false}) async {
     await save(force: true);
-    final folded = await journal.compact(_document, force: force);
+    final folded = await _journal.compact(_document, force: force);
     _emit(pending ? SaveState.dirty : SaveState.clean);
     return folded;
+  }
+
+  /// MOVE the document to another directory, and keep saving there.
+  ///
+  /// The journal machinery does the writing: everything the process knows
+  /// reaches the OLD files first, then the document is established at the new
+  /// location as a snapshot and every later edit appends beside it. Nothing
+  /// here copies bytes by hand, so "saves are updates, not overwrites" is as
+  /// true after a move as before one.
+  ///
+  /// The old files are LEFT IN PLACE. Deleting a document because it was copied
+  /// elsewhere is not this call's decision to make.
+  ///
+  /// Answers null when the document moved, or the words why it did not: a
+  /// directory another chronolog occupies is refused rather than overwritten,
+  /// because there is no dialog to ask and no undo for a replaced file.
+  Future<String?> relocate(String root) async {
+    if (root.trim().isEmpty) return 'A save location needs a path.';
+    if (root == _journal.dataRoot) return null;
+    final next = JournalStore(
+      dataRoot: root,
+      files: _files,
+      scheduler: _scheduler,
+      // The numbering carries forward: a move is a new file, not a new history.
+      continuing: _journal.seq,
+    );
+    if (await next.occupied()) {
+      return 'A chronolog already lives at $root, so nothing was moved.';
+    }
+    await save(force: true);
+    _cancel();
+    _journal = next;
+    await next.replaceSnapshot(_document);
+    _emit(pending ? SaveState.dirty : SaveState.clean);
+    return null;
   }
 
   /// The owner deliberately replacing the document. Pending ops are DROPPED
@@ -217,7 +260,7 @@ class DocumentStore {
     _cancel();
     _log.clear();
     _document = next;
-    await journal.replaceSnapshot(next);
+    await _journal.replaceSnapshot(next);
     _emit(SaveState.clean);
   }
 
@@ -239,7 +282,7 @@ class DocumentStore {
   }
 
   void _emit(SaveState state, [Object? error]) {
-    _status = (state: state, dirty: pending, seq: journal.seq, error: error);
+    _status = (state: state, dirty: pending, seq: _journal.seq, error: error);
     onStatus?.call(_status);
   }
 }

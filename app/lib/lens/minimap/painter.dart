@@ -1,5 +1,4 @@
-// The minimap, drawn: A WAVE FIRST, MOTES WHERE THEY CAN BE COUNTED, DUST WHERE
-// THEY CANNOT.
+// The minimap, drawn: A WAVE, ALWAYS -- IN DUST, WITH COUNTS RIDING ON IT.
 //
 // NOT A DOT MATRIX, and not a spray either. Don, on what this was always meant
 // to be: "the idea was an almost animated waveform in dust or glitter", and on
@@ -8,14 +7,22 @@
 // smoothed curve is drawn as a soft band under a thin crest line, and the grain
 // is placed AGAINST that curve, so the eye reads the shape before the grain.
 //
-// TWO REGIMES, ONE SEAM (ruled 2026-08-28, from "I have I think 4 items in a
-// rough cluster, how does that density map? Why aren't there four dots"). While
-// few enough facts are placed within a neighbourhood, each one is drawn as its
-// own MOTE at its exact time, sized by its composed display weight: four events
-// read as four marks and the state of the calendar is countable at a glance.
-// Above that threshold the motes coalesce into dust under the same envelope. The
-// regime is decided per neighbourhood, so a busy week is dust and a quiet one is
-// motes on the same tile.
+// THE WAVE IS THE LOOK AT EVERY DENSITY (ruled 2026-08-31, from "appears to have
+// lost the dust based Density wave, and replaced it with dots" -- "It was good
+// now it is misrendering"). The build that drew this had the dust STEP ASIDE
+// wherever facts were few enough to count, and dimmed the envelope with them; on
+// a real, sparse calendar every neighbourhood is countable, so the whole tile
+// became motes with nothing under them. There is no such regime any more: the
+// dust is the wave's texture and it is drawn wherever the wave has height.
+//
+// A COUNT MUST BE ANCHORED (Don, 2026-08-31, correcting the earlier reading of
+// his four-dots question: "my question was if we were bothering to render
+// countable dots why we weren't anchoring their count to anything obvious").
+// Where few enough facts are placed within a neighbourhood, each one ALSO gets a
+// MOTE -- one mark per fact, at its own time, sized by its composed display
+// weight, and placed ON the crest rather than floating loose in the band. So the
+// count means something exactly: that many marks are that many facts. Above the
+// threshold there are no motes, because a count nobody can take is noise.
 //
 // NOTHING MOVES ALONG TIME (ruled 2026-08-28: "the dust shifts right, giving the
 // impression that the events are moving"). A grain's place on the time axis is
@@ -141,9 +148,13 @@ class MinimapPainter extends CustomPainter {
   }
 
   /// The wave: a low-alpha band between the mirrored crests, the axis it swings
-  /// about, and the thin crest line the grain hangs on. Drawn in RUNS of one
-  /// regime, so the envelope steps back where motes are doing the talking
-  /// instead of swamping four of them.
+  /// about, and the thin crest line the grain hangs on.
+  ///
+  /// ONE RUN, AT ONE WEIGHT, THE WHOLE LENGTH OF THE TILE. The envelope used to
+  /// be drawn in runs and dimmed by `minimap.quietScale` wherever the facts were
+  /// countable; on a sparse document that is everywhere, and the wave went out.
+  /// A wave that disappears when a calendar is quiet is not the look -- a quiet
+  /// calendar is a low wave, which is the reading.
   void _paintWave(Canvas canvas, double axis) {
     if (_length <= 0) return;
     canvas.drawLine(
@@ -153,47 +164,34 @@ class MinimapPainter extends CustomPainter {
         ..strokeWidth = _px('minimap.axisWidth')
         ..color = theme.muted.withValues(alpha: _px('minimap.baselineOpacity')),
     );
-    var start = 0.0;
-    var quiet = _countableAt(0);
-    for (var step = 1.0; step <= _length; step += 1) {
-      final here = _countableAt(step);
-      if (here == quiet && step < _length) continue;
-      _paintRun(canvas, axis, start, step, quiet);
-      start = step;
-      quiet = here;
-    }
-  }
-
-  void _paintRun(Canvas canvas, double axis, double from, double to, bool quiet) {
     final upper = <Offset>[], lower = <Offset>[];
-    for (var step = from; step <= to; step += 1) {
+    for (var step = 0.0; step <= _length; step += 1) {
       final crest = _crestAt(step);
       upper.add(_at(step, axis - crest));
       lower.add(_at(step, axis + crest));
     }
     if (upper.length < 2) return;
-    final scale = quiet ? _px('minimap.quietScale') : 1.0;
     final band = Path()..addPolygon(upper, false);
     for (final point in lower.reversed) {
       band.lineTo(point.dx, point.dy);
     }
     canvas.drawPath(
       band..close(),
-      Paint()..color = theme.neutral.withValues(alpha: _px('minimap.bandOpacity') * scale),
+      Paint()..color = theme.neutral.withValues(alpha: _px('minimap.bandOpacity')),
     );
     final crest = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = _px('minimap.crestWidth')
       ..strokeJoin = StrokeJoin.round
-      ..color = theme.neutral.withValues(alpha: _px('minimap.crestOpacity') * scale);
+      ..color = theme.neutral.withValues(alpha: _px('minimap.crestOpacity'));
     canvas.drawPath(Path()..addPolygon(upper, false), crest);
     canvas.drawPath(Path()..addPolygon(lower, false), crest);
   }
 
-  /// Every grain of dust for this size. Grains exist only where the field is
-  /// DENSE -- a countable neighbourhood draws its facts instead -- and the
-  /// budget is shared over the dense stretches alone, so suppressing dust never
-  /// costs the wave its texture where it still needs one.
+  /// Every grain of dust for this size. THE DUST IS THE WAVE'S TEXTURE, so it is
+  /// drawn wherever the wave has height and never steps aside for the motes: a
+  /// sparse document is a low wave in dust with a few counted marks riding on
+  /// it, not a bare dot matrix (ruled 2026-08-31).
   ///
   /// A grain's place along time is a pure function of its bin and its index,
   /// with no clock in it at all: that is the ruling made mechanical.
@@ -209,7 +207,6 @@ class MinimapPainter extends CustomPainter {
     final binLength = _length / bins;
     var total = 0.0, area = 0.0;
     for (var bin = 0; bin < bins; bin += 1) {
-      if (_countable(bin)) continue;
       total += _curve[bin];
       area += 2 * _curve[bin] * _baseReach * binLength;
     }
@@ -228,7 +225,6 @@ class MinimapPainter extends CustomPainter {
     final axis = _thickness / 2;
     final grains = <Grain>[];
     for (var bin = 0; bin < bins; bin += 1) {
-      if (_countable(bin)) continue;
       final many = (budget * _curve[bin] / total).round();
       for (var index = 0; index < many; index += 1) {
         final a = _noise(bin, index), b = _noise(bin, index + budget);
@@ -279,9 +275,14 @@ class MinimapPainter extends CustomPainter {
     }
   }
 
-  /// One mote per placed fact, at its exact time, offset across the axis by its
-  /// own stable hash so a cluster reads as a cluster of separable marks, and
-  /// sized by its composed display weight. This is the countable regime.
+  /// One mote per placed fact, at its exact time, sized by its composed display
+  /// weight -- the ANCHORED COUNT. This is the countable regime, and the count
+  /// is the whole of it: that many marks are that many facts.
+  ///
+  /// A mote RIDES THE WAVE. It sits on the crest at its own time, on the side
+  /// its own stable hash picks and as far in from the crest as that hash says,
+  /// so a cluster reads as separable marks that still belong to the curve --
+  /// never as dots floating free in the band, which is what read as a dot matrix.
   void _paintMotes(Canvas canvas, double axis) {
     final spread = _px('minimap.moteSpread'), base = _px('minimap.moteSize');
     final most = _px('minimap.moteMax');
@@ -291,18 +292,27 @@ class MinimapPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = _px('minimap.moteHalo')
       ..color = theme.paper;
-    for (var bin = 0; bin < field.bins; bin += 1) {
-      if (!_countable(bin)) continue;
-      for (final mote in field.motesAt(bin)) {
-        final step = project(mote.day);
-        if (step == null || step < 0 || step > _length) continue;
-        final offset = (mote.hash % 1000 / 1000 - 1 / 2) * 2 * spread;
-        final size = math.min(most, math.max(1.0, base * mote.weight));
-        final centre = _at(step, axis + offset);
-        canvas.drawCircle(centre, size / 2, halo);
-        canvas.drawCircle(centre, size / 2, paint);
-      }
+    for (final mote in motesFor(_size)) {
+      final step = project(mote.day);
+      if (step == null || step < 0 || step > _length) continue;
+      final depth = mote.hash % 1000 / 1000 * spread;
+      final side = (mote.hash ~/ 1000).isEven ? -1 : 1;
+      final size = math.min(most, math.max(1.0, base * mote.weight));
+      final centre = _at(step, axis + side * _crestAt(step) * (1 - depth));
+      canvas.drawCircle(centre, size / 2, halo);
+      canvas.drawCircle(centre, size / 2, paint);
     }
+  }
+
+  /// The motes this size would draw: one per fact placed in a neighbourhood
+  /// countable at this scale. What a spec counts when it asks whether the count
+  /// is anchored to the facts.
+  List<Mote> motesFor(Size size) {
+    _prepare(size);
+    return [
+      for (var bin = 0; bin < field.bins; bin += 1)
+        if (_countable(bin)) ...field.motesAt(bin),
+    ];
   }
 
   void _paintTicks(Canvas canvas) {
@@ -370,10 +380,24 @@ class MinimapPainter extends CustomPainter {
 
   /// Which bins sit in a COUNTABLE neighbourhood: few enough facts placed within
   /// `minimap.countSpan` pixels that every one of them can be its own mote.
+  ///
+  /// HOW MANY CAN BE COUNTED IS A QUESTION ABOUT INK. A mote is a mark of a known
+  /// width, so the most facts a neighbourhood can show as SEPARATE marks is how
+  /// many of those marks fit across it. A threshold that let more in would draw a
+  /// chain of overlapping dots and call it a count -- which is what a real,
+  /// sparse calendar got: at two events a day every neighbourhood passed a
+  /// threshold of six in twenty-four pixels, and sixty motes at four pixels apart
+  /// are not four dots you can count, they are a dotted line (ruled 2026-08-31,
+  /// "render countable dots only if their count is anchored to something
+  /// obvious"). Denser than that, the facts are the wave and the dust says so.
+  ///
+  /// The authored ceiling still binds where it is the lower of the two.
   List<bool> _countability() {
     final bins = field.bins;
     if (bins == 0 || _length <= 0) return const [];
-    final most = count(tunable, 'minimap.countable');
+    final pitch = _px('minimap.moteSize') + _px('minimap.moteHalo') * 2;
+    final fits = pitch <= 0 ? field.bins : (_px('minimap.countSpan') / pitch).floor();
+    final most = math.min(count(tunable, 'minimap.countable'), fits);
     final reach = (_px('minimap.countSpan') / 2 / (_length / bins)).ceil();
     final placed = List.filled(bins + 1, 0), quiet = List.filled(bins + 1, 0);
     for (var bin = 0; bin < bins; bin += 1) {
@@ -397,15 +421,6 @@ class MinimapPainter extends CustomPainter {
   }
 
   bool _countable(int bin) => bin < _regimes.length && _regimes[bin];
-
-  bool _countableAt(double step) => _regimes.isEmpty || _countable(_binAt(step));
-
-  int _binAt(double step) {
-    final bins = _curve.length;
-    if (bins == 0 || _length <= 0) return 0;
-    final at = (step / _length * bins).floor();
-    return at < 0 ? 0 : (at >= bins ? bins - 1 : at);
-  }
 
   /// The field's bins through a triangular kernel. NOT mass-normalized:
   /// neighbouring activity ADDS and the result saturates at the full reach, so a

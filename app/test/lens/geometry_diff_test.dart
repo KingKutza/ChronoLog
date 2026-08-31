@@ -8,7 +8,9 @@
 //
 // This is a harness, not a unit test: it compares the port against the shipped
 // JavaScript, and a disagreement is a port defect rather than a broken
-// expectation. Skipped, with the reason stated, where node is not on the path.
+// expectation. NO SKIPS (ISSUES.md, ruled 8.31): a harness that cannot reach
+// its oracle has verified NOTHING, so it fails and says which prerequisite is
+// missing rather than reporting a green light for work it never checked.
 
 import 'dart:convert';
 import 'dart:io';
@@ -40,7 +42,16 @@ Map<String, Object?>? oracle() {
 void main() {
   final cases = oracle();
   if (cases == null) {
-    test('the lens geometry oracle is unavailable', () {}, skip: 'node is not on the path');
+    test('the lens geometry oracle answers', () {
+      fail(
+        'NOT VERIFIED (ISSUES.md, NO SKIPS ruled 8.31): the geometry oracle '
+        'could not be reached -- node is not on the path to run '
+        'tool/lens_diff_gen.mjs, and build/lens-diff-cases.json is not there '
+        'either. polar, arcPath and spiralRibbon were compared against '
+        'nothing. Put node on the path or generate the cases file; this light '
+        'stays red until the comparison actually runs.',
+      );
+    });
     return;
   }
 

@@ -322,4 +322,118 @@ void main() {
       }
     }
   });
+
+  // --- THE SAVE LOCATION IS THE USER'S TO CHOOSE (Don, 8.31) -----------------
+  //
+  // "I don't appear to be able to set a save location." A move is not a file
+  // copy: the document is written at the new place through the SAME journal
+  // machinery, so "saves are updates, not overwrites" survives the move, and a
+  // directory another chronolog occupies is refused in words rather than
+  // replaced -- there is no confirmation dialog anywhere to ask with.
+
+  test('a move writes the document at the chosen place and keeps saving there', () async {
+    final chosen = await tempRoot('moved-to');
+    addTearDown(() => removeRoot(chosen));
+    final store = open();
+    await store.load();
+    store.commit('Before the move', store.document.put('meta', 'one', '1'));
+    expect(await store.relocate(chosen.path), isNull, reason: 'an empty directory accepts it');
+
+    final moved = await JournalStore(dataRoot: chosen.path).load();
+    expect(moved.document, store.document, reason: 'the whole document travelled');
+
+    // And the journal keeps journalling THERE: a later edit appends beside the
+    // new snapshot, never back at the old location. What the old journal held
+    // when the move happened is the pre-move history and stays exactly that.
+    final left = written().map((entry) => entry.label).toList();
+    store.commit('After the move', store.document.put('meta', 'two', '2'));
+    await fire(store);
+    final here = parseJournal(
+      File(storePath(chosen.path, journalFileName)).readAsBytesSync(),
+    ).entries;
+    expect(here.map((entry) => entry.label), ['After the move']);
+    expect(
+      written().map((entry) => entry.label),
+      left,
+      reason: 'nothing is appended at the place it left',
+    );
+    expect(
+      (await JournalStore(dataRoot: chosen.path).load()).document,
+      store.document,
+      reason: 'reopening the new location is the document as it now stands',
+    );
+  });
+
+  test('everything committed reaches the old files before the move, and they are left there',
+      () async {
+    final chosen = await tempRoot('moved-from');
+    addTearDown(() => removeRoot(chosen));
+    final store = open();
+    await store.load();
+    store.commit('Said and not yet written', store.document.put('meta', 'one', '1'));
+    expect(store.pending, isTrue, reason: 'the debounce has not fired');
+    await store.relocate(chosen.path);
+    expect(
+      written().map((entry) => entry.label),
+      ['Said and not yet written'],
+      reason: 'a move never costs an edit the process was told about',
+    );
+    expect(
+      File(storePath(root.path, snapshotFileName)).existsSync(),
+      isTrue,
+      reason: 'the old files are left in place; deleting them is not this call to make',
+    );
+  });
+
+  test('a directory another chronolog occupies is refused, in words, and nothing is written',
+      () async {
+    final occupied = await tempRoot('occupied');
+    addTearDown(() => removeRoot(occupied));
+    final sitting = DocumentStore(dataRoot: occupied.path, scheduler: ManualScheduler());
+    await sitting.load();
+    sitting.commit('The one already living here', sitting.document.put('meta', 'theirs', 'yes'));
+    await sitting.save(force: true);
+    final theirs = (await JournalStore(dataRoot: occupied.path).load()).document;
+
+    final store = open();
+    await store.load();
+    store.commit('Mine', store.document.put('meta', 'mine', 'yes'));
+    final refused = await store.relocate(occupied.path);
+    expect(refused, isNotNull, reason: 'refuse loudly, never guess');
+    expect(refused, contains(occupied.path), reason: 'the words name the place');
+    expect(
+      (await JournalStore(dataRoot: occupied.path).load()).document,
+      theirs,
+      reason: 'the document already there is untouched',
+    );
+    expect(store.journal.dataRoot, root.path, reason: 'a refused move moved nothing');
+  });
+
+  test('the sequence carries across a move: a new file, not a new history', () async {
+    final chosen = await tempRoot('moved-seq');
+    addTearDown(() => removeRoot(chosen));
+    final store = open();
+    await store.load();
+    for (var index = 0; index < 4; index += 1) {
+      store.commit('edit $index', store.document.put('meta', 'n', '$index'));
+      await fire(store);
+    }
+    final before = store.seq;
+    await store.relocate(chosen.path);
+    expect(store.seq, greaterThan(before), reason: 'monotone across the move');
+    store.commit('after', store.document.put('meta', 'n', 'last'));
+    await fire(store);
+    expect(
+      parseJournal(File(storePath(chosen.path, journalFileName)).readAsBytesSync()).entries.single.seq,
+      greaterThan(before),
+    );
+  });
+
+  test('a move to where the document already is does nothing at all', () async {
+    final store = open();
+    await store.load();
+    expect(await store.relocate(root.path), isNull);
+    expect(store.journal.dataRoot, root.path);
+    expect(await store.relocate('  '), isNotNull, reason: 'a location needs a path');
+  });
 }

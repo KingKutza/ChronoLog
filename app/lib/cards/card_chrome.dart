@@ -25,6 +25,13 @@ const Map<String, String> frameCardTunableDefaults = {
   'card.pad': '12',
   'card.gap': '8',
   'card.labelWidth': '124',
+  // A CARD IS A TILE AND A TILE IS ANY WIDTH (ISSUES 8.31). The label is not a
+  // fixed column: it takes its share of the room the tile actually gave, never
+  // more than its full width and never less than its floor, and below that the
+  // row stacks and then collapses onto the control alone.
+  'card.labelShare': '2/5',
+  'card.labelMin': '2 * 22',
+  'card.controlMin': '2 * 30',
   'card.fieldWidth': '210',
   'card.narrowWidth': '76',
   'card.swatch': '22',
@@ -33,6 +40,10 @@ const Map<String, String> frameCardTunableDefaults = {
   'card.textLines': '4',
   'card.findRows': '200',
   'document.compactMinutes': '10',
+  // The document bar's save control: the lamp's diameter and the gap between
+  // the mark, the lamp and the word beside them.
+  'document.lamp': '2 * 5',
+  'document.saveGap': '2 * 3',
 };
 
 /// One card number. The composed settings win when the session knows the key,
@@ -181,15 +192,57 @@ Widget _spaced(BuildContext context, Widget child) => Padding(
 );
 
 /// A named row of the primary path: the label reads as a question, the control
-/// answers it.
-Widget cardRow(BuildContext context, String label, Widget child) => Row(
-  children: [
-    SizedBox(
-      width: cardPx(context, 'card.labelWidth'),
-      child: Text(label, style: labelStyle(context)),
-    ),
-    Flexible(child: child),
-  ],
+/// answers it -- AT WHATEVER WIDTH THE TILE HANDED THE CARD.
+///
+/// ISSUES (8.31), the same class as the responsive bars: "a card tile narrower
+/// than about 200px overflows its RenderFlex -- cardRow pairs the fixed
+/// card.labelWidth with a Flexible". A fixed column inside a Row is a claim
+/// about space nobody promised. So the row reads the room it was actually given
+/// and takes one of three forms, by settings-keyed thresholds and nothing else:
+///
+///   SHRINK   -- label and control side by side, the label taking its share of
+///               the room up to its full width;
+///   STACK    -- the label above the control, once a share of the room is too
+///               narrow to read as a label;
+///   COLLAPSE -- the control alone with the label on its tooltip, once there is
+///               not even room for the control beside anything.
+///
+/// Nothing is clipped and nothing is lost, which is the rule the bars follow.
+Widget cardRow(BuildContext context, String label, Widget child) {
+  final full = cardPx(context, 'card.labelWidth');
+  final least = cardPx(context, 'card.labelMin');
+  final control = cardPx(context, 'card.controlMin');
+  final share = cardPx(context, 'card.labelShare');
+  Widget named(double width) =>
+      SizedBox(width: width, child: Text(label, style: labelStyle(context)));
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      final room = constraints.maxWidth;
+      // Unbounded is not narrow: a row inside a scrolling run keeps its column.
+      if (!room.isFinite) return Row(children: [named(full), Flexible(child: child)]);
+      final wanted = room * share;
+      final width = wanted > full ? full : wanted;
+      if (width >= least && room - width >= control) {
+        return Row(children: [named(width), Flexible(child: child)]);
+      }
+      if (room >= control) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [Text(label, style: labelStyle(context)), child],
+        );
+      }
+      return Tooltip(message: label, child: child);
+    },
+  );
+}
+
+/// The rule between two regions of a card. ISSUES (8.31): "A horizontal rule,
+/// then staples" -- the eye's natural path needs one seam, drawn in the ground
+/// channel every divider in the program uses.
+Widget cardRule(BuildContext context) => Container(
+  height: ChromeScope.of(context).px('chrome.hair'),
+  color: ChronoTheme.of(context).hair,
 );
 
 /// Guidance, or a refusal in the law's own words. A card that cannot do
@@ -392,28 +445,132 @@ class _CardComposeState extends State<CardCompose> {
   ]);
 }
 
-/// A colour as a swatch beside the hex that names it. The ONE colour control:
+/// A colour as a swatch beside the words that name it. The ONE colour control:
 /// a frame's ink and a theme's role are the same act, so they are the same
 /// widget. An empty value is an inheritance, not a colour.
+///
+/// ISSUES (8.31, evening): "clicking the gray box did not launch a color picker
+/// and typing Blue into the text field did nothing either ... A control that
+/// accepts input and does nothing is worse than no control." So the swatch is a
+/// button onto a picker, the field reads a NAME as readily as a hex, and text
+/// that is not a colour is refused here, in words, instead of being written to
+/// the record as though it were one.
 Widget colorField(
   BuildContext context,
   String value,
   void Function(String) onChanged, {
   String hint = 'inherited',
-}) {
-  final size = cardPx(context, 'card.swatch');
-  return Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        width: size,
-        height: size,
-        color: parseColor(value) ?? ChronoTheme.of(context).hair,
+}) => ColorField(value: value, onChanged: onChanged, hint: hint);
+
+class ColorField extends StatefulWidget {
+  const ColorField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.hint = 'inherited',
+  });
+
+  final String value, hint;
+  final void Function(String) onChanged;
+
+  @override
+  State<ColorField> createState() => _ColorFieldState();
+}
+
+class _ColorFieldState extends State<ColorField> {
+  bool _picking = false;
+
+  /// What the picker OFFERS, as an authored list of colour names -- a text
+  /// setting, so a person who wants another palette writes one. The field still
+  /// takes any name or hex the reader knows; this is the short way in.
+  List<String> _palette(BuildContext context) => [
+    for (final word in ChromeScope.of(context).settings.text('card.palette').split(RegExp(r'\s+')))
+      if (word.trim().isNotEmpty) word.trim(),
+  ];
+
+  Widget _swatch(BuildContext context, Color color, String said, VoidCallback onTap) => Semantics(
+    label: said,
+    button: true,
+    child: Tooltip(
+      message: said,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Container(
+            width: cardPx(context, 'card.swatch'),
+            height: cardPx(context, 'card.swatch'),
+            color: color,
+          ),
+        ),
       ),
-      SizedBox(width: cardPx(context, 'card.gap')),
-      CardField(value: value, mono: true, hint: hint, onChanged: onChanged),
-    ],
+    ),
   );
+
+  void _pick(String written) {
+    widget.onChanged(written);
+    setState(() => _picking = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final written = widget.value.trim();
+    final read = parseColor(written);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _swatch(
+              context,
+              read ?? ChronoTheme.of(context).hair,
+              'Pick a colour',
+              () => setState(() => _picking = !_picking),
+            ),
+            SizedBox(width: cardPx(context, 'card.gap')),
+            Flexible(
+              child: CardField(
+                value: widget.value,
+                mono: true,
+                hint: widget.hint,
+                onChanged: (text) {
+                  widget.onChanged(text);
+                  setState(() {});
+                },
+              ),
+            ),
+          ],
+        ),
+        if (written.isNotEmpty && read == null)
+          cardNote(
+            context,
+            '"$written" is not a colour. Write a name — blue, dark green,'
+            ' rebeccapurple — or a hex like #3f6ea3. Nothing is stored as a'
+            ' colour until it reads as one.',
+            refusal: true,
+          ),
+        if (_picking)
+          cardWrap(context, [
+            for (final name in _palette(context))
+              _swatch(
+                context,
+                parseColor(name) ?? ChronoTheme.of(context).hair,
+                name,
+                () => _pick(name),
+              ),
+            namedAction(
+              context,
+              'Inherit',
+              hint: 'No colour of its own — the group and frame cascade speaks.',
+              onTap: () => _pick(''),
+            ),
+          ]),
+      ],
+    );
+  }
 }
 
 /// A named text row -- a label and the field that answers it. The commonest
@@ -426,10 +583,18 @@ Widget cardTextRow(
   String hint = '',
   double? width,
   bool mono = false,
+  int lines = 1,
 }) => cardRow(
   context,
   label,
-  CardField(value: value, hint: hint, width: width, mono: mono, onChanged: onChanged),
+  CardField(
+    value: value,
+    hint: hint,
+    width: width,
+    mono: mono,
+    lines: lines,
+    onChanged: onChanged,
+  ),
 );
 
 /// A named choice row: the vocabulary is the argument, so no site spells a

@@ -1,19 +1,36 @@
 // The staple substrate.
 //
-// A STAPLE IS AN EDGE, NOT AN ATTRIBUTE. It connects exactly two things at one
-// point -- LEXICON.md's founding conception, where "an event attached to
-// multiple lines staples them together at that point", and the owner's ruling
-// that "the point and purpose of a staple is to connect two things at a point.
-// Here we say we connect my personal calendar frame and this event at a point,
-// which is the event's end. Then we can project the two relative to eachother."
+// A STAPLE IS AN IDENTIFICATION, NOT AN ATTRIBUTE. The owner's full statement:
+// "a piece of metal existing in a third dimension that pierces 1 or more pages
+// (objects and frames) at 0 or more points causing all of said points to be
+// bound together through that third dimension." One thing, always: "n points on
+// objects or frames are one point", n >= 0. In plain words, "this point right
+// here is also that point right there" -- an event on a calendar, the end of an
+// era on the beginning of the next, a todo on an event, the midpoint of a thing
+// on itself.
 //
-// DIRECTIONAL, NOT TYPED. A staple is two ends IN ORDER, and any two scopes may
+// N-ARY, DIRECTIONAL, NOT TYPED. A staple is n ends IN ORDER, and any scopes may
 // join. The JavaScript's `connects` end-scope gate -- and `endScopePair` /
 // `stapleKindScopes`, which existed only to read it -- have no counterpart here.
 // `kind` keeps ONLY the flags that SELECT A DERIVATION: does this kind partition
 // a series, may it carry a following rule, do its ends carry a position at all,
-// does it anchor a point of an object's extent. Which two things a connection
-// joins is the author's business.
+// does it anchor a point of an object's extent. Which things a connection joins,
+// and how many, is the author's business.
+//
+// AND THE REGISTRY IS SHRINKING. Ruled 8.31: "A staple connects n points and says
+// each is the same as the other. No exceptions No special cases No extra
+// riders." `succession` selected a derivation until that night and now selects
+// nothing -- an era boundary is a plain point staple, read through the same
+// machinery as every other identification, with [StapleEnds.readEnds] supplying
+// the point a positionless record always meant so the old spelling keeps both
+// its meaning and its bytes.
+//
+// IDENTIFICATION, NOT CONTEST. Because the n points ARE one point, two claims
+// naming that point on DIFFERENT coordinate spaces are not rivals: they are one
+// point on several sheets, and the point simply has a position in each. A
+// CONTEST is the narrower thing it always should have been -- two claims in the
+// SAME coordinate space that disagree -- and it is still reported, never
+// averaged. [Extent.positions] is the per-sheet reading.
 //
 // The staple axiom is why this module exists at all: "there is no such thing as
 // a time-native object, only objects better or worse stapled to time." Placement
@@ -41,6 +58,7 @@ import 'coordinate_law.dart';
 import 'document.dart';
 import 'eras.dart';
 import 'exact.dart';
+import 'frame_points.dart';
 import 'records.dart';
 
 // --- The kind registry ------------------------------------------------------
@@ -69,6 +87,14 @@ class StapleKind {
   final bool carriesRule;
 
   /// Do this kind's ends carry a position at all?
+  ///
+  /// NOTHING SETS THIS FALSE ANY MORE. `succession` was the only entry that
+  /// did, and 8.31 dissolved it: every frame end speaks the point vocabulary, so
+  /// there is no kind whose ends have nowhere to be. The field survives because
+  /// the staple editor still reads it to decide whether to offer a position
+  /// field; retiring it belongs with the filed registry-to-shape migration,
+  /// which is the same pass that retires [carriesRule] -- a rule is an authored
+  /// function now, not a rider a kind permits.
   final bool positions;
 
   /// Does this kind anchor a named point of an object's extent?
@@ -101,12 +127,16 @@ const Map<String, StapleKind> stapleKinds = {
   // MULTIPLE: never averaged into one mapped position, never sorted into
   // monotone order, never interpolated across a gap.
   'correspondence': StapleKind('Corresponds to a point on another frame'),
-  // Eras are frames stapled together, and a succession is the boundary between
-  // two consecutive ones. The only kind whose ends carry NO POSITION: every
-  // other kind names a place on a frame, while a succession names an adjacency,
-  // and the boundary IS wherever the earlier era's extent runs out. Authoring it
-  // as a coordinate would create a second fact that can disagree.
-  'succession': StapleKind('Precedes the next era', positions: false),
+  // A LABEL, NOT A CASE. Ruled 8.31: "A staple connects n points and says each
+  // is the same as the other. No exceptions No special cases No extra riders."
+  // An era boundary is a plain point staple -- the end of one frame's extent
+  // identified with the beginning of another's -- so nothing here selects a
+  // derivation any more and `positions: false` is gone with the special
+  // handling it named. What survives is the word: an existing record spelled
+  // `succession` keeps loading, keeps its meaning, and round-trips byte for
+  // byte, because a frame end that names no point is READ as the point the
+  // staple's own order always said it was (see [StapleEnds.readEnds]).
+  'succession': StapleKind('Precedes the next era'),
 };
 
 StapleKind? stapleKind(String? kind) => kind == null ? null : stapleKinds[kind];
@@ -118,34 +148,102 @@ StapleKind? stapleKind(String? kind) => kind == null ? null : stapleKinds[kind];
 /// one every pre-connection document's placement already meant.
 const String defaultPoint = 'start';
 
-/// Reading a staple's two ends.
+/// Reading a staple's n ends.
 ///
 /// The JavaScript's nine near-identical filters over a two-element list melt to
-/// these three plus `ends.whereType<FrameEnd>()`, which the sealed types give
-/// for free. Authored order is the record's own order: no derivation below reads
-/// index 0 as "the source" or index 1 as "the follower", because direction is
-/// not stored. An instant known at one end propagates to the other, and which
-/// end is known is a fact about the document rather than about the staple --
-/// which is what makes `A.end <-> B.start` and `B.start <-> A.end` the same
-/// connection, as they must be.
+/// these plus `ends.whereType<FrameEnd>()`, which the sealed types give for
+/// free. Authored order is the record's own order: no derivation below reads
+/// index 0 as "the source" or the last index as "the follower", because
+/// direction is not stored. An instant known at one end propagates to every
+/// other, and which end is known is a fact about the document rather than about
+/// the staple -- which is what makes `A.end <-> B.start` and `B.start <-> A.end`
+/// the same connection, as they must be.
 extension StapleEnds on Relation {
+  /// THE STAPLE'S ENDS AS READ: what is authored, plus the point a positionless
+  /// frame end has always meant.
+  ///
+  /// A frame end carrying no position says nothing about where on its own sheet
+  /// it touches -- except what the staple's own ORDER says, and that order was
+  /// always the whole of an era succession's meaning: the first sheet the metal
+  /// pierces FINISHES at this point and every other BEGINS there. That is read
+  /// here as an ordinary point expression over each frame's own extent, with no
+  /// kind consulted, which is how "the end of 1 meets the beginning of 2" stops
+  /// being a case and becomes one spelling of the general staple.
+  ///
+  /// A LONE frame end is left alone. One sheet pierced at an unnamed point says
+  /// only "something of this is here"; reading it as the sheet's own end would
+  /// invent a claim from an absence, and there is no second end for the order to
+  /// be an order OF.
+  ///
+  /// Nothing is written. [ends] stays the record's own list, so a document that
+  /// arrived spelling this as `succession` saves back exactly as it loaded.
+  List<StapleEnd> get readEnds {
+    final all = ends;
+    var frames = 0, blanks = 0;
+    for (final end in all) {
+      if (end is! FrameEnd) continue;
+      frames += 1;
+      if (end.position == null) blanks += 1;
+    }
+    if (frames < 2 || blanks == 0) return all;
+    final read = <StapleEnd>[];
+    var ordinal = 0;
+    for (final end in all) {
+      if (end is! FrameEnd) {
+        read.add(end);
+        continue;
+      }
+      final implied = impliedPoint(ordinal++);
+      read.add(
+        end.position != null
+            ? end
+            : FrameEnd(end.frame, position: Position.point(implied.from), extra: end.extra),
+      );
+    }
+    return read;
+  }
+
   /// Where the end naming [id] sits, or -1.
   int endIndexOf(String id) => ends.indexWhere((end) => end.id == id);
 
-  /// The counterpart of the end at [index], BY POSITION. Two ends can be
-  /// value-equal, so this is found by index rather than by identity or equality:
-  /// a frame stapled to itself at two points is a legitimate correspondence.
-  StapleEnd? otherThan(int index) {
-    final both = ends;
-    return both.length == 2 && index >= 0 && index < 2 ? both[1 - index] : null;
+  /// Every index at which an end names [id] AS a [T]. A staple may pierce one
+  /// page at several of its own points -- "the midpoint of itself" -- so asking
+  /// for the first would silently drop the rest.
+  Iterable<int> endIndexesOf<T extends StapleEnd>(String id) sync* {
+    for (final (index, end) in readEnds.indexed) {
+      if (end is T && end.id == id) yield index;
+    }
   }
 
-  FrameEnd? get firstFrameEnd {
-    for (final end in ends) {
-      if (end is FrameEnd) return end;
-    }
-    return null;
+  /// Every OTHER end, BY POSITION, in authored order. Two ends can be
+  /// value-equal, so this is found by index rather than by identity or equality:
+  /// a frame stapled to itself at two points is a legitimate correspondence.
+  ///
+  /// The n-ary reading of "the other end": with three ends the counterpart of
+  /// one is the other two, and every derivation that used to read a single
+  /// counterpart reads this instead.
+  List<StapleEnd> othersThan(int index) {
+    final all = readEnds;
+    if (index < 0 || index >= all.length) return const [];
+    return [
+      for (final (at, end) in all.indexed)
+        if (at != index) end,
+    ];
   }
+
+  /// The single counterpart of the end at [index] -- the pair case, and null
+  /// when this staple identifies more or fewer than two points. Only a caller
+  /// that genuinely wants "the one other thing" may use it; everything n-ary
+  /// reads [othersThan].
+  StapleEnd? otherThan(int index) {
+    final others = othersThan(index);
+    return others.length == 1 ? others.single : null;
+  }
+
+  /// Every sheet this staple pierces, in authored order. `firstFrameEnd` is
+  /// gone: "the first frame end" was only ever a stand-in for "the end that
+  /// names an instant", which is [Staples.instantEnd] and needs a law to answer.
+  List<FrameEnd> get frameEnds => readEnds.whereType<FrameEnd>().toList();
 }
 
 /// Which point of an object's extent this end touches.
@@ -189,7 +287,10 @@ String _idKey(StapleEnd end) => switch (end) {
 /// case-insensitively; a numeric value matches the index directly.
 ///
 /// A void position matches nothing, which is the point of it, and a span matches
-/// by containment.
+/// by containment. A POINT matches by containment too, which is what makes the
+/// all-point the INCLUSIVE connection Don ruled: "the end of 1 staples to all of
+/// 2" holds at every instant of 2, and a point of size zero holds at exactly one
+/// -- the same derivation, differing in size rather than in kind.
 bool frameEndMatches(CoordinateLaw law, StapleEnd? end, Rational days) {
   if (end is! FrameEnd) return false;
   final position = end.position;
@@ -202,11 +303,32 @@ bool frameEndMatches(CoordinateLaw law, StapleEnd? end, Rational days) {
     }
     final selector = position?.selector;
     if (selector != null) return _selectorMatches(law, selector, days);
+    final point = lawPointRegion(law, position);
+    if (point != null) {
+      final (low, high) = point.from <= point.to ? (point.from, point.to) : (point.to, point.from);
+      return days >= low && days <= high;
+    }
   } catch (_) {
     return false;
   }
   return false;
 }
+
+/// The region an authored point names under [law], or null when this position is
+/// not a point -- or when the frame cannot say where it sits at all.
+///
+/// The second case is the one the ruling turns on. A basis with "no power to
+/// label a point along the line" answers nothing here, and every derivation
+/// downstream reads that as association without projection rather than as a
+/// position it may invent. The Dawn Era's staple is real; a place in it is not.
+({Rational from, Rational to})? lawPointRegion(CoordinateLaw law, Position? position) {
+  final source = pointSourceOf(position?.point);
+  final extent = law.extentDays;
+  if (source == null || extent == null) return null;
+  return evaluatePoint(source, extent, units: law.unitNamed, subject: _pointSubject(law));
+}
+
+String _pointSubject(CoordinateLaw law) => 'This point of ${law.frameId ?? 'the frame'}';
 
 int? _namedIndex(List<String>? names, Object? value) {
   if (names == null) return null;
@@ -317,11 +439,18 @@ Contest _contest(
   Rational? days,
 }) => (role: role, staple: staple, relation: relation, days: days, reason: reason);
 
+/// Where each identified point of an object sits, PER COORDINATE SPACE: point
+/// name to space to exact days. "n points on objects or frames are one point"
+/// read out -- a point identified with instants on two sheets has a position in
+/// each, and neither is a rival for the other.
+typedef PointPositions = Map<String, Map<String, Rational>>;
+
 /// What the anchoring connections on one object came to.
 typedef AnchorSet = ({
   List<ResolvedAnchor> anchors,
   List<Contest> overdetermined,
   List<Contest> unresolved,
+  PointPositions positions,
   bool cyclic,
 });
 
@@ -337,6 +466,7 @@ class Extent {
     this.anchors = const [],
     this.overdetermined = const [],
     this.unresolved = const [],
+    this.positions = const {},
     this.cyclic = false,
     SpreadDays? spread,
     this.frame,
@@ -351,6 +481,14 @@ class Extent {
   final bool derivedMagnitude, cyclic;
   final List<ResolvedAnchor> anchors;
   final List<Contest> overdetermined, unresolved;
+
+  /// Every identified point of this object, spelled in each coordinate space
+  /// that names it. [startDays] and [endDays] answer in ONE space -- [frame]'s,
+  /// the space the leading anchor was written in -- because they are a single
+  /// pair of numbers; this is the whole of what the staples said, and it is how
+  /// "the sticky note is at 6:45pm 8.30.26 AND at 3rd of Limestone 507" is read
+  /// back without either claim being demoted to a contest.
+  final PointPositions positions;
 
   /// The fuzziness of the derived extent, so rendering can see it. Data, not a
   /// drawing instruction: the display language for uncertainty is not designed,
@@ -404,6 +542,94 @@ bool isPlacement(Relation relation, [String? objectId]) =>
     (objectId == null || relation.event == objectId) &&
     relation.coordinate != null;
 
+// --- What is identified with what -------------------------------------------
+
+/// One claim an identification makes: a sheet, and where on it -- or nowhere on
+/// it at all.
+///
+/// [position] is null for an end that pierces the page WITHOUT NAMING AN
+/// INSTANT. Don's case, ruled 8.31: "Event is stapled to A at point 7/15/27
+/// 2:30:54, and is stapled to B at Null Point. There B is associated with A
+/// through event but no point on B projects to a given point on A." So a null
+/// point is graph association and nothing more, and no derivation may make an
+/// anchor of it.
+typedef PointClaim = ({String frame, Position? position, String source});
+
+/// Whether this claim says WHERE on its sheet.
+///
+/// An authored void is the explicit statement that there is nothing here, and an
+/// absent position never named a place to begin with; both pierce the page
+/// without naming an instant. A selector or a span DOES name places -- many of
+/// them -- which is a positional claim even though no single instant can be read
+/// off it.
+///
+/// AND THE ALL-POINT ASSOCIATES WITHOUT PROJECTING. Ruled 8.31: where a basis
+/// cannot label a point along its own line, "the end of 1 staples to all of 2"
+/// -- a real identification of the two sheets, and no statement about where on
+/// the second anything sits. A SIZED point is that claim, told apart from a
+/// size-zero one by its own two expressions rather than by any law, so this stays
+/// the structural reading it has always been.
+bool claimIsPositioned(PointClaim claim) {
+  final position = claim.position;
+  if (position == null || position is VoidPosition) return false;
+  final point = pointSourceOf(position.point);
+  return point == null || point.from == point.to;
+}
+
+/// EVERY SET OF CLAIMS THE AUTHOR HAS SAID ARE ONE POINT.
+///
+/// The one reading of "which point identifications exist", so the two seams
+/// built on it -- `framesProject` (whether two sheets correspond at all) and
+/// `Correspondences` (where an instant lands) -- cannot disagree about what the
+/// document says. They differ only in what they do with a group.
+///
+/// TWO WAYS A GROUP FORMS, and the record type is NOT the discriminator:
+///
+///   * a staple's own frame ends: n sheets pierced at one point, so every pair
+///     of them names that point. A staple touching one sheet and nothing else
+///     groups nothing -- it places something there and says nothing about
+///     anywhere else.
+///   * ONE POINT OF ONE OBJECT: every claim made at that point of that object,
+///     however it was spelled. The Dwarf Fortress parable -- the sticky note
+///     stapled to the August sheet and to the DF decade sheet relates the two
+///     sheets because one point of the sticky is now a point on both -- and the
+///     object's own PLACEMENT ATTACHMENT is one of those spellings, because a
+///     placement IS the object's first identification. Two staples naming one
+///     point are the same point as surely as one staple with three ends is.
+List<List<PointClaim>> pointIdentifications(Iterable<Relation> relations) {
+  final groups = <List<PointClaim>>[];
+  final byObjectPoint = <String, List<PointClaim>>{};
+  for (final relation in relations) {
+    if (relation.isStaple) {
+      // NO KIND GATE. A kind selects a derivation, never a meaning.
+      final claims = [
+        for (final end in relation.readEnds)
+          if (end is FrameEnd)
+            (frame: end.frame, position: end.position, source: relation.id),
+      ];
+      if (claims.length > 1) groups.add(claims);
+      if (claims.isEmpty) continue;
+      for (final end in relation.readEnds) {
+        if (end is! ObjectEnd) continue;
+        (byObjectPoint['${end.object} ${endPoint(end)}'] ??= <PointClaim>[]).addAll(claims);
+      }
+      continue;
+    }
+    if (!isPlacement(relation)) continue;
+    final frame = relation.frame;
+    if (frame == null) continue;
+    (byObjectPoint['${relation.event} $defaultPoint'] ??= <PointClaim>[]).add((
+      frame: frame,
+      position: Position.coordinate(relation.coordinate ?? const {}),
+      source: relation.id,
+    ));
+  }
+  for (final claims in byObjectPoint.values) {
+    if (claims.length > 1) groups.add(claims);
+  }
+  return groups;
+}
+
 /// One row of an object's whole effective connection set.
 ///
 /// An `implicit` row has no staple record -- [relation] names the attachment
@@ -411,6 +637,9 @@ bool isPlacement(Relation relation, [String? objectId]) =>
 /// writes that relation rather than minting a staple that would then contradict
 /// it. That is what keeps "Start time" from being special: it is one row in this
 /// list, with the same fields as every other row, and NO RECORD MOVES.
+/// [fars] is every end the connection identifies this one WITH, in authored
+/// order; [far] is its single member for the pair case and null otherwise, which
+/// is what a one-counterpart editor field still wants to read.
 typedef ConnectionRow = ({
   bool implicit,
   Relation? relation,
@@ -418,6 +647,7 @@ typedef ConnectionRow = ({
   String? kind,
   StapleEnd? near,
   StapleEnd? far,
+  List<StapleEnd> fars,
 });
 
 /// One correspondence entry, oriented so `from` is the asked-about frame's own
@@ -566,20 +796,94 @@ class Staples {
   }
 
   /// The exact instant a frame end names, or null.
-  ///
-  /// Only a `coordinate` position is ONE instant. A selector, a span and a void
-  /// are many-valued or empty, and reducing them to a single day here is exactly
-  /// the collapse the correspondence rule forbids -- "Tuesdays" would silently
-  /// become one arbitrary Tuesday. Those positions answer [frameEndMatches]
-  /// instead, which is a membership question rather than a location one.
   Rational? frameEndDays(StapleEnd? end) =>
-      end is FrameEnd ? daysOf(end.frame, end.position?.coordinate) : null;
+      end is FrameEnd ? positionDays(end.frame, end.position) : null;
+
+  /// THE ONE READING of "where on this sheet does this position sit".
+  ///
+  /// Only a `coordinate` and a point of SIZE ZERO are one instant. A selector, a
+  /// span, a void and a SIZED point are many-valued or empty, and reducing any
+  /// of them to a single day here is exactly the collapse the correspondence
+  /// rule forbids -- "Tuesdays" would silently become one arbitrary Tuesday, and
+  /// "all of era 2" would become one arbitrary year of it. Those positions
+  /// answer [frameEndMatches] instead, which is a membership question rather
+  /// than a location one.
+  ///
+  /// Every seam asks HERE. `framesProject` reads which sheets a point relates,
+  /// `Correspondences` reads where an instant lands, and the anchor derivation
+  /// reads where an object sits; three readings of one authored position could
+  /// disagree, and one cannot.
+  Rational? positionDays(String frameId, Position? position) {
+    if (position == null) return null;
+    final at = position.coordinate;
+    if (at != null) return daysOf(frameId, at);
+    final region = pointRegionOf(frameId, position);
+    return region != null && region.from == region.to ? region.from : null;
+  }
+
+  /// The region an authored point names on [frameId], or null.
+  ({Rational from, Rational to})? pointRegionOf(String frameId, Position? position) {
+    final law = lawOf(frameId);
+    if (law == null) return null;
+    try {
+      return lawPointRegion(law, position);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Why an authored point on [frameId] could not be read, in the author's own
+  /// words, or null when it reads -- or names no point to begin with.
+  ///
+  /// The query path swallows refusals so one broken frame cannot take a whole
+  /// projection offline; this is how a surface asks what was swallowed. "The
+  /// end of the Dawn Era" has no answer, and saying so is the answer.
+  String? pointRefusal(String frameId, Position? position) {
+    if (pointSourceOf(position?.point) == null) return null;
+    final law = lawOf(frameId);
+    if (law == null) return 'Frame $frameId has no coordinate law, so it has no points to name.';
+    if (law.extentDays == null) {
+      return '${_frameTitle(frameId)} does not say where it begins or ends, so it'
+          ' cannot label a point along its own line. A staple reaching it'
+          ' connects to all of it.';
+    }
+    try {
+      lawPointRegion(law, position);
+      return null;
+    } catch (error) {
+      return refusalText(error);
+    }
+  }
+
+  String _frameTitle(String frameId) {
+    final title = declaredText(document.frames[frameId]?.title);
+    return title.isEmpty ? frameId : title;
+  }
+
+  /// The frame end this staple names an instant at, or null. N-ARY: the staple
+  /// may pierce several sheets at the one point it identifies, so this is the
+  /// first end in AUTHORED ORDER that resolves to an instant rather than
+  /// literally the first frame end -- a sheet whose law cannot read its
+  /// coordinate must not take the whole staple offline when another sheet spells
+  /// the same point readably.
+  FrameEnd? instantEnd(Relation staple) {
+    for (final end in staple.readEnds) {
+      if (end is FrameEnd && frameEndDays(end) != null) return end;
+    }
+    return null;
+  }
 
   /// The instant this staple itself names, or null for a connection whose
   /// instant comes from the objects it joins. Series derivations use this: a rule
   /// segment is cut at an instant, and a series end never connects to another
   /// object, so a series staple always has a frame end to read.
-  Rational? stapleDays(Relation staple) => frameEndDays(staple.firstFrameEnd);
+  Rational? stapleDays(Relation staple) => frameEndDays(instantEnd(staple));
+
+  /// The coordinate space a frame's positions are actually written in. Two
+  /// frames that resolve to the same owner ARE one sheet (every era frame of one
+  /// calendar), and an unresolvable law is its own sheet -- a broken declaration
+  /// relates to nothing rather than to everything.
+  String coordinateSpaceOf(String frameId) => lawOf(frameId)?.frameId ?? frameId;
 
   /// What a duration magnitude is worth in days, under the law the magnitude
   /// itself names. A caller that HAS the document must never fall back to the
@@ -612,7 +916,7 @@ class Staples {
       ? const []
       : [
           for (final staple in staplesOf(id))
-            if (staple.ends.whereType<T>().any((end) => end.id == id)) staple,
+            if (staple.readEnds.whereType<T>().any((end) => end.id == id)) staple,
         ];
 
   /// Every staple on a series, in a stable, deterministic order.
@@ -643,17 +947,22 @@ class Staples {
     final entries = <Correspondence>[];
     for (final staple in staplesOf(frameId)) {
       if (staple.kind != 'correspondence') continue;
-      final ends = staple.ends;
-      if (ends.length != 2) continue;
+      final ends = staple.readEnds;
       // Oriented per END rather than per staple: a frame stapled to itself at
       // two different points is a legitimate correspondence (a loop), and it has
       // to enumerate from both of its own ends rather than arbitrarily from one.
+      //
+      // N-ARY: one staple may say three points are one point, and that is three
+      // ORDERED PAIRS from each of this frame's own ends -- every sheet the
+      // metal pierces corresponds to every other, which is what makes a staple
+      // through a third frame relate the first two.
       for (final (index, from) in ends.indexed) {
         if (from is! FrameEnd || from.frame != frameId) continue;
-        final to = staple.otherThan(index);
-        if (to is! FrameEnd) continue;
-        if (counterpartId != null && to.frame != counterpartId) continue;
-        entries.add((staple: staple, from: from, to: to));
+        for (final to in staple.othersThan(index)) {
+          if (to is! FrameEnd) continue;
+          if (counterpartId != null && to.frame != counterpartId) continue;
+          entries.add((staple: staple, from: from, to: to));
+        }
       }
     }
     return entries;
@@ -746,29 +1055,37 @@ class Staples {
     final placement = placementRelation(objectId);
     if (placement != null) {
       final parameters = placement.extra['parameters'];
+      final far = FrameEnd(
+        placement.frame ?? '',
+        position: Position.coordinate(placement.coordinate ?? const {}),
+        extra: parameters == null ? const {} : {'parameters': parameters},
+      );
       rows.add((
         implicit: true,
         relation: placement,
         staple: null,
         kind: 'anchor',
         near: ObjectEnd(objectId, point: defaultPoint),
-        far: FrameEnd(
-          placement.frame ?? '',
-          position: Position.coordinate(placement.coordinate ?? const {}),
-          extra: parameters == null ? const {} : {'parameters': parameters},
-        ),
+        far: far,
+        fars: [far],
       ));
     }
+    // One ROW PER OWN END, not per staple: a staple that pierces this object at
+    // two of its own points says two things about it, and a row that named only
+    // the first would leave the second unauthorable.
     for (final staple in staplesForObject(objectId)) {
-      final index = staple.endIndexOf(objectId);
-      rows.add((
-        implicit: false,
-        relation: null,
-        staple: staple,
-        kind: staple.kind,
-        near: index < 0 ? null : staple.ends[index],
-        far: staple.otherThan(index),
-      ));
+      for (final index in staple.endIndexesOf<ObjectEnd>(objectId)) {
+        final fars = staple.othersThan(index);
+        rows.add((
+          implicit: false,
+          relation: null,
+          staple: staple,
+          kind: staple.kind,
+          near: staple.readEnds[index],
+          far: fars.length == 1 ? fars.single : null,
+          fars: fars,
+        ));
+      }
     }
     return rows;
   }
@@ -776,19 +1093,28 @@ class Staples {
   /// Every anchoring connection this object participates in, resolved and
   /// ordered by role precedence.
   ///
-  /// One anchor per role wins -- the first in stable order. A second connection
-  /// touching the same point is not an error (the collection is open, and
-  /// rejecting it would lose authored data) but it cannot also be believed, so it
-  /// is reported as overdetermined and left alone. An object whose start comes
-  /// from a connection AND from its own frame staple lands here, reported, never
-  /// averaged.
+  /// ONE ANCHOR PER POINT PER SHEET. A point holds one position in each
+  /// coordinate space, so a claim naming this object's start on frame A and a
+  /// claim naming it on frame B are ONE POINT ON TWO SHEETS -- both believed,
+  /// both readable through [AnchorSet.positions], neither a rival for the other.
+  /// That is the staple's own definition: the n points it names ARE one point.
+  ///
+  /// A CONTEST is the narrower thing: two claims in the SAME coordinate space
+  /// that DISAGREE. It is not an error (the collection is open, and rejecting it
+  /// would lose authored data) but it cannot also be believed, so it is reported
+  /// as overdetermined and left alone, never averaged. Two claims in one space
+  /// that AGREE are the same point said twice -- a restatement, not a rival, and
+  /// nothing to report.
   AnchorSet objectAnchors(String objectId) => _anchorsOf(objectId, _newResolution());
 
   AnchorSet _anchorsOf(String objectId, _Resolution resolution) {
-    final resolved = <ResolvedAnchor>[];
+    // Emission order is kept so the tie-break below is total: several claims can
+    // come off ONE staple (the n-ary case), which makes the staple id alone an
+    // equal key. Authored end order decides between them.
+    final claims = <({ResolvedAnchor anchor, int order})>[];
     final overdetermined = <Contest>[], unresolved = <Contest>[];
-    final seenRoles = <String>{};
     var cyclic = false;
+    var order = 0;
     for (final staple in staplesForObject(objectId)) {
       if (!(stapleKind(staple.kind)?.anchors ?? false)) continue;
       // Traversing an edge must not count as arriving back at it. A staple
@@ -799,111 +1125,177 @@ class Staples {
       // DIFFERENT staples closing a loop -- as the only thing the path guard
       // fires on.
       if (resolution.crossed.contains(staple.id)) continue;
-      final index = staple.endIndexOf(objectId);
-      final near = index < 0 ? null : staple.ends[index];
-      final far = staple.otherThan(index);
-      final role = endPoint(near);
-      if (far == null) {
-        unresolved.add(
-          _contest(role, 'this staple has only one end, so it connects nothing', staple: staple),
-        );
-        continue;
-      }
-      Rational? days;
-      var spread = spreadDays(staple) ?? SpreadDays.zero;
-      String? frame;
-      if (far is FrameEnd) {
-        days = frameEndDays(far);
-        frame = far.frame;
-      } else if (far is ObjectEnd) {
-        // A connection whose other end resolves back through this object cannot
-        // be resolved at all: the pair would each be waiting on the other.
-        // Reported rather than iterated to a fixed point, because there is no
-        // instant to report and guessing one would place an object nobody
-        // positioned.
-        if (resolution.path.contains(far.object)) {
-          cyclic = true;
+      // One pass PER OWN END: a staple may pierce this object at more than one
+      // of its own points, and each of those points is anchored by everything
+      // else the staple names.
+      for (final index in staple.endIndexesOf<ObjectEnd>(objectId)) {
+        final near = staple.readEnds[index];
+        final role = endPoint(near);
+        final fars = staple.othersThan(index);
+        if (fars.isEmpty) {
           unresolved.add(
             _contest(
               role,
-              'this connection resolves back through the object it places',
+              'this staple identifies nothing with this point, so it places nothing',
               staple: staple,
             ),
           );
           continue;
         }
-        final upstream = _resolveExtent(far.object, (
-          path: {...resolution.path, objectId},
-          crossed: {...resolution.crossed, staple.id},
-          memo: resolution.memo,
-        ));
-        // A cycle anywhere below makes THIS answer path-dependent too, so it has
-        // to travel up: the memo is only safe for a subtree that resolved
-        // without one, and a diamond over a cycle would otherwise cache an
-        // answer that is only true for the path it was reached by.
-        if (upstream.cyclic) cyclic = true;
-        final point = endPoint(far);
-        days = extentPointDays(upstream, point, offsetDays: magnitudeDays(far.offset));
-        if (days != null) {
-          spread = spread + upstream.spread;
-          frame = upstream.frame;
+        // EVERY other end is a claim on this one point. With three ends that is
+        // two claims, and under the identification they are two spellings of one
+        // instant rather than a fight.
+        for (final far in fars) {
+          Rational? days;
+          var spread = spreadDays(staple) ?? SpreadDays.zero;
+          String? frame;
+          if (far is FrameEnd) {
+            days = frameEndDays(far);
+            frame = far.frame;
+          } else if (far is ObjectEnd) {
+            // A connection whose other end resolves back through this object
+            // cannot be resolved at all: the pair would each be waiting on the
+            // other. Reported rather than iterated to a fixed point, because
+            // there is no instant to report and guessing one would place an
+            // object nobody positioned.
+            if (resolution.path.contains(far.object)) {
+              cyclic = true;
+              unresolved.add(
+                _contest(
+                  role,
+                  'this connection resolves back through the object it places',
+                  staple: staple,
+                ),
+              );
+              continue;
+            }
+            final upstream = _resolveExtent(far.object, (
+              path: {...resolution.path, objectId},
+              crossed: {...resolution.crossed, staple.id},
+              memo: resolution.memo,
+            ));
+            // A cycle anywhere below makes THIS answer path-dependent too, so it
+            // has to travel up: the memo is only safe for a subtree that
+            // resolved without one, and a diamond over a cycle would otherwise
+            // cache an answer that is only true for the path it was reached by.
+            if (upstream.cyclic) cyclic = true;
+            final point = endPoint(far);
+            days = extentPointDays(upstream, point, offsetDays: magnitudeDays(far.offset));
+            if (days != null) {
+              spread = spread + upstream.spread;
+              frame = upstream.frame;
+            }
+          }
+          if (days == null) {
+            unresolved.add(
+              _contest(
+                role,
+                "this connection's other end has no resolvable position",
+                staple: staple,
+              ),
+            );
+            continue;
+          }
+          claims.add((
+            anchor: (
+              role: role,
+              staple: staple,
+              end: near,
+              days: days,
+              spread: spread,
+              frame: frame,
+            ),
+            order: order++,
+          ));
         }
       }
-      if (days == null) {
-        unresolved.add(
-          _contest(role, "this connection's other end has no resolvable position", staple: staple),
-        );
-      } else if (seenRoles.add(role)) {
-        resolved.add((
-          role: role,
-          staple: staple,
-          end: near!,
-          days: days,
-          spread: spread,
-          frame: frame,
-        ));
-      } else {
+    }
+    claims.sort((left, right) {
+      final byRole = _rolePrecedence(left.anchor.role) - _rolePrecedence(right.anchor.role);
+      if (byRole != 0) return byRole;
+      final byStaple = _byStableOrder(left.anchor.staple, right.anchor.staple);
+      return byStaple != 0 ? byStaple : left.order - right.order;
+    });
+
+    final resolved = <ResolvedAnchor>[];
+    final positions = <String, Map<String, Rational>>{};
+    for (final claim in claims) {
+      final anchor = claim.anchor;
+      final sheet = positions.putIfAbsent(anchor.role, () => <String, Rational>{});
+      final standing = sheet[spaceOfFrame(anchor.frame)];
+      if (standing == null) {
+        sheet[spaceOfFrame(anchor.frame)] = anchor.days;
+        resolved.add(anchor);
+      } else if (standing != anchor.days) {
         overdetermined.add(
           _contest(
-            role,
-            'another connection already anchors this point',
-            staple: staple,
-            days: days,
+            anchor.role,
+            'another connection already anchors this point in the same '
+            'coordinate space, at a different instant',
+            staple: anchor.staple,
+            days: anchor.days,
           ),
         );
       }
+      // standing == days: one point said twice. Agreement is not a contest.
     }
-    resolved.sort(
-      (left, right) => _rolePrecedence(left.role) != _rolePrecedence(right.role)
-          ? _rolePrecedence(left.role) - _rolePrecedence(right.role)
-          : _byStableOrder(left.staple, right.staple),
-    );
 
     // The object's own placement relation IS an implicit start connection to the
-    // frame it is attached to, so a connection that also claims `start` is a
-    // second claim on the same point. Anchors take precedence -- that is the
-    // documented order -- but the contest has to be REPORTED rather than
-    // silently won, because the surface that authored both is the only place
-    // that can resolve it.
-    final placement = resolved.any((anchor) => anchor.role == defaultPoint)
-        ? placementRelation(objectId)
-        : null;
+    // frame it is attached to. On ANOTHER sheet that is a second spelling of the
+    // same start, so it joins [positions] and nothing is reported. In the SAME
+    // space as a believed start anchor it is a genuine second claim: anchors take
+    // precedence -- that is the documented order -- but the contest has to be
+    // REPORTED rather than silently won, because the surface that authored both
+    // is the only place that can resolve it.
+    final placement = placementRelation(objectId);
     if (placement != null) {
-      overdetermined.add(
-        _contest(
-          defaultPoint,
-          "this object's own placement also names its start",
-          relation: placement,
-        ),
-      );
+      final at = daysOf(placement.frame ?? '', Coordinate.fromJson(placement.coordinate));
+      final space = spaceOfFrame(placement.frame);
+      final sheet = positions[defaultPoint];
+      final standing = sheet?[space];
+      if (at == null) {
+        // Nothing to spell, so nothing to identify with -- but a placement that
+        // cannot be read while a staple already anchors the start is still a
+        // second claim the author has to be told about.
+        if (sheet != null) {
+          overdetermined.add(
+            _contest(
+              defaultPoint,
+              "this object's own placement also names its start",
+              relation: placement,
+            ),
+          );
+        }
+      } else if (standing == null) {
+        positions.putIfAbsent(defaultPoint, () => <String, Rational>{})[space] = at;
+      } else if (standing != at) {
+        overdetermined.add(
+          _contest(
+            defaultPoint,
+            "this object's own placement also names its start",
+            relation: placement,
+            days: at,
+          ),
+        );
+      }
     }
     return (
       anchors: resolved,
       overdetermined: overdetermined,
       unresolved: unresolved,
+      positions: positions,
       cyclic: cyclic,
     );
   }
+
+  /// The coordinate space a nullable frame reference names. A connection whose
+  /// upstream chain never reached a frame has no sheet, and the empty key is that
+  /// -- distinct from every frame's own space, so two space-less claims on one
+  /// point still contest each other.
+  String spaceOfFrame(String? frameId) =>
+      frameId == null || frameId.isEmpty ? '' : _spaces[frameId] ??= coordinateSpaceOf(frameId);
+
+  final Map<String, String> _spaces = {};
 
   static _Resolution _newResolution() =>
       (path: <String>{}, crossed: <String>{}, memo: <String, Extent>{});
@@ -953,7 +1345,23 @@ class Staples {
     final magnitude = magnitudeDays(document.events[objectId]?.duration);
     final found = _anchorsOf(objectId, resolution);
     final anchors = found.anchors;
-    final derived = anchors.length >= 2 ? _derivedMagnitude(anchors[0], anchors[1]) : null;
+    // [startDays] and [endDays] are ONE PAIR OF NUMBERS, so they can only answer
+    // in one coordinate space: the leading anchor's. Anchors on other sheets are
+    // the same points spelled elsewhere -- carried whole in `anchors` and
+    // `positions`, believed, and never contested against these. Only the sheet
+    // being answered in can overdetermine the answer.
+    final sheet = anchors.isEmpty ? '' : spaceOfFrame(anchors.first.frame);
+    final here = [
+      for (final anchor in anchors)
+        // A claim whose chain never reached a frame belongs to no sheet, so it
+        // is not on ANOTHER one either: it still pairs with the sheet being
+        // answered in. Only two KNOWN and DIFFERENT spaces separate.
+        if (sheet.isEmpty ||
+            spaceOfFrame(anchor.frame).isEmpty ||
+            spaceOfFrame(anchor.frame) == sheet)
+          anchor,
+    ];
+    final derived = here.length >= 2 ? _derivedMagnitude(here[0], here[1]) : null;
 
     // The one-anchor and two-anchor shapes differ in exactly three things: where
     // the magnitude comes from, how many anchors were believed, and what the
@@ -966,11 +1374,11 @@ class Staples {
     // end, which is EARLIER than either anchor. Treating the earlier anchor as
     // the start would put the start at the midpoint and silently halve the
     // event.
-    if (anchors.isNotEmpty) {
-      final leading = anchors.first;
+    if (here.isNotEmpty) {
+      final leading = here.first;
       final size = derived == null ? magnitude : derived.abs();
       final (start, end) = _fromAnchor(leading, size);
-      final spread = derived == null ? leading.spread : leading.spread + anchors[1].spread;
+      final spread = derived == null ? leading.spread : leading.spread + here[1].spread;
       return Extent(
         startDays: start,
         endDays: end,
@@ -980,7 +1388,7 @@ class Staples {
         anchors: anchors,
         overdetermined: [
           ...found.overdetermined,
-          for (final other in anchors.skip(derived == null ? 1 : 2))
+          for (final other in here.skip(derived == null ? 1 : 2))
             _contest(
               other.role,
               derived == null
@@ -992,6 +1400,7 @@ class Staples {
             ),
         ],
         unresolved: found.unresolved,
+        positions: found.positions,
         cyclic: found.cyclic,
         spread: spread,
         frame: leading.frame,
@@ -1016,6 +1425,7 @@ class Staples {
           : 'placement',
       overdetermined: found.overdetermined,
       unresolved: found.unresolved,
+      positions: found.positions,
       cyclic: found.cyclic,
       frame: placement?.frame,
     );
@@ -1073,7 +1483,7 @@ class Staples {
         <({Relation staple, FrameEnd end, Rational days})>[
           for (final staple in staplesForSeries(pattern.id))
             if (stapleKind(staple.kind)?.partitions ?? false)
-              if (staple.firstFrameEnd case final FrameEnd end)
+              if (instantEnd(staple) case final FrameEnd end)
                 // Both the inclusive close and the following segment's exclusive
                 // open use the SAME instant, or occurrences between the authored
                 // midnight and the end of the named unit would fall into both.
@@ -1183,8 +1593,9 @@ class Staples {
 
   // --- Exclusions as live references ----------------------------------------
 
-  /// The set of whole days covered by events on the referenced frames, over a
-  /// bounded window.
+  /// The set of whole days a series' live exclusions cover, over a bounded
+  /// window: the days events on the referenced FRAMES occupy, plus the days a
+  /// SELECTOR matches.
   ///
   /// LEXICON.md, Rob-and-John beat 2: "skip holidays (events on frame xyz)" and
   /// "holiday exclusion is a live reference to another frame's events, not a
@@ -1204,9 +1615,26 @@ class Staples {
         if (str(frame) case final String id)
           if (id.isNotEmpty) id,
     ];
-    if (frames.isEmpty) return null;
+    // THE SECOND EXCLUSION SENTENCE: "except every time that matches" (ISSUES
+    // 8.31, evening: "no clear way to put in an except weekends and holidays").
+    // A selector is the {cycle, value} form the position selectors already
+    // speak, read against the frame it NAMES -- so "Saturday" means whatever
+    // that frame's own declaration says a Saturday is, and there is no second
+    // matcher and no set of legal selector kinds.
+    final selectors = [
+      for (final row in asList(exclude?['selectors']))
+        if (obj(row) case final Json selector) selector,
+    ];
+    if (frames.isEmpty && selectors.isEmpty) return null;
     final days = <String>{};
     final from = lower.floor(), to = upper.floor();
+    for (final selector in selectors) {
+      final law = lawOf(str(selector['frame']) ?? '');
+      if (law == null) continue;
+      for (var day = from; day <= to; day += BigInt.one) {
+        if (_selectorMatches(law, selector, Rational(day))) days.add('$day');
+      }
+    }
     for (final frameId in frames) {
       for (final entry in factsOf(frameId)) {
         final duration = magnitudeDays(entry.event.duration);

@@ -23,8 +23,10 @@
 // way to name or nest a unit, because any system that encodes a right way does in
 // the same breath preclude other ways.
 
+import 'basis_function.dart';
 import 'eras.dart';
 import 'exact.dart';
+import 'frame_points.dart';
 
 // --- The Coordinate value type ----------------------------------------------
 
@@ -775,8 +777,13 @@ class CoordinateLaw {
   /// defaults to "positional if a family can execute the ladder", and the law
   /// resolver passes it explicitly so a measure frame keeps reading its own base
   /// level rather than being reinterpreted as a date.
-  CoordinateLaw(Declaration? declaration, {this.frameId, bool? positional, EraContext? era})
-    : declaration = declaration ?? const Declaration() {
+  CoordinateLaw(
+    Declaration? declaration, {
+    this.frameId,
+    bool? positional,
+    EraContext? era,
+    this.basis,
+  }) : declaration = declaration ?? const Declaration() {
     _installStandards();
     final label = _label(frameId);
     final declared = this.declaration;
@@ -927,17 +934,38 @@ class CoordinateLaw {
     String? frameId,
     bool? positional,
     EraContext? era,
+    BasisFunction? basis,
   }) => CoordinateLaw(
     Declaration.parse(json, _label(frameId)),
     frameId: frameId,
     positional: positional,
     era: era,
+    basis: basis,
   );
 
   final Declaration declaration;
 
   /// Appears only in refusal messages.
   final String? frameId;
+
+  /// THE BASIS AS A FUNCTION, when the author wrote one instead of naming a
+  /// frame to inherit from. Ruled 8.31: "a linear equation a non-linear equation
+  /// a piecewise equeation, an all point, a loop, A list/stack, or anything
+  /// else." It warps the COUNT this ladder produces -- forward for [toDays],
+  /// inverted for [fromDays] -- and the ladder itself is untouched, which is what
+  /// makes a nested radix ladder one spelling of the general basis rather than
+  /// the only one. Null for every frame that inherits or owns its structure
+  /// outright, which is the shape every stored document carries today.
+  final BasisFunction? basis;
+
+  /// The count on the axis this frame is measured against, for [count] on its
+  /// own. The identity when no basis function is authored, which is why nothing
+  /// downstream carries a has-a-basis branch of its own.
+  Rational flow(Rational count) => basis?.forward(count) ?? count;
+
+  /// The inverse, refusing in the author's own words where the function does not
+  /// invert -- a flat stretch answers many-valued, a curve answers by name.
+  Rational unflow(Rational count) => basis?.invert(count) ?? count;
 
   late final Map<String, Level> _byName = {};
   late final Map<String, Cycle> _cycles = {};
@@ -1217,6 +1245,57 @@ class CoordinateLaw {
   /// Era-qualified text ("3E 433", "44 BCE") to (era, year), or null.
   EraQualified? parseYear(Object? text) => eraTable?.parse(text);
 
+  /// The exact day this law's year ladder starts [properYear] at.
+  ///
+  /// PROPER years, not era-local ones: an era's own [toDays] refuses a year past
+  /// its length, which is right for a coordinate an author wrote and wrong for
+  /// the question "where does this era run out" -- the instant after its last
+  /// year is precisely the one the era does not contain. Null when this law has
+  /// no year ladder to count in.
+  Rational? properYearDays(BigInt properYear) {
+    final family = this.family;
+    final year = yearLevel;
+    if (family == null || year == null) return null;
+    final parts = [
+      for (final level in familyLadder)
+        if (level.name == year)
+          properYear
+        else
+          BigInt.parse(family.defaults[level.name] ?? '1'),
+    ];
+    return flow(Rational(family.toWholeUnits(familyLadder, parts))) * baseAtoms * atomDays +
+        epochDays +
+        originDays;
+  }
+
+  /// THE FRAME'S OWN EXTENT: where it begins, and where it runs out.
+  ///
+  /// Ruled 8.31, dissolving succession: an era boundary "is derived from where
+  /// the earlier era runs out", and a frame end may name its own beginning or
+  /// end as a point. [end] is therefore EXCLUSIVE -- the first instant the frame
+  /// does not contain -- which is what makes "the end of 1 meets the beginning
+  /// of 2" come out as one number twice rather than as a rule reconciling two.
+  ///
+  /// Null for a frame that cannot say where it sits: a plain calendar (which is
+  /// unbounded, not empty) and, deliberately, the Dawn Era -- a basis with no
+  /// power to label a point along the line answers nothing here, and the staple
+  /// that reaches it connects inclusively instead.
+  FrameExtent? get extentDays {
+    final entry = eraEntry;
+    if (entry == null) return null;
+    final first = entry.firstProper, last = entry.lastProper;
+    return (
+      beginning: first == null ? null : properYearDays(first),
+      end: last == null ? null : properYearDays(last + BigInt.one),
+    );
+  }
+
+  /// What a name means inside a point expression on this frame, beyond its own
+  /// bounds: the length of one of its units, so "three weeks in" is written as
+  /// arithmetic in the frame's own vocabulary rather than as a day count the
+  /// author had to work out.
+  Object? unitNamed(String name) => unitDays(name) ?? standardUnitDays[name];
+
   /// Does this law place its coordinates on the running clock at all?
   ///
   /// Only a positional law does: a non-positional law reads its base level as a
@@ -1276,7 +1355,7 @@ class CoordinateLaw {
       // makes a shortened day shorten the absolute span rather than compress the
       // hours inside it.
       final whole = family.toWholeUnits(familyLadder, parts);
-      final atoms = Rational(whole) * baseAtoms + _belowAtoms(value);
+      final atoms = flow(Rational(whole)) * baseAtoms + _belowAtoms(value);
       return atoms * atomDays + epochDays + originDays;
     }
     // A value naming levels this law does not declare is NOT a value in this law,
@@ -1307,7 +1386,7 @@ class CoordinateLaw {
     if (raw == null) {
       throw LawRefusal('Frame ${frameId ?? '(anonymous)'} has no temporal coordinate law');
     }
-    return Rational.parse(raw.value) * baseDays + epochDays;
+    return flow(Rational.parse(raw.value)) * baseDays + epochDays;
   }
 
   /// A day ordinal back to a nested coordinate. The levels below the base only
@@ -1319,13 +1398,26 @@ class CoordinateLaw {
     }
     final family = this.family;
     if (family == null) {
-      return Coordinate.of([(baseLevel, ((days - epochDays) / baseDays).toJson())]);
+      return Coordinate.of([(baseLevel, unflow((days - epochDays) / baseDays).toJson())]);
     }
     // Into ATOMS once, then decompose: whole base units first, then whatever
     // atoms are left spent down the below-base ladder.
     final atoms = (days - epochDays - originDays) / atomDays;
-    final whole = (atoms / baseAtoms).floor();
-    var remainder = atoms - baseAtoms * Rational(whole);
+    // The basis warps the WHOLE-UNIT count and the levels below it ride
+    // untouched, so the count is taken back through the function before the
+    // ladder decomposes it. A flow whose values are not whole numbers has no
+    // whole count to hand back here and [unflow] says so by name rather than
+    // rounding to the nearest one it could have meant.
+    final counted = (atoms / baseAtoms).floor();
+    var remainder = atoms - baseAtoms * Rational(counted);
+    final restored = unflow(Rational(counted));
+    if (restored.d != BigInt.one) {
+      throw LawRefusal(
+        '${_label(frameId)}: this basis puts that instant at $restored of its own'
+        ' units, which is not a whole one, so it names no coordinate here.',
+      );
+    }
+    final whole = restored.n;
     // Under an era law the year that comes back is the era-LOCAL year, because
     // the frame is already the era, and the round trip preserves what the author
     // wrote rather than a linearized equivalent of it. A proper year outside this
@@ -1357,7 +1449,21 @@ class CoordinateLaw {
       if (amount != BigInt.zero) significant = true;
       below.add((level: level.name, value: '$amount'));
     }
-    return Coordinate(significant ? [...above, ...below] : above);
+    final answer = Coordinate(significant ? [...above, ...below] : above);
+    // A WARPED LADDER CHECKS ITSELF. The decomposition above assumes the whole
+    // count it started from is the one the flow produced, and a flow that lands
+    // between whole units breaks that assumption -- silently, which is the one
+    // way this must never fail. So a law carrying a basis function verifies its
+    // own answer against the forward direction and refuses in words when the two
+    // disagree. Nothing is checked where there is no function, because there the
+    // decomposition IS the inverse.
+    if (basis != null && toDays(answer) != days) {
+      throw LawRefusal(
+        '${_label(frameId)}: this basis puts that instant between two of its own'
+        ' units, so it names no coordinate here.',
+      );
+    }
+    return answer;
   }
 
   /// The proper year an era-qualified coordinate names. The era is REQUIRED: a
@@ -1396,9 +1502,16 @@ typedef EraLookup = EraContext? Function(Map<String, Object?> document, String f
 
 /// The declaration a frame's coordinates are actually governed by, plus the
 /// identity to cache it under.
-typedef _Resolved = ({Object? source, Declaration? ready, String frameId, bool? positional});
+typedef _Resolved = ({
+  Object? source,
+  Declaration? ready,
+  String frameId,
+  bool? positional,
+  Object? basisSource,
+  BasisFunction? basis,
+});
 
-typedef _Cached = ({Object? source, String eraKey, CoordinateLaw law});
+typedef _Cached = ({Object? source, Object? basisSource, String eraKey, CoordinateLaw law});
 
 /// Law resolution with its cache, and the one refusal seam every "what is wrong
 /// with this?" question in the model asks.
@@ -1425,7 +1538,10 @@ class CoordinateLaws {
     final era = eras?.call(document, frameId);
     final eraKey = era == null ? '' : '${era.identity}:${era.countable}';
     final cached = perDocument[frameId];
-    if (cached != null && identical(cached.source, resolved.source) && cached.eraKey == eraKey) {
+    if (cached != null &&
+        identical(cached.source, resolved.source) &&
+        identical(cached.basisSource, resolved.basisSource) &&
+        cached.eraKey == eraKey) {
       return cached.law;
     }
     final law = CoordinateLaw(
@@ -1433,8 +1549,14 @@ class CoordinateLaws {
       frameId: resolved.frameId,
       positional: resolved.positional,
       era: era,
+      basis: resolved.basis,
     );
-    perDocument[frameId] = (source: resolved.source, eraKey: eraKey, law: law);
+    perDocument[frameId] = (
+      source: resolved.source,
+      basisSource: resolved.basisSource,
+      eraKey: eraKey,
+      law: law,
+    );
     return law;
   }
 
@@ -1544,8 +1666,20 @@ _Resolved _resolveDeclaration(Map<String, Object?> document, String frameId, Set
   final traits = [for (final trait in asList(frame['traits'])) '$trait'];
   final measure = traits.contains('measure') || traits.contains('duration');
   final positional = measure ? false : null;
-  _Resolved own(Object? source, Declaration? ready) =>
-      (source: source, ready: ready, frameId: frameId, positional: positional);
+  final basis = frame['basis'];
+  // A BASIS IS EITHER A FRAME OR A FUNCTION. A map here is the function form,
+  // and it belongs to THIS frame: there is no other frame's ladder to inherit,
+  // so the frame's own levels are the unit breakdown the function is spelled in
+  // ("1 is year, year contains 14 months").
+  final authoredBasis = basis is Map ? BasisFunction.parse(basis, _label(frameId)) : null;
+  _Resolved own(Object? source, Declaration? ready) => (
+    source: source,
+    ready: ready,
+    frameId: frameId,
+    positional: positional,
+    basisSource: authoredBasis == null ? null : basis,
+    basis: authoredBasis,
+  );
   if (declaration?['kind'] == 'gregorian' || traits.contains('gregorian')) {
     // A gregorian frame with no authored ladder gets the registered one, which is
     // what the kind has always meant here. It survives only as this
@@ -1560,7 +1694,6 @@ _Resolved _resolveDeclaration(Map<String, Object?> document, String frameId, Set
     // The authored map itself, never a copy: the cache keys on its identity.
     return own(frame['coordinate'], null);
   }
-  final basis = frame['basis'];
   if (basis is String && basis.isNotEmpty) {
     return _resolveDeclaration(document, basis, seen);
   }

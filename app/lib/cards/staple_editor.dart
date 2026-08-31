@@ -24,6 +24,7 @@ import 'package:flutter/material.dart';
 import '../chrome/controls.dart';
 import '../core/coordinate_law.dart';
 import '../core/document.dart';
+import '../core/eras.dart';
 import '../core/exact.dart';
 import '../core/projection.dart';
 import '../core/records.dart';
@@ -402,26 +403,58 @@ class _AddConnection extends StatelessWidget {
   final String objectId;
   final Editor editor;
 
+  /// The one write: this object's point identified with the far end's.
+  void _connect(Connectable far) {
+    final near = ObjectEnd(objectId, point: 'start');
+    final other = far.kind == 'frame'
+        ? StapleEnd.frame(far.id)
+        : ObjectEnd(far.id, point: 'start') as StapleEnd;
+    editor.transaction(
+      'Connect to ${far.label}',
+      (d) => putStaple(
+        d,
+        kind: steerStapleKind('anchor', near, other)?.kind ?? 'anchor',
+        ends: [near, other],
+      ).document,
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => ConnectionPicker(
-    document: editor.document,
-    exclude: objectId,
-    hint: 'Connect to a frame or an object',
-    onPicked: (far) {
-      final near = ObjectEnd(objectId, point: 'start');
-      final other = far.kind == 'frame'
-          ? StapleEnd.frame(far.id)
-          : ObjectEnd(far.id, point: 'start') as StapleEnd;
-      editor.transaction(
-        'Connect to ${far.label}',
-        (d) => putStaple(
-          d,
-          kind: steerStapleKind('anchor', near, other)?.kind ?? 'anchor',
-          ends: [near, other],
-        ).document,
-      );
-    },
-  );
+  Widget build(BuildContext context) {
+    final host = CardHost.of(context);
+    return ConnectionPicker(
+      document: editor.document,
+      exclude: objectId,
+      hint: 'Connect to a frame or an object',
+      onPicked: _connect,
+      // MAKE WHAT NOTHING IS CALLED YET, connect to it, and open its card so it
+      // can be set up (ISSUES 8.31). The frame is minted as a GROUP -- a frame
+      // IS a group (ruled 2026-08-19) -- and boosts by default, so an object
+      // crossing more frames reads as more prominent without anyone authoring
+      // arithmetic; whatever it should really be is one dropdown away on the
+      // card that just opened.
+      onCreate: (kind, name) {
+        if (name.isEmpty) return;
+        if (kind == 'frame') {
+          final frame = Frame(
+            id: createId('frame'),
+            title: name,
+            traits: const ['set', 'group'],
+            extra: const {
+              'display': {'weight': 'w * 1.5'},
+            },
+          );
+          editor.transaction('New frame $name', (d) => d.put('frames', frame.id, frame));
+          _connect((id: frame.id, label: name, kind: 'frame'));
+          return host.openFrame(frame.id);
+        }
+        final made = editor.newObject('event', title: name);
+        editor.transaction('New object $name', (d) => d.put('events', made.id, made));
+        _connect((id: made.id, label: name, kind: 'object'));
+        host.openObject(made.id);
+      },
+    );
+  }
 }
 
 /// Containment, which passes no judgment: any object may hold any objects,
@@ -471,6 +504,222 @@ class _Containment extends StatelessWidget {
       children: [
         side('Holds', indexes.childrenOf(objectId), true),
         side('Held by', indexes.parentsOf(objectId), false),
+      ],
+    );
+  }
+}
+
+/// THE SERIES' EXCLUSIONS, spoken as sentences.
+///
+/// ISSUES (8.31, evening, Don live): "when I set lunch to repeats every day I
+/// had no clear way to put in an except weekends and holidays." The model
+/// already holds both readings; what was missing was the authoring surface. So
+/// there are exactly two sentences here, and they compile to the same NOT the
+/// projection algebra already reads:
+///
+///   EXCEPT MEMBERS OF a frame -- a LIVE reference to another frame's events,
+///   resolved at projection time, so adding a holiday changes the series with
+///   no edit to the series and removing one puts the meeting back.
+///
+///   EXCEPT EVERY TIME THAT MATCHES a selector -- the {cycle, value} form the
+///   position selectors already speak, read against the frame's OWN declared
+///   cycles, so "Saturday" means whatever THAT frame says a Saturday is. No new
+///   vocabulary, and no closed set of selector kinds.
+///
+/// OVERSCALE: the frames a series may be excluded by are never enumerated. The
+/// offers are windowed and a find narrows them, exactly as the far-end
+/// typeahead does.
+class SeriesExclusions extends StatefulWidget {
+  const SeriesExclusions({
+    super.key,
+    required this.pattern,
+    required this.editor,
+    this.frameId,
+  });
+
+  final Pattern pattern;
+  final Editor editor;
+
+  /// The frame this series counts in -- whose declarations a selector reads,
+  /// and which cannot exclude the series, since its own occurrences are among
+  /// the facts it holds.
+  final String? frameId;
+
+  @override
+  State<SeriesExclusions> createState() => _SeriesExclusionsState();
+}
+
+class _SeriesExclusionsState extends State<SeriesExclusions> {
+  String _find = '', _cycle = '', _value = '';
+
+  Json get _exclude => obj(widget.pattern.extra['exclude']) ?? const <String, dynamic>{};
+
+  List<String> get _frames => [
+    for (final id in asList(_exclude['frames']))
+      if (str(id) case final String named) named,
+  ];
+
+  List<Json> get _selectors => [
+    for (final row in asList(_exclude['selectors']))
+      if (obj(row) case final Json selector) selector,
+  ];
+
+  /// One write for both sentences. An exclusion of nothing is stored as
+  /// nothing: an empty list left behind is a claim nobody made.
+  void _put({List<String>? frames, List<Json>? selectors}) {
+    final next = <String, dynamic>{
+      ..._exclude,
+      'frames': frames ?? _frames,
+      'selectors': selectors ?? _selectors,
+    }..removeWhere((_, value) => value is List && value.isEmpty);
+    widget.editor.transaction(
+      'Edit the series exclusions',
+      (d) => d.put(
+        'patterns',
+        widget.pattern.id,
+        widget.pattern.withField('exclude', next.isEmpty ? null : next),
+      ),
+    );
+    setState(() => _find = '');
+  }
+
+  CoordinateLaw? get _law {
+    final frame = widget.frameId;
+    if (frame == null) return null;
+    try {
+      return widget.editor.engine.lawOf(frame);
+    } on Object {
+      return null;
+    }
+  }
+
+  String _titleOf(String id) => widget.editor.document.frames[id]?.title ?? id;
+
+  /// The frames this series can be excluded by: not a measure, which holds
+  /// magnitudes rather than events; not the frame the series itself counts in,
+  /// whose facts include this very series; not one already excluded. Windowed,
+  /// with the remainder reported as a lower bound.
+  ({List<Frame> offers, int more}) _candidates() {
+    final needle = _find.trim().toLowerCase();
+    final window = cardPx(context, 'card.searchWindow').round();
+    final taken = _frames.toSet();
+    final offers = <Frame>[];
+    var more = 0;
+    for (final frame in widget.editor.document.frames.values) {
+      if (frame.id == widget.frameId || taken.contains(frame.id)) continue;
+      if (frame.traits.contains('measure')) continue;
+      final title = frame.title ?? frame.id;
+      if (needle.isNotEmpty && !title.toLowerCase().contains(needle)) continue;
+      offers.length < window ? offers.add(frame) : more += 1;
+    }
+    return (offers: offers, more: more);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final found = _candidates();
+    final law = _law;
+    final cycles = law?.cycles() ?? const <Cycle>[];
+    final cycle = _cycle.isEmpty ? (cycles.firstOrNull?.name ?? '') : _cycle;
+    final names = law?.cycleNames(cycle) ?? const <String>[];
+    final value = _value.isEmpty ? (names.firstOrNull ?? '') : _value;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final id in _frames)
+          cardWrap(context, [
+            Text('Except members of', style: labelStyle(context)),
+            cardLink(context, _titleOf(id), () => CardHost.of(context).openFrame(id)),
+            namedAction(
+              context,
+              'Remove',
+              glyph: '✕',
+              hint: 'The series keeps those days again.',
+              onTap: () => _put(frames: [for (final kept in _frames) if (kept != id) kept]),
+            ),
+          ]),
+        for (final selector in _selectors)
+          cardWrap(context, [
+            Text(
+              'Except every time that matches ${str(selector['cycle']) ?? ''}'
+              ' ${declaredText(selector['value'])}',
+              style: labelStyle(context),
+            ),
+            namedAction(
+              context,
+              'Remove',
+              glyph: '✕',
+              hint: 'The series keeps those times again.',
+              onTap: () => _put(
+                selectors: [
+                  for (final kept in _selectors)
+                    if (kept != selector) kept,
+                ],
+              ),
+            ),
+          ]),
+        cardWrap(context, [
+          for (final frame in found.offers)
+            namedAction(
+              context,
+              'Except members of ${frame.title ?? frame.id}',
+              hint: 'A live reference: what that frame holds is what is skipped.',
+              onTap: () => _put(frames: [..._frames, frame.id]),
+            ),
+          if (found.offers.isEmpty && _find.trim().isNotEmpty)
+            cardNote(context, 'No frame here is called that.'),
+          CardField(
+            value: _find,
+            hint: 'Find a frame to except…',
+            width: cardPx(context, 'card.narrowWidth') * 2,
+            onChanged: (text) => setState(() => _find = text),
+          ),
+        ]),
+        if (found.more > 0) cardNote(context, '+${found.more} more — narrow the find.'),
+        if (cycles.isNotEmpty)
+          cardWrap(context, [
+            Text('Except every time that matches', style: labelStyle(context)),
+            cardMenu(
+              context,
+              cycle,
+              {for (final declared in cycles) declared.name: declared.name},
+              (picked) => setState(() {
+                _cycle = picked;
+                _value = '';
+              }),
+            ),
+            if (names.isEmpty)
+              CardField(
+                value: value,
+                mono: true,
+                width: cardPx(context, 'card.narrowWidth'),
+                onChanged: (text) => setState(() => _value = text),
+              )
+            else
+              cardMenu(
+                context,
+                value,
+                {for (final name in names) name: name},
+                (picked) => setState(() => _value = picked),
+              ),
+            namedAction(
+              context,
+              'Except these',
+              hint: 'Read against this frame\'s own declarations, never a borrowed calendar.',
+              onTap: value.isEmpty
+                  ? null
+                  : () => _put(
+                      selectors: [
+                        ..._selectors,
+                        // The selector NAMES THE FRAME whose declarations it is
+                        // read against: "Saturday" is whatever that frame says
+                        // a Saturday is, and a sentence that did not say which
+                        // frame would be borrowing someone else's calendar.
+                        {'cycle': cycle, 'value': value, if (widget.frameId != null) 'frame': widget.frameId},
+                      ],
+                    ),
+            ),
+          ]),
       ],
     );
   }

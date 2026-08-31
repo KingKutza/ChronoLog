@@ -88,6 +88,42 @@ bool typingNow() {
       focused.findAncestorWidgetOfExactType<EditableText>() != null;
 }
 
+/// The binding text an action fires on. The lens digits are ONE setting holding
+/// several keys, so every `lensN` reads the same line; nothing else has to know
+/// that.
+String bindingOf(Chrome chrome, String action) =>
+    chrome.settings.text(action.startsWith('lens') ? 'keys.lensDigits' : 'keys.$action');
+
+/// A chord carries a modifier, so a person typing cannot produce it by accident.
+bool isChord(String binding) => binding.contains('+');
+
+/// THE ONE GUARD, AT THE ONE DISPATCHER.
+///
+/// Declining inside the callback was the defect: a `Shortcuts` map that MATCHES
+/// a key consumes the event whether or not the action then does anything, so
+/// the character never reached the field (Don, 8.28: "I cannot type numbers in
+/// the names of events"; recurred 8.31 on the document name box). An action
+/// that is not ENABLED is never invoked and the event is left unhandled, which
+/// is the difference between "the chrome chose not to act" and "the chrome
+/// never had a claim on this key".
+///
+/// So: while a field is taking keystrokes, this action is disabled for every
+/// bare binding and enabled for every chord. One condition, one place, every
+/// binding -- present and future -- covered by it.
+class ChromeAction extends Action<ChromeIntent> {
+  ChromeAction(this.chrome, this.run);
+
+  final Chrome chrome;
+  final Object? Function(Chrome chrome, String action) run;
+
+  @override
+  bool isEnabled(ChromeIntent intent) =>
+      !typingNow() || isChord(bindingOf(chrome, intent.action));
+
+  @override
+  Object? invoke(ChromeIntent intent) => run(chrome, intent.action);
+}
+
 /// Wraps the surface in the one map. Nothing below binds a key of its own.
 class ChromeKeyboard extends StatelessWidget {
   const ChromeKeyboard({super.key, required this.child});
@@ -111,22 +147,20 @@ class ChromeKeyboard extends StatelessWidget {
     return Shortcuts(
       shortcuts: shortcuts,
       child: Actions(
-        actions: {
-          ChromeIntent: CallbackAction<ChromeIntent>(
-            onInvoke: (intent) => _run(chrome, intent.action),
-          ),
-        },
-        child: Focus(autofocus: true, child: child),
+        actions: {ChromeIntent: ChromeAction(chrome, _run)},
+        // A SCOPE, not a bare focus node: when a field lets go of the keyboard
+        // the focus has to land back INSIDE this dispatcher, or the surface
+        // would be left with the shortcuts above the primary focus and every
+        // bare binding silently dead until something else was clicked.
+        child: FocusScope(autofocus: true, child: child),
       ),
     );
   }
 
+  /// What a binding does once [ChromeAction] has let it through. The typing
+  /// guard is NOT repeated here: it lives in exactly one place, on the action,
+  /// where declining also means not consuming.
   Object? _run(Chrome chrome, String action) {
-    // A bare key never steals a keystroke from a field.
-    final binding = chrome.settings.text(
-      action.startsWith('lens') ? 'keys.lensDigits' : 'keys.$action',
-    );
-    if (typingNow() && !binding.contains('+')) return null;
     final stage = chrome.stage;
     final focused = stage.focusedId;
     final view = stage.focusedViewTile;

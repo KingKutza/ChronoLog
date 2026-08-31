@@ -99,6 +99,11 @@ class Workspace {
   /// Surfaced, never swallowed.
   final JournalLoad load;
 
+  /// A move in flight. A relocation writes settings-adjacent state, and a
+  /// second listener callback arriving mid-write would ask for the same move
+  /// twice.
+  bool _moving = false;
+
   /// Boot. Every seam is a parameter, so a spec runs this exact assembly with a
   /// disk that is a map and a clock it moves.
   static Future<Workspace> open({
@@ -116,8 +121,12 @@ class Workspace {
       scheduler: scheduler,
       onRefusal: settings.refusals.add,
     );
+    // THE SETTINGS FILE IS READ FIRST, because one of its lines says where the
+    // document is saved. A store pointed at the app directory and moved
+    // afterwards would write a snapshot nobody asked for.
+    await bindSettings(session, settings);
     final store = DocumentStore(
-      dataRoot: root,
+      dataRoot: authoredPath(settings.text('document.saveAt'), root),
       files: files,
       scheduler: scheduler,
       // THE EMPTY DOCUMENT, from the core's own factory: nothing here invents a
@@ -191,7 +200,7 @@ class Workspace {
     );
     await _layTheThemes(session);
     await workspace._dressIn(settings.text('theme.name'));
-    settings.addListener(workspace._themeNamed);
+    settings.addListener(workspace._settingsChanged);
     editor.changes.addListener(workspace._framesChanged);
     return workspace;
   }
@@ -237,9 +246,30 @@ class Workspace {
     if (palette != null) theme.value = palette;
   }
 
-  void _themeNamed() {
+  /// ONE listener for the settings that are not arithmetic: the palette to wear
+  /// and the directory to save into. Both are authored text, both take effect
+  /// whether the words were typed in a card or into `chronolog.settings`.
+  void _settingsChanged() {
     final named = settings.text('theme.name');
     if (named.isNotEmpty && named != theme.value.name) _dressIn(named);
+    _moveDocument();
+  }
+
+  /// Where the document is saved is the user's to choose (Don, 8.31). Editing
+  /// the setting IS the move; the store's own journal machinery does the
+  /// writing, and a refusal -- a directory another chronolog already occupies --
+  /// is reported in the same place every settings refusal is read.
+  Future<void> _moveDocument() async {
+    if (_moving) return;
+    final wanted = authoredPath(settings.text('document.saveAt'), root);
+    if (wanted == store.journal.dataRoot) return;
+    _moving = true;
+    try {
+      final refused = await store.relocate(wanted);
+      if (refused != null) settings.refusals.add('document.saveAt: $refused');
+    } finally {
+      _moving = false;
+    }
   }
 
   void _framesChanged() => views.defaultFrames = defaultFramesOf(editor.document);
@@ -256,7 +286,7 @@ class Workspace {
   }
 
   void dispose() {
-    settings.removeListener(_themeNamed);
+    settings.removeListener(_settingsChanged);
     editor.changes.removeListener(_framesChanged);
     files.dispose();
     theme.dispose();

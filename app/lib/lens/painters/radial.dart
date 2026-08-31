@@ -450,7 +450,13 @@ abstract class CurvePainter extends LensPainter {
         markOf(scene, fact, weight, law, cascade).stroke()..strokeWidth = stroke,
       );
       if (scene.isSelected(fact)) paintSelection(canvas, shape);
-      hits.add((bounds: shape.getBounds(), shape: shape, fact: fact, identity: fact.identity));
+      hits.add((
+        bounds: shape.getBounds(),
+        shape: shape,
+        grab: null,
+        fact: fact,
+        identity: fact.identity,
+      ));
       labels.add((
         text: '${obj(fact.event.payload)?['title'] ?? ''}',
         angle: (from + to) / 2,

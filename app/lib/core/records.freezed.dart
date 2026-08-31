@@ -2473,14 +2473,15 @@ extension PositionPatterns on Position {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( CoordinatePosition value)?  coordinate,TResult Function( SelectorPosition value)?  selector,TResult Function( SpanPosition value)?  span,TResult Function( VoidPosition value)?  authoredVoid,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( CoordinatePosition value)?  coordinate,TResult Function( SelectorPosition value)?  selector,TResult Function( SpanPosition value)?  span,TResult Function( VoidPosition value)?  authoredVoid,TResult Function( PointPosition value)?  point,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case CoordinatePosition() when coordinate != null:
 return coordinate(_that);case SelectorPosition() when selector != null:
 return selector(_that);case SpanPosition() when span != null:
 return span(_that);case VoidPosition() when authoredVoid != null:
-return authoredVoid(_that);case _:
+return authoredVoid(_that);case PointPosition() when point != null:
+return point(_that);case _:
   return orElse();
 
 }
@@ -2498,14 +2499,15 @@ return authoredVoid(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( CoordinatePosition value)  coordinate,required TResult Function( SelectorPosition value)  selector,required TResult Function( SpanPosition value)  span,required TResult Function( VoidPosition value)  authoredVoid,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( CoordinatePosition value)  coordinate,required TResult Function( SelectorPosition value)  selector,required TResult Function( SpanPosition value)  span,required TResult Function( VoidPosition value)  authoredVoid,required TResult Function( PointPosition value)  point,}){
 final _that = this;
 switch (_that) {
 case CoordinatePosition():
 return coordinate(_that);case SelectorPosition():
 return selector(_that);case SpanPosition():
 return span(_that);case VoidPosition():
-return authoredVoid(_that);}
+return authoredVoid(_that);case PointPosition():
+return point(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -2519,14 +2521,15 @@ return authoredVoid(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( CoordinatePosition value)?  coordinate,TResult? Function( SelectorPosition value)?  selector,TResult? Function( SpanPosition value)?  span,TResult? Function( VoidPosition value)?  authoredVoid,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( CoordinatePosition value)?  coordinate,TResult? Function( SelectorPosition value)?  selector,TResult? Function( SpanPosition value)?  span,TResult? Function( VoidPosition value)?  authoredVoid,TResult? Function( PointPosition value)?  point,}){
 final _that = this;
 switch (_that) {
 case CoordinatePosition() when coordinate != null:
 return coordinate(_that);case SelectorPosition() when selector != null:
 return selector(_that);case SpanPosition() when span != null:
 return span(_that);case VoidPosition() when authoredVoid != null:
-return authoredVoid(_that);case _:
+return authoredVoid(_that);case PointPosition() when point != null:
+return point(_that);case _:
   return null;
 
 }
@@ -2543,13 +2546,14 @@ return authoredVoid(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( Json json)?  coordinate,TResult Function( Json json)?  selector,TResult Function( Json json)?  span,TResult Function()?  authoredVoid,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( Json json)?  coordinate,TResult Function( Json json)?  selector,TResult Function( Json json)?  span,TResult Function()?  authoredVoid,TResult Function( Object? source)?  point,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case CoordinatePosition() when coordinate != null:
 return coordinate(_that.json);case SelectorPosition() when selector != null:
 return selector(_that.json);case SpanPosition() when span != null:
 return span(_that.json);case VoidPosition() when authoredVoid != null:
-return authoredVoid();case _:
+return authoredVoid();case PointPosition() when point != null:
+return point(_that.source);case _:
   return orElse();
 
 }
@@ -2567,13 +2571,14 @@ return authoredVoid();case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( Json json)  coordinate,required TResult Function( Json json)  selector,required TResult Function( Json json)  span,required TResult Function()  authoredVoid,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( Json json)  coordinate,required TResult Function( Json json)  selector,required TResult Function( Json json)  span,required TResult Function()  authoredVoid,required TResult Function( Object? source)  point,}) {final _that = this;
 switch (_that) {
 case CoordinatePosition():
 return coordinate(_that.json);case SelectorPosition():
 return selector(_that.json);case SpanPosition():
 return span(_that.json);case VoidPosition():
-return authoredVoid();}
+return authoredVoid();case PointPosition():
+return point(_that.source);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -2587,13 +2592,14 @@ return authoredVoid();}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( Json json)?  coordinate,TResult? Function( Json json)?  selector,TResult? Function( Json json)?  span,TResult? Function()?  authoredVoid,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( Json json)?  coordinate,TResult? Function( Json json)?  selector,TResult? Function( Json json)?  span,TResult? Function()?  authoredVoid,TResult? Function( Object? source)?  point,}) {final _that = this;
 switch (_that) {
 case CoordinatePosition() when coordinate != null:
 return coordinate(_that.json);case SelectorPosition() when selector != null:
 return selector(_that.json);case SpanPosition() when span != null:
 return span(_that.json);case VoidPosition() when authoredVoid != null:
-return authoredVoid();case _:
+return authoredVoid();case PointPosition() when point != null:
+return point(_that.source);case _:
   return null;
 
 }
@@ -2848,6 +2854,71 @@ String toString() {
 
 
 
+
+/// @nodoc
+
+
+class PointPosition extends Position {
+  const PointPosition(this.source): super._();
+  
+
+ final  Object? source;
+
+/// Create a copy of Position
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$PointPositionCopyWith<PointPosition> get copyWith => _$PointPositionCopyWithImpl<PointPosition>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PointPosition&&const DeepCollectionEquality().equals(other.source, source));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(source));
+
+@override
+String toString() {
+  return 'Position.point(source: $source)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $PointPositionCopyWith<$Res> implements $PositionCopyWith<$Res> {
+  factory $PointPositionCopyWith(PointPosition value, $Res Function(PointPosition) _then) = _$PointPositionCopyWithImpl;
+@useResult
+$Res call({
+ Object? source
+});
+
+
+
+
+}
+/// @nodoc
+class _$PointPositionCopyWithImpl<$Res>
+    implements $PointPositionCopyWith<$Res> {
+  _$PointPositionCopyWithImpl(this._self, this._then);
+
+  final PointPosition _self;
+  final $Res Function(PointPosition) _then;
+
+/// Create a copy of Position
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? source = freezed,}) {
+  return _then(PointPosition(
+freezed == source ? _self.source : source ,
+  ));
+}
+
+
+}
 
 /// @nodoc
 mixin _$Document {

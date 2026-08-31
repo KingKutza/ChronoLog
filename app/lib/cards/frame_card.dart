@@ -24,6 +24,7 @@ import '../core/math.dart';
 import '../core/records.dart';
 import '../core/weight.dart';
 import '../edit/editor.dart';
+import '../lens/theme.dart';
 import 'boundary_series_editor.dart';
 import 'card_factory.dart';
 import 'card_chrome.dart';
@@ -159,7 +160,9 @@ class _FrameCardState extends State<FrameCard> {
       if (_handling['zone'] != 'auto') 'zone': _handling['zone'] == 'fill',
       if (_handling['strategic'] != 'auto') 'strategic': _handling['strategic'],
       if (_half.trim().isNotEmpty) 'halfDistance': _half.trim(),
-      if (_color.trim().isNotEmpty) 'color': _color.trim(),
+      // A COLOUR OR NOTHING. Text the one reader cannot read is refused at the
+      // field, in words, and never written here as though it were a colour.
+      if (parseColor(_color) != null) 'color': _color.trim(),
     }..removeWhere((_, value) => value == null);
     return built.isEmpty ? null : built;
   }

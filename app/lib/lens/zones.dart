@@ -18,6 +18,7 @@ import 'package:flutter/widgets.dart';
 import '../core/exact.dart';
 import '../core/projection.dart';
 import 'facts.dart';
+import 'marks.dart';
 import 'theme.dart';
 import 'tunables.dart';
 
@@ -35,8 +36,18 @@ String zoneSegment(Segment segment) {
 /// placement frame, the frames above that, and every group it belongs to -- so
 /// authoring it once on the group settles it in every lens at once. The shipped
 /// default is the tunable, which is what a document with nothing authored gets.
+///
+/// THE DAY IS ONE OF THESE (ruled 2026-08-31): "day start/end is an authored
+/// object -- a daily series -- whose handling says display-as-zone ... The
+/// setting dies." Nothing here knows what a day is; it draws the zone whatever
+/// authored object asked for one, and a document with no day object simply has
+/// no day zone.
 bool zoneFill(ProjectionEngine engine, Fact fact, Tunable? read) =>
-    switch (engine.authoredHandling(fact.event.id, 'zone', nearest: fact.relation.frame)) {
+    switch (engine.authoredHandling(
+      handlingSubject(engine, fact),
+      'zone',
+      nearest: fact.relation.frame,
+    )) {
       final bool authored => authored,
       _ => tunable(read, 'zone.default') > Rational.zero,
     };

@@ -121,6 +121,18 @@ class LinesPainter extends LensPainter {
       ? null
       : start + span * Rational.parse('${(at.dx - field.left) / field.width}');
 
+  /// A rail runs one way, so a pan does: the window moves by the share of its
+  /// span the drag crossed, and the height of the gesture is not shown moving,
+  /// because down this surface there is nowhere to go (ruled 2026-08-31 -- the
+  /// transform shows exactly what release commits).
+  @override
+  PanLanding panLanding(Offset shift) => (
+    days: field.width <= 0
+        ? Rational.zero
+        : -span * Rational.parse((shift.dx / field.width).toStringAsFixed(9)),
+    shown: Offset.zero,
+  );
+
   @override
   void paint(Canvas canvas, Size size) {
     hits.clear();

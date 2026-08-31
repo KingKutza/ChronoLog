@@ -4,6 +4,7 @@
 import 'package:chronolog/chrome/controls.dart';
 import 'package:chronolog/chrome/shell.dart';
 import 'package:chronolog/edit/editor.dart';
+import 'package:chronolog/host/file_picker.dart';
 import 'package:chronolog/lens/theme.dart';
 import 'package:chronolog/session/view_state.dart';
 import 'package:chronolog/stage/tile.dart';
@@ -73,4 +74,24 @@ Future<void> tapPart(WidgetTester tester, String text) async {
   await tester.pumpAndSettle();
   await tester.tap(finder, warnIfMissed: false);
   await tester.pumpAndSettle();
+}
+
+/// A host whose dialog ANSWERS, so the picked-a-path road can be walked without
+/// a dialog in a spec. The refusing seam covers the other road; this one covers
+/// what happens after a person chooses.
+class AnsweringFilePicker extends FilePicker {
+  const AnsweringFilePicker(this.answer);
+
+  final String answer;
+
+  @override
+  Future<PickedFile> open({String? initialPath, List<String> extensions = const []}) async =>
+      (path: answer, refusal: '');
+
+  @override
+  Future<PickedFile> save({
+    String? initialPath,
+    String? suggestedName,
+    List<String> extensions = const [],
+  }) async => (path: answer, refusal: '');
 }

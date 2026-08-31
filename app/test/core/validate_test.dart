@@ -201,17 +201,17 @@ List<Plant> plants(Corpus corpus) {
       'references a missing group',
     ),
     (
+      // N points are one point, n >= 0 (ruled 2026-08-31): one end is a pin
+      // and zero ends pierce without identifying, so END COUNT is never a
+      // defect. What stays a defect is an `ends` field that is not a list of
+      // ends at all.
       'relations',
       Relation(
         id: 'relation:p',
         type: 'staple',
-        extra: {
-          'ends': [
-            {'frame': frame},
-          ],
-        },
+        extra: {'ends': 'not a list'},
       ),
-      'must connect exactly two things',
+      'must carry its ends as a list',
     ),
     (
       'relations',

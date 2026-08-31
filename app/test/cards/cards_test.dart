@@ -20,6 +20,7 @@ import 'package:chronolog/core/records.dart';
 import 'package:chronolog/lens/theme.dart';
 import 'package:chronolog/session/files.dart';
 import 'package:chronolog/store/data_dir.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../core/corpus.dart';
@@ -78,13 +79,139 @@ void main() {
       expect(find.text('Save now'), findsOneWidget);
       expect(find.textContaining('Field notes'), findsWidgets);
       await tapPart(tester, 'Storage, boundary and layouts');
-      expect(fieldHinted('nowhere'), findsOneWidget, reason: 'the path defaults to the data root');
+      expect(
+        fieldHinted('nowhere'),
+        findsWidgets,
+        reason: 'both authored locations -- where it saves, where calendars are -- '
+            'hint the data root they fall back to',
+      );
     });
 
-    test('an unwritten ICS path is the data root; a written one is itself', () {
-      expect(icsPathOf('', 'C:/app'), 'C:/app');
-      expect(icsPathOf('  ', 'C:/app'), 'C:/app');
-      expect(icsPathOf(' D:/feeds/work.ics ', 'C:/app'), 'D:/feeds/work.ics');
+    // NOT BUILT (ISSUES.md, 8.31): "a card tile narrower than about 200px
+    // overflows its RenderFlex -- cardRow pairs the fixed card.labelWidth (124)
+    // with a Flexible". The stage hands a card whatever width is left over, so
+    // every width a tile can produce is a width the card must survive. The
+    // typing sweep dodged this by zooming its tile; under the NO SKIPS ruling
+    // (ISSUES.md, 8.31) the dodged failure gets its own light, and it stays red
+    // until the card layout is as space-driven as the bars are.
+    testWidgets('a card lays out at every width a tile can hand it', (tester) async {
+      final bench = await openCards(createEmptyWorkspaceDocument(title: 'Narrow'));
+      for (final width in [600.0, 400.0, 240.0, 180.0, 120.0]) {
+        await pumpCard(
+          tester,
+          cardChrome(bench.editor),
+          Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(width: width, child: const DocumentCard(root: 'nowhere')),
+          ),
+        );
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'the document card overflowed at ${width}px of tile width',
+        );
+      }
+    });
+
+    // ONE RESOLVER, TWO ARITIES. An unwritten path is the portable fallback; a
+    // written one is itself, whitespace and all removed. Generated, so the
+    // property is not three remembered strings.
+    test('an unwritten path is the fallback; a written one is itself, trimmed', () {
+      for (final seed in seeds(24)) {
+        final random = Random(seed);
+        final blank = ' ' * random.nextInt(4);
+        expect(authoredPath(blank, 'C:/app'), 'C:/app');
+        expect(authoredPath(null, 'C:/app'), 'C:/app');
+        final written = 'D:/feeds/${random.nextInt(1 << 20).toRadixString(36)}';
+        expect(authoredPath('$blank$written$blank', 'C:/app'), written);
+      }
+    });
+
+    // ICS LOCATIONS ARE A LIST (Don, 8.31: "only one such location"). The
+    // property is over generated lists of any length, with blank lines and
+    // padding thrown in, because a person's typing carries both.
+    test('ICS locations are every non-blank line, in order, and never one path', () {
+      for (final seed in seeds(24)) {
+        final random = Random(seed);
+        final wanted = [
+          for (var index = 0; index < random.nextInt(6); index += 1)
+            'D:/feeds/${random.nextInt(1 << 20).toRadixString(36)}',
+        ];
+        final typed = [
+          for (final path in wanted) ...[
+            if (random.nextBool()) ' ' * random.nextInt(3),
+            '${' ' * random.nextInt(3)}$path${' ' * random.nextInt(3)}',
+          ],
+        ].join(random.nextBool() ? '\r\n' : '\n');
+        expect(
+          authoredPaths(typed, 'C:/app'),
+          wanted.isEmpty ? ['C:/app'] : wanted,
+          reason: 'every line is a location and no line is lost',
+        );
+      }
+    });
+
+    testWidgets('the card offers a save location, and a picked folder becomes the setting', (
+      tester,
+    ) async {
+      final bench = await openCards(createEmptyWorkspaceDocument(title: 'Field notes'));
+      final chrome = cardChrome(bench.editor);
+      await pumpCard(
+        tester,
+        chrome,
+        DocumentCard(
+          root: 'nowhere',
+          // A dialog that ANSWERS. No dialog is raised in a spec; the seam is.
+          picker: const AnsweringFilePicker('D:/elsewhere/chronolog.chronolog'),
+        ),
+      );
+      // The save location is on the PRIMARY path, not behind the fold: "I don't
+      // appear to be able to set a save location" is a discoverability defect.
+      expect(fieldHinted('nowhere'), findsWidgets);
+      expect(chrome.settings.text('document.saveAt'), isEmpty, reason: 'beside the app by default');
+      await tapText(tester, 'Choose a folder…');
+      expect(
+        chrome.settings.text('document.saveAt'),
+        parentDirectory('D:/elsewhere/chronolog.chronolog'),
+        reason: 'the chosen FILE names the folder the document lives in',
+      );
+      // And back: an empty path is the portable default, reachable in one tap.
+      await tapText(tester, 'Beside the app');
+      expect(chrome.settings.text('document.saveAt'), isEmpty);
+    });
+
+    testWidgets('every ICS location the author writes is offered, not just the first', (
+      tester,
+    ) async {
+      // SYNCHRONOUS I/O ONLY. A widget test runs in a fake-async zone, where an
+      // awaited real file operation never completes; the listing this exercises
+      // is synchronous anyway, so the setup is too.
+      final root = Directory.systemTemp.createTempSync('chronolog-ics-locations-');
+      addTearDown(() {
+        try {
+          root.deleteSync(recursive: true);
+        } on FileSystemException {
+          // A directory the platform is still holding is cleanup, not a result.
+        }
+      });
+      final places = <String>[];
+      for (final area in ['work', 'home', 'shared']) {
+        final folder = Directory(storePath(root.path, area))..createSync(recursive: true);
+        File(storePath(folder.path, '$area.ics')).writeAsStringSync('');
+        places.add(folder.path);
+      }
+      final bench = await openCards(createEmptyWorkspaceDocument(title: 'Many feeds'));
+      final chrome = cardChrome(bench.editor);
+      chrome.settings.setText('document.icsPaths', places.join('\n'));
+      await pumpCard(tester, chrome, DocumentCard(root: root.path));
+      await tapPart(tester, 'Storage, boundary and layouts');
+      for (final area in ['work', 'home', 'shared']) {
+        expect(
+          find.text('Import $area.ics'),
+          findsOneWidget,
+          reason: 'the $area location is a location like any other',
+        );
+      }
     });
 
     test('a folder lists only its .ics files; a path that is not one lists nothing', () async {

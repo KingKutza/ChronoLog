@@ -56,31 +56,45 @@ Scene busyWorld() {
   return world;
 }
 
-MinimapPainter wavePainter({String lens = 'tactical', double clock = 9.5}) {
-  final world = busyWorld();
-  final engine = ProjectionEngine(world.document);
-  final projection = Projection.of(['calendar:a']);
-  final span = Rational.fromInt(14);
-  final range = slideRange(null, august, span, null);
-  return MinimapPainter(
-    field: accumulate(engine, projection, range, null),
-    law: LawContext(engine.lawOf('calendar:a')),
-    theme: shipped['paper']!,
-    focusDays: august,
-    spanDays: span,
-    nowDays: august + Rational(BigInt.from(3), BigInt.from(4)),
-    granularity: granularityFor(lens),
-    clock: clock,
-  );
-}
+MinimapPainter wavePainter({String lens = 'tactical', double clock = 9.5}) =>
+    painterOver(busyWorld(), (_) {}, clock, lens: lens);
 
 /// Four events in a rough cluster with a quiet fortnight either side: the shape
 /// Don was looking at when he asked why he could not simply count them.
-MinimapPainter clusterPainter({double clock = 9.5}) {
-  final world = Scene()..calendar('calendar:a');
-  for (final (day, hour) in [(17, 9), (17, 14), (18, 11), (19, 16)]) {
-    world.place('calendar:a', civil(2026, 8, day, hour), title: 'Aug $day at $hour');
-  }
+MinimapPainter clusterPainter({double clock = 9.5}) => painterOver(
+  Scene()..calendar('calendar:a'),
+  (world) {
+    for (final (day, hour) in [(17, 9), (17, 14), (18, 11), (19, 16)]) {
+      world.place('calendar:a', civil(2026, 8, day, hour), title: 'Aug $day at $hour');
+    }
+  },
+  clock,
+);
+
+/// TWO EVENTS A DAY, EVERY DAY: a real, sparse calendar -- the document Don
+/// opened on 8/31 and got "dots" from. Every neighbourhood here is countable, so
+/// this is exactly the shape the old regime drew with no dust at all and a
+/// dimmed envelope: a dot matrix.
+MinimapPainter sparsePainter({double clock = 9.5}) => painterOver(
+  Scene()..calendar('calendar:a'),
+  (world) {
+    for (var day = 1; day <= 30; day += 1) {
+      world.place('calendar:a', civil(2026, 8, day, 9), title: 'Aug $day, morning');
+      world.place('calendar:a', civil(2026, 8, day, 15), title: 'Aug $day, afternoon');
+    }
+  },
+  clock,
+);
+
+/// One painter over a world the caller fills: the two sparse shapes differ by
+/// their facts and nothing else.
+MinimapPainter painterOver(
+  Scene world,
+  void Function(Scene) fill,
+  double clock, {
+  String lens = 'tactical',
+}) {
+  fill(world);
   final engine = ProjectionEngine(world.document);
   final span = Rational.fromInt(14);
   final range = slideRange(null, august, span, null);
@@ -91,7 +105,7 @@ MinimapPainter clusterPainter({double clock = 9.5}) {
     focusDays: august,
     spanDays: span,
     nowDays: august + Rational(BigInt.from(3), BigInt.from(4)),
-    granularity: granularityFor('tactical'),
+    granularity: granularityFor(lens),
     clock: clock,
   );
 }
@@ -159,22 +173,77 @@ void main() {
   });
 
   testWidgets('four events in a cluster are four countable motes', (tester) async {
+    const size = Size(96, 720);
     final painter = clusterPainter();
-    await pumpAt(tester, painter, const Size(96, 720));
+    await pumpAt(tester, painter, size);
     expect(tester.takeException(), isNull);
-    // The regime, not just the picture: a handful of facts is drawn one by one,
-    // so there is no dust over them to count through.
-    expect(painter.grainsFor(const Size(96, 720)), isEmpty);
+    // THE COUNT IS ANCHORED: four facts, four marks, and not one mark that is
+    // not a fact. That is the whole reason a countable regime exists (Don,
+    // 2026-08-31: "if we were bothering to render countable dots why weren't we
+    // anchoring their count to anything obvious").
+    expect(painter.motesFor(size).length, 4);
+    // And the wave is still underneath them: the dust does not stand aside for
+    // a count (ruled 2026-08-31, "It was good now it is misrendering").
+    expect(painter.grainsFor(size), isNotEmpty);
     await expectLater(
       find.byKey(const ValueKey('minimap')),
       matchesGoldenFile('goldens/minimap-cluster.png'),
     );
   });
 
-  testWidgets('a busy stretch is dust and a quiet one is motes, on the same tile', (tester) async {
+  testWidgets('a sparse calendar is the WAVE, in dust, with its counts on it', (tester) async {
+    const size = Size(96, 720);
+    final painter = sparsePainter();
+    await pumpAt(tester, painter, size);
+    expect(tester.takeException(), isNull);
+    final grains = painter.grainsFor(size);
+    expect(
+      grains,
+      isNotEmpty,
+      reason:
+          'ISSUES (8.31, night): at one to three events a day every bin is countable, '
+          'the dust used to be suppressed there and the envelope dimmed with it — '
+          'which left "dots" where the ruled look is the dust wave.',
+    );
+    // The dust is a BAND, not a line: it stands off the axis, which is the wave
+    // being visible at all.
+    final axis = size.width / 2;
+    final reach = grains.map((grain) => (grain.at.dx - axis).abs()).reduce(max);
+    expect(
+      reach,
+      greaterThan(axis / 4),
+      reason: 'the dust hugs the axis, so there is no wave to see',
+    );
+    // AND NOT A DOTTED LINE. Sixty facts across this stretch cannot be drawn as
+    // sixty separable marks -- a mote is its own width of ink and they would
+    // land closer together than that -- so at this zoom the facts ARE the wave,
+    // and the count comes back when the view is zoomed in far enough to take it.
+    final placed = [
+      for (var bin = 0; bin < painter.field.bins; bin += 1) painter.field.presentAt(bin),
+    ].fold(0, (sum, count) => sum + count);
+    expect(placed, greaterThan(50), reason: 'the whole month is in the range');
+    expect(
+      painter.motesFor(size),
+      isEmpty,
+      reason:
+          'ISSUES (8.31, night): "render countable dots only if their count is '
+          'anchored to something obvious" — motes this close together are a dotted '
+          'line, not a count.',
+    );
+    await expectLater(
+      find.byKey(const ValueKey('minimap')),
+      matchesGoldenFile('goldens/minimap-sparse.png'),
+    );
+  });
+
+  testWidgets('busy or quiet, the tile is dust the whole way along', (tester) async {
+    const size = Size(1280, 140);
     final painter = wavePainter();
-    await pumpAt(tester, painter, const Size(1280, 140));
-    expect(painter.grainsFor(const Size(1280, 140)), isNotEmpty);
+    await pumpAt(tester, painter, size);
+    expect(painter.grainsFor(size), isNotEmpty);
+    // Both regimes are on this tile: a busy week and a quiet fortnight. The
+    // motes belong to the quiet end alone; the dust belongs to all of it.
+    expect(painter.motesFor(size), isNotEmpty);
   });
 
   test('NOTHING moves along time: only brightness and the width of the band do', () {

@@ -208,6 +208,92 @@ Rulings and additions (Don, 2026-08-25, ToDo design session):
   instance edits. ICS todo conversions are held until the data model is
   nailed down.
 
+Rulings and additions (Don, 2026-08-31, SENTENCES.md alignment rounds):
+- **The staple, stated in full** ("This is what a Staple has always ment"):
+  "A staple is a piece of *metal* existing in a third dimention that pirces
+  1 or more pages (objecst and frames) at 0 or more points causing all of
+  said points to be bound together through that third dimention. The word
+  staple is not casual." The one thing they do: "they always did one thing,
+  they said n points on objects or frames are one point. where a point is
+  of size 0, all, or some One Math value between and n is >=0." In plain
+  words: "what we are saying is this point right here is also that point
+  right there, this can be attaching an event to a calendar or the end of
+  an era to the begining of the next, to to the midpoint of itself or a
+  todo to and event or anything else."
+- **Sentences are one math**: "What we need is a declaritive vocabulary,
+  that is also just One Math. That means Anything One Math can express, our
+  sentences can and anything it cant the sentences can't. And it can never
+  be ambigous or unclear, and we should definatly have a hover to see One
+  Math, and a type Sentence, Type One Math and a drop down sentence option."
+- **Verbs have no mapping**: "verb can not be logic, if it is open. It
+  either has a definition in One Math or it dosn't, if it has a definition
+  that all verbs share, cool... if it has a definition or not per verb...
+  then it is an enum, you can not have one verb mean something and another
+  not without having a mapping and we already agreed to no mapping."
+- **Day edges are objects, not settings**: day start/end "should be an
+  event set to display as a zone and then capable of all the math
+  definition that staples give."
+
+- **The Dwarf Fortress parable** (Don, from the car): a sticky note saying
+  Dwarf Fortress, a sheet with the month of August, a sheet with the decade
+  starting 1st of Granite 505. "I pick out the point I started playing at
+  call it 3rd of Limestone 507 and when I started playing lets say 6:45
+  8.30.26 and the left of the sticky and I staple all three points together
+  because they are one point. And then I do the same with the end. Now If I
+  pick up any of the three I pick up all three, and If I project the event I
+  can see where it started and ended as well as its duration on both
+  calendars, and if I project one calendar I can see both the event and the
+  other calendar in that range as there is now a ratio to convert one to the
+  other." A second Don travels back and staples every session start and
+  stop: August is unchanged, but between 7 and 9 on the night of the 30th
+  "we see the DF calendar project peicewise," and with every session entered
+  the DF calendar projects "the peicewise passage of Charlotte Time."
+- **Precision, not type**: "a simple function a complex function and a
+  peicewise function are the same thing they differ in percision not in
+  type."
+- **The idea of ChronoLog**: "if we had a hypothetical paper pile of all the
+  events and todos and calendars and stapled them at all the points the
+  connect, that we could then treat that mess as a graph and we could
+  project that graph. that Is the idea of Chronolog."
+
+- **A staple only ever works one way** (Don, on the three questions): three
+  consecutive eras are two staples; one three-end staple is the Sundering —
+  "in the mithic age humans and elves got along then the sundering came and
+  they have kept seperat calendars since. they agree on era 1 and the
+  sundering when they split but nothing since." Stapling one end to the
+  beginning and end of two eras is "a broken time thing," equally legal.
+- **The null-point staple**: "Event is Stapled to A at point... and is
+  stapled to B at Null Point. There B is associated with A through event but
+  no point on B projects to a given point on A." Association without
+  projection; a nonlinear basis has "no clean translation" beyond its
+  anchors.
+- **Sigils for shared points** (Don's worked rendering): B.start at A', C.start
+  a day later, B.end stapled to C.end — "in intimate we would show B and C
+  where they land on A... and at the end of B a C shaped Sigle, a dotted
+  line (or not depending on settings) and on the start of C a B shaped
+  sigil. In the Line it would render as a loop over a line, in Tree it would
+  render as a triangle."
+
+- **No exceptions, no special cases, no extra riders** (Don, dissolving
+  succession): "A staple connects n points and says each is the same as the
+  other." Era ends are just points each basis has the power to define — "the
+  end of 1 could just as easily connect to three weeks into 2" — and where a
+  basis cannot label a point along the line, "the staple connects inclusivly
+  eg the end of 1 staples to all of 2."
+- **The boundary can be a frame**: the split "could also be a frame 3 years
+  long and be filled with the chronicals of the sundering war, and at zoom
+  out it shows a point 1 ends 2&3 begin and on zoom in it shows the
+  sundering as its own mini-era."
+- **A basis is any valid One Math expression**: "a linear equation a
+  non-linear equation a piecewise equeation, an all point, a loop, A
+  list/stack, or anything else." The worked era: "era 1 would be a peicewise
+  function, where we say y is 0 when x <=0, Y is x when x is >=0 && x<=1051,
+  then we would define 1 is year, year contains 14 months, that breakdown in
+  this order as this list of decimals."
+
+- **The trinity, restated for clarity** (Don): "No Enums, No Special cases,
+  No Hard coded values."
+
 ## Vocabulary (time-traveler framing, from ReadMe.txt and the pr-2 mockup)
 
 - **Prime Line / PrimeLine** — the canonical timeline; the one currently displayed as primary.

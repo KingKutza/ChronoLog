@@ -225,12 +225,18 @@ void _relation(Document document, Relation relation, String id, List<String> err
 }
 
 void _staple(Document document, Relation staple, String id, List<String> errors) {
-  // Exactly two: one end is an attribute pretending to be an edge, and three is
-  // a relation nobody has defined.
+  // N POINTS ARE ONE POINT, n >= 0. Zero ends is a staple that pierces pages
+  // without identifying any of their points, one is a pin that gives a point
+  // identity for other math to reference, and three is the sticky note stapled
+  // to two calendars at once. So the COUNT is never an error. What is not data
+  // is an `ends` field that is not a list of ends at all, or an end the document
+  // cannot read -- both of which silently shrink what the author wrote.
   final ends = staple.ends;
   final declared = staple.extra['ends'];
-  if (declared is! List || declared.length != 2 || ends.length != 2) {
-    errors.add('Staple $id must connect exactly two things');
+  if (declared != null && declared is! List) {
+    errors.add('Staple $id must carry its ends as a list');
+  } else if (declared is List && declared.length != ends.length) {
+    errors.add('Staple $id has an end that names nothing this document can reach');
   }
   for (final (index, end) in ends.indexed) {
     final label = 'Staple $id end ${index + 1}';
@@ -252,10 +258,10 @@ void _staple(Document document, Relation staple, String id, List<String> errors)
   // Two ends at the same position say nothing, and an object or series stapled
   // to itself says nothing either -- an object's own start-to-end span is its
   // duration magnitude, not a connection.
-  if (ends.length == 2 && ends[0].id == ends[1].id) {
-    final (first, second) = (ends[0], ends[1]);
-    if (first is FrameEnd && second is FrameEnd) {
-      if (first.position == second.position) {
+  if (ends.length > 1 && ends.every((end) => end.id == ends.first.id)) {
+    final first = ends.first;
+    if (first is FrameEnd) {
+      if (ends.every((end) => end is FrameEnd && end.position == first.position)) {
         errors.add('Staple $id connects one point to itself');
       }
     } else {

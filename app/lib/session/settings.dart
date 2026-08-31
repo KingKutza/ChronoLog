@@ -10,13 +10,88 @@
 // A refused expression never takes effect: the last good value stays and the
 // refusal is reported in the law's own vocabulary.
 
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../core/exact.dart';
 import '../core/math.dart';
 import '../lens/tunables.dart';
 
-class Settings extends ChangeNotifier {
+/// A notifier that can be told something DURING a frame.
+///
+/// A change authored from inside a build -- a card reading a setting that
+/// refuses, an edit committed while a widget is laying out -- would mark its own
+/// listeners dirty in the middle of the frame, which Flutter refuses outright.
+/// The FACT is already true; only the repaint waits for the frame to end.
+/// Outside a frame, and in a run with no binding at all, this is an ordinary
+/// synchronous notification.
+///
+/// ONE implementation for every notifier in the program that a build can reach:
+/// the settings layer and the edit service both wear it.
+mixin FrameSafeNotifier on ChangeNotifier {
+  bool _announcing = false;
+
+  @override
+  void notifyListeners() {
+    if (_phase() != SchedulerPhase.persistentCallbacks) return super.notifyListeners();
+    if (_announcing) return;
+    _announcing = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _announcing = false;
+      if (hasListeners) super.notifyListeners();
+    });
+  }
+
+  static SchedulerPhase? _phase() {
+    try {
+      return SchedulerBinding.instance.schedulerPhase;
+    } on Object {
+      return null;
+    }
+  }
+}
+
+/// A list that ANNOUNCES. A refusal is news, so it has to arrive like news: the
+/// cards that display refusals update the moment one is pushed rather than on
+/// whatever rebuild happens to come next.
+///
+/// Every mutation route goes through [length] and `[]=`, which is what
+/// [ListBase] builds `add`, `addAll`, `clear` and the rest out of, so no caller
+/// can write into it unheard.
+class AnnouncedList<T> extends ListBase<T> {
+  AnnouncedList(this.onChanged);
+
+  final void Function() onChanged;
+  final List<T> _lines = [];
+
+  @override
+  int get length => _lines.length;
+
+  @override
+  set length(int value) {
+    _lines.length = value;
+    onChanged();
+  }
+
+  @override
+  T operator [](int index) => _lines[index];
+
+  @override
+  void operator []=(int index, T value) {
+    _lines[index] = value;
+    onChanged();
+  }
+
+  @override
+  void add(T element) {
+    _lines.add(element);
+    onChanged();
+  }
+}
+
+class Settings extends ChangeNotifier with FrameSafeNotifier {
   Settings({
     List<Map<String, String>> defaults = const [],
     List<Map<String, String>> texts = const [],
@@ -36,8 +111,9 @@ class Settings extends ChangeNotifier {
   final Map<String, Object> _memo = {};
 
   /// What the last read of the settings file, or the last rejected edit, had
-  /// to refuse. Reported, never fatal.
-  final List<String> refusals = [];
+  /// to refuse. Reported, never fatal -- and ANNOUNCED, so a card showing a
+  /// refusal shows it the instant it is pushed and not on its next rebuild.
+  late final List<String> refusals = AnnouncedList<String>(notifyListeners);
 
   Iterable<String> get keys => shipped.keys;
 

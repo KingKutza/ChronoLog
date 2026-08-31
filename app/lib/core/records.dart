@@ -19,9 +19,16 @@
 // position form" a shape the type system cannot express wrongly, which is why
 // the ~60 lines that used to check it are absent rather than ported.
 //
-// DIRECTIONAL, NOT TYPED. A staple is two ends IN ORDER. Direction is the
-// order. There is no scope gate anywhere below deciding which two things a
-// connection may join, and `kind` is carried as open data.
+// N-ARY, DIRECTIONAL, NOT TYPED. The staple, in the owner's words: "a piece of
+// metal existing in a third dimension that pierces 1 or more pages (objects and
+// frames) at 0 or more points causing all of said points to be bound together
+// through that third dimension." It does ONE thing: "n points on objects or
+// frames are one point", n >= 0, where a point is of size 0, all, or some one
+// math value between. So `ends` is a LIST OF ANY LENGTH -- one end is a pin that
+// gives a point identity, two is the familiar pair, three is the sticky note
+// stapled to two calendars -- and direction is the authored order of that list.
+// There is no scope gate anywhere below deciding which things a connection may
+// join, and `kind` is carried as open data.
 //
 // COORDINATES BELONG TO THE COORDINATE-LAW LAYER, and there is exactly one
 // coordinate type: that layer's [Coordinate]. Nothing here mints a second one.
@@ -341,9 +348,12 @@ abstract class Relation with _$Relation implements DocumentRecord {
 
   bool get isStaple => type == 'staple';
 
-  /// This staple's two ends, IN ORDER. An end naming nothing resolvable is not
-  /// an end and does not appear, which is how "exactly two" stays a countable
-  /// claim rather than a shape check on each element.
+  /// This staple's n ends, IN ORDER -- the n points it says are one point. Any
+  /// length is legal data: zero pierces pages without identifying a point, one
+  /// is a pin, and three or more is the sticky stapled to several sheets at
+  /// once. An end naming nothing resolvable is not an end and does not appear,
+  /// which is how the count stays a countable claim rather than a shape check
+  /// on each element.
   List<StapleEnd> get ends {
     final raw = extra['ends'];
     if (raw is! List) return const [];
@@ -405,7 +415,14 @@ sealed class StapleEnd with _$StapleEnd {
 
   /// The keys each end form names for itself; anything else on an end is
   /// preserved as that end's own unknown field.
-  static const Set<String> _frameKeys = {'frame', 'coordinate', 'selector', 'span', 'void'};
+  static const Set<String> _frameKeys = {
+    'frame',
+    'coordinate',
+    'selector',
+    'span',
+    'void',
+    'point',
+  };
   static const Set<String> _objectKeys = {'object', 'point', 'offset'};
   static const Set<String> _seriesKeys = {'series'};
 
@@ -446,8 +463,15 @@ sealed class StapleEnd with _$StapleEnd {
 /// authored claim that there is nothing here, which is a different claim from an
 /// absent staple: the absence says only that nobody has said yet.
 ///
-/// Every case stores the raw map the file carries, under the key the file uses.
-/// The typed accessors below parse it on demand.
+/// A POINT is the frame's own extent spoken about: "the beginning", "the end",
+/// "all of it", "three weeks in". Ruled 8.31 -- "the end of 1 could just as
+/// easily connect to three weeks into 2" -- so a frame end says which of its own
+/// points it touches the same way an object end always could, and the value is a
+/// ONE MATH expression over that frame's extent rather than a vocabulary of
+/// names. `frame_points.dart` reads it; this layer only carries it.
+///
+/// Every case stores the raw value the file carries, under the key the file
+/// uses. The typed accessors below parse it on demand.
 @Freezed(fromJson: false, toJson: false)
 sealed class Position with _$Position {
   const Position._();
@@ -456,8 +480,17 @@ sealed class Position with _$Position {
   const factory Position.span(Json json) = SpanPosition;
   const factory Position.authoredVoid() = VoidPosition;
 
+  /// A point of the frame's own extent. [source] is whatever the file carries
+  /// under `point` -- a string expression for a point of size zero, or a map of
+  /// `from`/`to` expressions for a sized one -- kept verbatim so a spelling this
+  /// build cannot evaluate still round-trips.
+  const factory Position.point(Object? source) = PointPosition;
+
   static Position? tryFrom(Json json) {
     if (json['void'] == true) return const VoidPosition();
+    if (json.containsKey('point') && json['point'] != null) {
+      return PointPosition(json['point']);
+    }
     return switch (json) {
       {'selector': final Map it} => SelectorPosition(Json.from(it)),
       {'span': final Map it} => SpanPosition(Json.from(it)),
@@ -470,6 +503,7 @@ sealed class Position with _$Position {
     CoordinatePosition(:final json) => {'coordinate': json},
     SelectorPosition(:final json) => {'selector': json},
     SpanPosition(:final json) => {'span': json},
+    PointPosition(:final source) => {'point': source},
     VoidPosition() => const {'void': true},
   };
 
@@ -495,6 +529,12 @@ sealed class Position with _$Position {
   /// read under the frame's OWN law, which is what makes a name mean anything.
   Json? get selector => switch (this) {
     SelectorPosition(:final json) => json,
+    _ => null,
+  };
+
+  /// The authored point expression, exactly as the file carries it, or null.
+  Object? get point => switch (this) {
+    PointPosition(:final source) => source,
     _ => null,
   };
 }

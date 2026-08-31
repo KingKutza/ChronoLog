@@ -11,6 +11,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../chrome/controls.dart';
 import '../core/records.dart';
 import 'card_chrome.dart';
 
@@ -68,6 +69,7 @@ class ConnectionPicker extends StatefulWidget {
     this.exclude,
     this.frames = true,
     this.objects = true,
+    this.onCreate,
   });
 
   final Document document;
@@ -75,6 +77,14 @@ class ConnectionPicker extends StatefulWidget {
   final String hint;
   final String? exclude;
   final bool frames, objects;
+
+  /// Makes what nothing is called yet, by kind and by the typed name.
+  ///
+  /// ISSUES (8.31): "Typing a frame name that does not exist offers to
+  /// instantiate it, opening a second card to set that frame up", and
+  /// SENTENCES.md rules the same for objects. Absent, a name nothing wears is
+  /// reported and nothing is offered -- stated, never a dead click.
+  final void Function(String kind, String name)? onCreate;
 
   @override
   State<ConnectionPicker> createState() => _ConnectionPickerState();
@@ -106,7 +116,25 @@ class _ConnectionPickerState extends State<ConnectionPicker> {
         if (!found.scanned)
           cardNote(context, 'Type to find one — the whole document is never listed.')
         else if (found.hits.isEmpty)
-          cardNote(context, 'Nothing here is called that.')
+          // A NAME NOTHING WEARS IS AN OFFER, not a dead end: making it is one
+          // tap, and the thing made opens its own card to be set up.
+          cardWrap(context, [
+            cardNote(context, 'Nothing here is called that.'),
+            if (widget.onCreate case final void Function(String, String) make)
+              for (final kind in [
+                if (widget.frames) 'frame',
+                if (widget.objects) 'object',
+              ])
+                namedAction(
+                  context,
+                  'Create $kind "${_query.trim()}"…',
+                  hint: 'Makes it and opens its card.',
+                  onTap: () {
+                    make(kind, _query.trim());
+                    setState(() => _query = '');
+                  },
+                ),
+          ])
         else
           cardWrap(context, [
             for (final hit in found.hits)

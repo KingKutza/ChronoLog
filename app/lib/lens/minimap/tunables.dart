@@ -42,7 +42,14 @@ const Map<String, String> minimapTunableDefaults = {
   // The kernel is a triangle over this many bins: neighbouring activity adds and
   // the crest saturates, which is what makes the result a wave rather than a
   // comb of spikes.
-  'minimap.smooth': '11',
+  //
+  // NARROWED FROM ELEVEN (2026-08-31). A sparse calendar's own occupancy is
+  // around half its bins -- two events a day, four bins to the day -- and a
+  // kernel eleven bins wide sums that straight past saturation: every crest at
+  // full reach, from the first event to the last, which is a SLAB and not a
+  // wave. Five bins is narrow enough that a day's events read as one swell and
+  // the gaps between days read as troughs, at every density.
+  'minimap.smooth': '5',
   // Where saturation begins: the kernel ADDS neighbouring activity, and this is
   // the share of the reach one bin's full level claims once summed.
   'minimap.gain': '0.4',
@@ -93,23 +100,29 @@ const Map<String, String> minimapTunableDefaults = {
   'minimap.breathe': '0.03',
   'minimap.breatheSeconds': '56',
 
-  // --- Countable versus dense -----------------------------------------------
-  // Up to this many placed facts within this many pixels, every fact is drawn
-  // as its own mote and the count is READ rather than estimated. Above it they
-  // coalesce into dust under the same envelope.
+  // --- The anchored count ----------------------------------------------------
+  // Up to this many placed facts within this many pixels, every fact ALSO gets
+  // its own mote and the count is READ rather than estimated. Above it there are
+  // no motes: a count nobody can take is noise (ruled 2026-08-31).
+  //
+  // The dust does NOT stand aside for them, and there is no quiet scale on the
+  // envelope any more: a sparse calendar is a low wave, not a bare tile with
+  // dots on it. The motes ride ON that wave.
   'minimap.countable': '6',
   'minimap.countSpan': '24',
-  // The envelope steps back where motes are talking, so four marks are not
-  // swamped by the band that describes them.
-  'minimap.quietScale': '0.3',
   // A mote's size is its composed display weight, floored at a pixel and capped
-  // so one heavy object cannot become a blot.
-  'minimap.moteSize': '6',
-  'minimap.moteMax': '12',
-  'minimap.moteHalo': '1.5',
-  // How far across the axis a mote may be pushed by its own stable hash, so
-  // near-simultaneous facts stay separable instead of stacking into one dot.
-  'minimap.moteSpread': '14',
+  // so one heavy object cannot become a blot. THE SIZE DECIDES THE THRESHOLD as
+  // much as the count above does: a mote plus its halo is the ink one fact
+  // costs, and the painter admits no more of them into a neighbourhood than fit
+  // across it as separate marks.
+  'minimap.moteSize': '4',
+  'minimap.moteMax': '8',
+  'minimap.moteHalo': '1',
+  // How far IN FROM THE CREST a mote may be pushed by its own stable hash, as a
+  // share of the crest, so near-simultaneous facts stay separable instead of
+  // stacking into one dot. At zero every mote sits exactly on the line; at one
+  // the band is fair game all the way to the axis.
+  'minimap.moteSpread': '0.7',
 
   // --- The window box -------------------------------------------------------
   'minimap.windowWash': '0.07',

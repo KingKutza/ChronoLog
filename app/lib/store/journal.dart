@@ -9,7 +9,8 @@
 // editing never rewrites the document, it appends the ops that changed it. The
 // whole document is written on exactly three occasions -- establishing a file
 // that does not exist yet, compaction, and the owner deliberately replacing the
-// document -- and none of them is autosave.
+// document, which is also how a MOVE to a chosen save location writes its first
+// snapshot -- and none of them is autosave.
 //
 // ZERO DOMAIN KNOWLEDGE. An op names a map and a record id and either assigns
 // the whole record or deletes it, uniformly for all seven maps. That uniformity
@@ -152,11 +153,16 @@ Object? _decode(List<int> bytes) {
 /// read, which is what keeps the live document in exactly one place -- the
 /// master isolate's store above this.
 class JournalStore {
+  /// [continuing] is where this pair's numbering starts. It matters in exactly
+  /// one case: a document MOVED to a new directory carries its sequence
+  /// forward, so the history reads as one lineage rather than restarting at one.
   JournalStore({
     required this.dataRoot,
     this.files = const IoStoreFiles(),
     this.scheduler = const WallScheduler(),
-  }) : snapshotFile = storePath(dataRoot, snapshotFileName),
+    int continuing = 0,
+  }) : _seq = continuing,
+       snapshotFile = storePath(dataRoot, snapshotFileName),
        journalFile = storePath(dataRoot, journalFileName),
        _stateFile = storePath(dataRoot, journalStateFileName);
 
@@ -167,7 +173,7 @@ class JournalStore {
   final String journalFile;
   final String _stateFile;
 
-  int _seq = 0;
+  int _seq;
   int _entryCount = 0;
 
   /// The sequence number of the last entry written. Monotone across a
@@ -176,6 +182,14 @@ class JournalStore {
 
   /// Entries still in the journal file, folded into the snapshot by a compaction.
   int get entryCount => _entryCount;
+
+  /// Does a chronolog already live here? Asked before a MOVE: a location
+  /// another document occupies is not somewhere this one may be written, and
+  /// with no confirmation dialogs anywhere the honest answer is to refuse and
+  /// say so rather than to overwrite and hope.
+  Future<bool> occupied() async =>
+      await files.read(snapshotFile) != null ||
+      (await files.read(journalFile) ?? const <int>[]).isNotEmpty;
 
   /// Snapshot plus replay.
   ///

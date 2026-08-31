@@ -25,6 +25,9 @@ import 'package:chronolog/lens/view_tile.dart';
 import 'package:chronolog/session/lens_catalog.dart';
 import 'package:chronolog/stage/layout_tree.dart';
 import 'package:chronolog/stage/tile.dart';
+import 'package:chronolog/store/data_dir.dart';
+import 'package:chronolog/store/document_store.dart';
+import 'package:chronolog/store/journal.dart';
 import 'package:chronolog/stage/stage_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -305,5 +308,109 @@ void main() {
     await pumpWorkspace(tester, workspace);
     expect(findNode(workspace.stage.root, card), isNull);
     expect(find.textContaining('No tile named'), findsNothing);
+  });
+
+  // --- THE SAVE LOCATION IS AUTHORED (ISSUES 8.31, "Save location") ---------
+  //
+  // Don: "I don't appear to be able to set a save location." It is a setting, so
+  // it is read from `chronolog.settings` before the store is pointed anywhere,
+  // and writing it later MOVES the document. The card and the file are one road.
+
+  test('a save location written in the settings file is where the document is established', () async {
+    final root = resolveDataRoot(explicit: _root);
+    const elsewhere = 'D:elsewhere';
+    final files = MemoryFiles()
+      ..write(
+        storePath(root, 'chronolog.settings'),
+        jsonEncode({'document.saveAt': elsewhere}),
+      );
+    final workspace = await Workspace.open(
+      dataRoot: _root,
+      files: files,
+      scheduler: ManualScheduler(),
+      picker: const RefusedFilePicker('no dialog in a spec'),
+    );
+    addTearDown(workspace.dispose);
+    expect(workspace.store.journal.dataRoot, elsewhere);
+    expect(
+      files.written.keys.where((path) => path.startsWith(elsewhere)),
+      isNotEmpty,
+      reason: 'the document was established at the chosen place, not beside the app',
+    );
+    expect(
+      files.written.keys.any((path) => path == storePath(root, snapshotFileName)),
+      isFalse,
+      reason: 'no phantom document beside the app the author did not ask for',
+    );
+  });
+
+  test('writing the setting afterwards moves the document, and keeps saving there', () async {
+    final root = resolveDataRoot(explicit: _root);
+    final files = MemoryFiles();
+    final workspace = await Workspace.open(
+      dataRoot: _root,
+      files: files,
+      scheduler: ManualScheduler(),
+      picker: const RefusedFilePicker('no dialog in a spec'),
+    );
+    addTearDown(workspace.dispose);
+    expect(workspace.store.journal.dataRoot, root, reason: 'beside the app by default');
+    workspace.editor.commit(
+      'Rename document',
+      workspace.editor.document.copyWith(
+        meta: {...workspace.editor.document.meta, 'title': 'Moved'},
+      ),
+    );
+
+    const chosen = 'D:chosen';
+    workspace.settings.setText('document.saveAt', chosen);
+    // The move is asynchronous the way every write here is; nothing sleeps.
+    for (var turn = 0; turn < 8; turn += 1) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(workspace.store.journal.dataRoot, chosen);
+    final moved = await JournalStore(dataRoot: chosen, files: files).load();
+    expect(moved.document.meta['title'], 'Moved', reason: 'the document travelled whole');
+  });
+
+  test('a save location another chronolog occupies is refused in words, not overwritten', () async {
+    final files = MemoryFiles();
+    const occupied = 'D:occupied';
+    // Somebody else's document, sitting where this one is about to be sent.
+    final sitting = DocumentStore(
+      dataRoot: occupied,
+      files: files,
+      scheduler: ManualScheduler(),
+    );
+    await sitting.load();
+    sitting.commit('Theirs', sitting.document.put('meta', 'title', 'Theirs'));
+    await sitting.save(force: true);
+
+    final workspace = await Workspace.open(
+      dataRoot: _root,
+      files: files,
+      scheduler: ManualScheduler(),
+      picker: const RefusedFilePicker('no dialog in a spec'),
+    );
+    addTearDown(workspace.dispose);
+    workspace.settings.setText('document.saveAt', occupied);
+    for (var turn = 0; turn < 8; turn += 1) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(
+      workspace.store.journal.dataRoot,
+      resolveDataRoot(explicit: _root),
+      reason: 'a refused move moved nothing',
+    );
+    expect(
+      workspace.settings.refusals.where((line) => line.startsWith('document.saveAt')),
+      isNotEmpty,
+      reason: 'the words are reported where every settings refusal is read',
+    );
+    expect(
+      (await JournalStore(dataRoot: occupied, files: files).load()).document.meta['title'],
+      'Theirs',
+      reason: 'the document already there is untouched',
+    );
   });
 }

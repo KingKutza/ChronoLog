@@ -12,7 +12,6 @@
 // are laws rather than code paths: no caller can commit around them.
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../core/document.dart';
 import '../core/exact.dart';
@@ -22,6 +21,7 @@ import '../core/projection.dart';
 import '../core/records.dart';
 import '../core/series_heal.dart';
 import '../core/staples.dart';
+import '../session/settings.dart';
 import '../store/document_store.dart';
 import 'cascades.dart';
 import 'drafts.dart';
@@ -45,7 +45,7 @@ const Map<String, String> editTunableDefaults = {
 /// One committed edit: its label, what it did, and what undoes it.
 typedef Edit = ({String label, List<Op> ops, List<Op> inverse});
 
-class Editor extends ChangeNotifier {
+class Editor extends ChangeNotifier with FrameSafeNotifier {
   Editor(this.store, {this.settings}) : engine = ProjectionEngine(store.document);
 
   final DocumentStore store;
@@ -183,36 +183,11 @@ class Editor extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Telling the surface, safely.
-  ///
-  /// An edit made WHILE THE TREE IS BUILDING -- a card settling its draft as it
-  /// mounts or unmounts -- would otherwise mark an ancestor dirty in the middle
-  /// of the frame, which Flutter refuses outright. The DOCUMENT is already
-  /// changed, so nothing reads a stale value; only the repaint waits for the
-  /// frame to end.
-  ///
-  /// Outside a frame this is an ordinary synchronous notification, and in a run
-  /// with no binding at all there is no frame to be in the middle of.
-  @override
-  void notifyListeners() {
-    if (_phase() != SchedulerPhase.persistentCallbacks) return super.notifyListeners();
-    if (_announcing) return;
-    _announcing = true;
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      _announcing = false;
-      if (hasListeners) super.notifyListeners();
-    });
-  }
-
-  bool _announcing = false;
-
-  static SchedulerPhase? _phase() {
-    try {
-      return SchedulerBinding.instance.schedulerPhase;
-    } on Object {
-      return null;
-    }
-  }
+  /// Telling the surface, safely, is [FrameSafeNotifier]'s job -- an edit made
+  /// WHILE THE TREE IS BUILDING (a card settling its draft as it mounts or
+  /// unmounts) announces after the frame instead of marking an ancestor dirty
+  /// inside it. The document is already changed either way; only the repaint
+  /// waits.
 
   /// Delete an object. Its placements, memberships, containment edges, staples
   /// and the overrides that named it travel with it, inside this one entry.

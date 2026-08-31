@@ -44,8 +44,23 @@ const String wallTime = 'frame:wall-time';
 /// A rail: x is days from the focus at the centre, y carries nothing. Every fact
 /// in the visible window becomes a hit DURING paint, which is the contract every
 /// real painter keeps.
+///
+/// It keeps the other two contracts as well, because the specs below are about
+/// them: a mark records its BODY as the shape a click means and a narrow strip
+/// as the region a drag grabs, and the surface bleeds one day past its own edge
+/// so a pan of less than that is previewed by the transform instead of
+/// committed.
 class RailPainter extends LensPainter {
   RailPainter(super.scene);
+
+  @override
+  Offset get bleed => const Offset(dayPixels, 0);
+
+  @override
+  PanLanding panLanding(Offset shift) => (
+    days: days(surface.width / 2 - shift.dx) - days(surface.width / 2),
+    shown: Offset(shift.dx, 0),
+  );
 
   Rational days(double dx) =>
       scene.focusDays + Rational.parse(((dx - surface.width / 2) / dayPixels).toStringAsFixed(9));
@@ -71,7 +86,15 @@ class RailPainter extends LensPainter {
       final at = project(fact.day);
       if (at == null) continue;
       final bounds = Rect.fromCenter(center: at, width: dayPixels / 2, height: dayPixels / 2);
-      hits.add((bounds: bounds, shape: null, fact: fact, identity: fact.identity));
+      final grab = Path()
+        ..addRect(Rect.fromLTWH(bounds.left, bounds.top, dayPixels / 8, bounds.height));
+      hits.add((
+        bounds: bounds,
+        shape: Path()..addRect(bounds),
+        grab: grab,
+        fact: fact,
+        identity: fact.identity,
+      ));
       canvas.drawRect(bounds, Paint()..color = scene.theme.ink);
     }
   }
@@ -106,7 +129,23 @@ Future<Bed> _layOut(String lens) async {
   return (editor: bench.editor, settings: settings, views: views, stage: Stage(), root: bench.root);
 }
 
-Future<void> pump(WidgetTester tester, Bed bed) async {
+/// Every card this surface was asked to open, in order. A card opener is all
+/// the lens layer knows about cards, so recording the calls proves the PATH
+/// without dragging the card layer into a pointer spec.
+final List<String> opened = [];
+
+TileSpec _recordingCard(String id) {
+  opened.add(id);
+  return TileSpec(
+    id: 'card:$id',
+    type: 'card',
+    klass: 'card',
+    title: 'Card',
+    build: (_) => const SizedBox.shrink(),
+  );
+}
+
+Future<void> pump(WidgetTester tester, Bed bed, {bool cards = false}) async {
   final tile = ViewTile(
     tileId: tileId,
     surface: (
@@ -114,7 +153,7 @@ Future<void> pump(WidgetTester tester, Bed bed) async {
       settings: bed.settings,
       views: bed.views,
       stage: bed.stage,
-      objectCard: null,
+      objectCard: cards ? _recordingCard : null,
       frameCard: null,
     ),
   );
@@ -141,12 +180,15 @@ Future<void> pump(WidgetTester tester, Bed bed) async {
   );
 }
 
-RailPainter railOf(WidgetTester tester) =>
-    tester
-            .widgetList<CustomPaint>(find.byType(CustomPaint))
-            .firstWhere((paint) => paint.painter is RailPainter)
-            .painter
-        as RailPainter;
+/// The lens under the tile, through whatever the bleed wrapped it in: a surface
+/// that draws past its own edge is handed to the render box inside a [BledPainter],
+/// and the specs are about the lens either way.
+RailPainter railOf(WidgetTester tester) => tester
+    .widgetList<CustomPaint>(find.byType(CustomPaint))
+    .map((paint) => paint.painter)
+    .map((painter) => painter is BledPainter ? painter.lens : painter)
+    .whereType<RailPainter>()
+    .first;
 
 DragGhost? ghostOf(WidgetTester tester) => tester
     .widgetList<CustomPaint>(find.byType(CustomPaint))
@@ -185,10 +227,22 @@ Future<void> markAt(Bed bed, WidgetTester tester) async {
   await tester.pump();
 }
 
+/// The offset the pan transform is holding right now: what the eye is being
+/// shown over and above what the painter drew.
+Offset panOf(WidgetTester tester) {
+  final transform = tester
+      .widgetList<Transform>(find.descendant(of: find.byType(ViewTile), matching: find.byType(Transform)))
+      .first
+      .transform
+      .getTranslation();
+  return Offset(transform.x, transform.y);
+}
+
 void main() {
   setUp(() {
     lensPainters.clear();
     lensWidgets.clear();
+    opened.clear();
     registerLensPainter('intimate', RailPainter.new);
   });
 
@@ -359,15 +413,113 @@ void main() {
 
   testWidgets('two clicks inside the window are one double-click, not a clear', (tester) async {
     final bed = await layOut(tester, 'intimate');
-    await pump(tester, bed);
+    await pump(tester, bed, cards: true);
     await markAt(bed, tester);
     final mark = railOf(tester).hits.single.bounds.center;
-    final identity = railOf(tester).hits.single.identity;
+    final hit = railOf(tester).hits.single;
     await clickAt(tester, mark, Duration.zero);
     await clickAt(tester, mark, const Duration(milliseconds: 40));
-    // The second click opened the object rather than clearing it. With no card
-    // surface wired the open is a no-op, and the selection is what it proves.
-    expect(railOf(tester).scene.selection, {identity});
+    // The second click OPENED THE OBJECT'S CARD rather than clearing it (ISSUES
+    // 8.31: "I see no clear way to open an events card back up").
+    expect(railOf(tester).scene.selection, {hit.identity});
+    expect(opened, [hit.fact.event.id]);
+  });
+
+  testWidgets('a click anywhere in a mark selects it, not only where a drag grabs it', (
+    tester,
+  ) async {
+    // ISSUES 8.31. One shape was answering two questions: the narrow strip a
+    // drag takes hold of was also gating selection, so a click in the body of an
+    // event found no mark at all -- no ring, no card, no Open row.
+    final bed = await layOut(tester, 'intimate');
+    await pump(tester, bed, cards: true);
+    await markAt(bed, tester);
+    final hit = railOf(tester).hits.single;
+    final random = Random(specSeed);
+    for (var index = 0; index < 8; index += 1) {
+      final inside = Offset(
+        hit.bounds.left + random.nextDouble() * hit.bounds.width,
+        hit.bounds.top + random.nextDouble() * hit.bounds.height,
+      );
+      await clickAt(tester, inside, Duration(seconds: index * 2));
+      expect(
+        railOf(tester).scene.selection,
+        {hit.identity},
+        reason: 'a click at $inside found no mark',
+      );
+      // A click is its own undo, so clear it before the next one.
+      await clickAt(tester, inside, Duration(seconds: index * 2 + 1));
+    }
+  });
+
+  testWidgets('the menu on a mark opens that object, wherever on the mark it was raised', (
+    tester,
+  ) async {
+    final bed = await layOut(tester, 'intimate');
+    await pump(tester, bed, cards: true);
+    await markAt(bed, tester);
+    final hit = railOf(tester).hits.single;
+    final gesture = await tester.startGesture(
+      onScreen(tester, hit.bounds.center),
+      buttons: kSecondaryMouseButton,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text('Open'), findsOneWidget);
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(opened, [hit.fact.event.id]);
+  });
+
+  testWidgets('a drag through the body of a mark still creates: the strip is what moves it', (
+    tester,
+  ) async {
+    final bed = await layOut(tester, 'intimate');
+    bed.views.of(tileId).write('grain', Rational.zero);
+    await pump(tester, bed);
+    await markAt(bed, tester);
+    final hit = railOf(tester).hits.single;
+    final placements = bed.editor.document.relations.keys.toSet();
+    final from = hit.bounds.center;
+    final gesture = await tester.startGesture(onScreen(tester, from));
+    await gesture.moveTo(onScreen(tester, from + const Offset(dayPixels * 2, 0)));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+    expect(placedDays(bed.editor, placements), railOf(tester).unproject(from));
+  });
+
+  testWidgets('release commits exactly where the drag left it: nothing snaps back', (tester) async {
+    // Don, 2026-08-31: "I drag up and right, and then it snaps back to basically
+    // the same position when I release." The property, on any lens: the place a
+    // time sits at the last moment of the drag -- what the painter drew plus
+    // what the transform is holding -- is where it sits after the release. The
+    // settle repaint may change fidelity; it may never change position.
+    final random = Random(specSeed);
+    final bed = await layOut(tester, 'intimate');
+    await pump(tester, bed);
+    for (var index = 0; index < 8; index += 1) {
+      final watched = bed.views.focusOf(tileId);
+      final travel = Offset(random.nextDouble() * 300 - 150, random.nextDouble() * 200 - 100);
+      final gesture = await tester.startGesture(
+        onScreen(tester, at(surface.width / 2)),
+        buttons: kMiddleMouseButton,
+      );
+      await gesture.moveBy(travel);
+      await tester.pump();
+      final live = railOf(tester).project(watched)! + panOf(tester);
+      await gesture.up();
+      await tester.pump();
+      final settled = railOf(tester).project(watched)! + panOf(tester);
+      expect(
+        (settled - live).distance < 1,
+        isTrue,
+        reason: 'a drag of $travel showed $live and settled at $settled',
+      );
+      // And it moved AT ALL: a pan that commits nothing tells no lie and does
+      // no work either.
+      expect((live - Offset(surface.width / 2, surface.height / 2)).dx, isNot(0));
+    }
   });
 
   testWidgets('a lens with no painter refuses in words rather than drawing nothing', (

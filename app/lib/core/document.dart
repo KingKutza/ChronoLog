@@ -370,12 +370,17 @@ Object? _object(Object? end) => end is Map ? end['object'] : null;
 /// anything -- an object's own start-to-end span is its duration magnitude, not a
 /// connection -- which is why validation refuses one and why a merge drops it
 /// rather than leaving behind a record the next load cannot accept.
-bool _collapsed(Relation relation) =>
-    (relation.type == 'contains' && relation.parent == relation.child) ||
-    (relation.isStaple &&
-        relation.ends.length == 2 &&
-        relation.ends.first.id == relation.ends.last.id &&
-        relation.ends.first is! FrameEnd);
+bool _collapsed(Relation relation) {
+  if (relation.type == 'contains' && relation.parent == relation.child) return true;
+  if (!relation.isStaple) return false;
+  // N-ARY: a staple says its n points are one point. It has collapsed when every
+  // one of those points names the SAME object or series -- however many ends
+  // there are -- because "this thing is itself" says nothing. A frame stapled to
+  // itself at several positions is the nonlinear line crossing its own path, and
+  // is not a collapse.
+  final ends = relation.ends;
+  return ends.length > 1 && ends.first is! FrameEnd && ends.every((end) => end.id == ends.first.id);
+}
 
 /// Every record a rewrite touches, replaced; every record it returns null for,
 /// left as the identical object it was -- which is what keeps the op diff honest.

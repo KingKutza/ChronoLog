@@ -51,6 +51,38 @@ String parentDirectory(String path) {
 
 int _larger(int a, int b) => a > b ? a : b;
 
+/// An AUTHORED path, or [fallback] when the author has written none.
+///
+/// THE ONE RESOLVER. The document's own save location and every ICS location
+/// read the same way, because "where a thing lives" has one meaning in this
+/// program: a path the user wrote, and beside-the-app when they wrote nothing.
+/// There is no blessed directory at either end -- the fallback is the portable
+/// default, not a home the app insists on.
+String authoredPath(String? authored, String fallback) {
+  final trimmed = (authored ?? '').trim();
+  return trimmed.isEmpty ? fallback : trimmed;
+}
+
+/// Authored paths, ONE PER LINE -- a LIST, never a single location (Don, 8.31:
+/// "only a location to look for .ics file and even then only one such
+/// location"). Blank lines are not locations, and an empty setting answers with
+/// the fallback so the list is never a hole.
+///
+/// A list of TEXT settings is packed into one key the way `keys.lensDigits`
+/// packs a list of keys: the one math has no lists, and a path is not
+/// arithmetic, so the newline is the separator and the field is multi-line.
+/// One line break, however the host spells it: a path list a person typed on
+/// Windows and a path list an editor rewrote are the same list.
+final RegExp lineBreak = RegExp(r'\r\n|\r|\n');
+
+List<String> authoredPaths(String? authored, String fallback) {
+  final lines = [
+    for (final line in (authored ?? '').split(lineBreak))
+      if (line.trim().isNotEmpty) line.trim(),
+  ];
+  return lines.isEmpty ? [fallback] : lines;
+}
+
 /// A named file inside a data root. One join, so the journal, the snapshot and
 /// every plaintext sidecar spell a path the same way.
 String storePath(String root, String name) =>

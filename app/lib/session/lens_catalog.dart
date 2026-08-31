@@ -95,8 +95,12 @@ const List<LensSpec> _shipped = [
       ControlSpec('number', 'back', 'Days behind', 'intimate.back', 'day'),
       ControlSpec('number', 'forward', 'Days ahead', 'intimate.forward', 'day'),
       ControlSpec('number', 'grain', 'Grain', 'intimate.grain', 'minute'),
-      ControlSpec('number', 'startHour', 'Day starts', 'intimate.startHour', 'hour'),
-      ControlSpec('number', 'endHour', 'Day ends', 'intimate.endHour', 'hour'),
+      // NO DAY-START / DAY-END PICKER (ruled 2026-08-31): "seems like a good
+      // setting but I think it is a bad one." The day is an AUTHORED OBJECT --
+      // a daily series whose handling says display-as-zone -- so it is drawn by
+      // the same zone painting every other authored region gets, and it carries
+      // everything a definition staple can say. A setting here could only ever
+      // offer crude hour increments and could never be one.
       ControlSpec('number', 'hourPixels', 'Row height', 'intimate.hourPixels'),
     ],
   ),
@@ -211,8 +215,6 @@ const Map<String, String> sessionTunableDefaults = {
   'intimate.back': '0',
   'intimate.forward': '2',
   'intimate.grain': '15',
-  'intimate.startHour': '4',
-  'intimate.endHour': '20',
   'intimate.hourPixels': '42',
   'tactical.rows': '5',
   'tactical.columns': '7',

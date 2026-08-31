@@ -32,7 +32,12 @@ import 'tunables.dart';
 
 /// One painted mark, recorded during paint so identity, selection and the drag
 /// source live in the same object the pointer hits.
-typedef MarkHit = ({Rect bounds, Path? shape, Fact fact, String identity});
+///
+/// TWO REGIONS, TWO QUESTIONS. [shape] is the mark's real geometry -- what a
+/// click, a menu and the cursor mean -- and [grab] is the part of it a DRAG
+/// takes hold of, which Intimate narrows to a leading strip so a create-drag
+/// passes through an occupied span. A null grab is grabbed wherever it is hit.
+typedef MarkHit = ({Rect bounds, Path? shape, Path? grab, Fact fact, String identity});
 
 /// The vocabulary. `span` is last because it is the only one chosen by size
 /// rather than by role.
@@ -93,13 +98,31 @@ String sigilFor({
   return 'point';
 }
 
+/// The object whose HANDLING a fact answers to: itself, or -- for a fact a
+/// series generated -- the template it is an occurrence of.
+///
+/// AN OCCURRENCE IS ITS TEMPLATE APPEARING AGAIN (ruled 2026-08-31, with the day
+/// object). A generated fact carries a stable virtual id that is in no document,
+/// so asking the document about that id finds nothing authored and no frames
+/// bearing on it: handling authored on a daily object -- draw as a zone, this
+/// sigil, this half-distance -- would reach the template and none of the days it
+/// makes. The template is the authored object, so the template is what is asked.
+String handlingSubject(ProjectionEngine engine, Fact fact) {
+  final pattern = fact.pattern;
+  if (pattern == null) return fact.event.id;
+  return engine.document.patterns[pattern]?.templateEvent ?? fact.event.id;
+}
+
 /// The sigil an author named for this fact: the object's own `display.sigil`,
 /// then the frame the fact sits on, then the frames bearing on it nearest
 /// first. A FRAME IS A GROUP, so naming a sigil is a group display property
 /// like any other (ruled 2026-08-28) -- a celestial frame gives its objects the
 /// celestial glyph, and nothing reads a trait string to get there.
-Object? authoredSigilOf(ProjectionEngine engine, Fact fact) =>
-    engine.authoredHandling(fact.event.id, 'sigil', nearest: fact.relation.frame);
+Object? authoredSigilOf(ProjectionEngine engine, Fact fact) => engine.authoredHandling(
+  handlingSubject(engine, fact),
+  'sigil',
+  nearest: fact.relation.frame,
+);
 
 String sigilLabel(String sigil, String state, String? title) {
   final name = sigilLabels[sigil] ?? sigilLabels['point']!;
@@ -212,7 +235,7 @@ class MarkSpec {
       );
     }
     if (slashed) canvas.drawLine(bounds.bottomLeft, bounds.topRight, strikePaint());
-    return (bounds: bounds, shape: shape, fact: fact, identity: fact.identity);
+    return (bounds: bounds, shape: shape, grab: null, fact: fact, identity: fact.identity);
   }
 }
 

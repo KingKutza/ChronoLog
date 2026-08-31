@@ -20,29 +20,48 @@ import 'view_tile.dart';
 
 /// The rows for one point on a lens: what is under the cursor, then what this
 /// place affords, then what the tile itself affords.
-List<MenuRow> viewMenuRows(ViewTileController tile, {MarkHit? hit, Rational? at}) {
+///
+/// WHAT IS UNDER THE CURSOR ARRIVES IN WHATEVER FORM THE SURFACE HAS IT: a
+/// painted lens carries a [MarkHit], a roster row or a graph node carries an id.
+/// The rows are the same either way, because OPEN IS NOT A PER-LENS FEATURE --
+/// every mark on every lens has a path back to its record's card (ruled
+/// 2026-08-31).
+List<MenuRow> viewMenuRows(
+  ViewTileController tile, {
+  MarkHit? hit,
+  String? objectId,
+  String? frameId,
+  Rational? at,
+}) {
   final frame = tile.primaryFrame, stage = tile.stage;
   final openObject = tile.objectCard, openFrame = tile.frameCard;
   final nothing = frame == null ? 'nothing projected' : null;
+  final object = objectId ?? hit?.fact.event.id;
   return [
-    if (hit != null) ...[
+    if (frameId != null)
+      menuRow(
+        'Open',
+        openFrame == null ? null : () => stage.open(openFrame(frameId)),
+        hint: openFrame == null ? 'no card surface' : null,
+      ),
+    if (frameId == null && object != null) ...[
       menuRow(
         'Open',
         openObject == null
             ? null
             : () {
-                tile.select(hit.identity);
-                tile.openSelected();
+                tile.select(hit?.identity ?? object);
+                tile.openObject(object);
               },
         hint: openObject == null ? 'no card surface' : null,
       ),
       // Undoable, so there is no confirmation to answer.
-      menuRow('Delete', () => tile.editor.deleteObject(hit.fact.event.id), hint: 'undoable'),
+      menuRow('Delete', () => tile.editor.deleteObject(object), hint: 'undoable'),
       menuRow(
         'Mark done',
-        () => tile.editor.toggleState(hit.fact.event.id, doneStateFrameId, frame: frame),
+        () => tile.editor.toggleState(object, doneStateFrameId, frame: frame),
       ),
-      menuRow('Move to…', null, hint: 'drag the mark'),
+      if (hit != null) menuRow('Move to\u2026', null, hint: 'drag the mark'),
     ],
     for (final entry in objectKinds.entries)
       menuRow(
@@ -52,7 +71,7 @@ List<MenuRow> viewMenuRows(ViewTileController tile, {MarkHit? hit, Rational? at}
       ),
     menuRow('Paste', null, hint: 'nothing copied'),
     menuRow(
-      'Frame…',
+      'Frame\u2026',
       frame == null || openFrame == null ? null : () => stage.open(openFrame(frame)),
       hint: nothing,
     ),
@@ -69,5 +88,11 @@ Future<void> showViewContextMenu(
   Offset screen,
   ViewTileController tile, {
   MarkHit? hit,
+  String? objectId,
+  String? frameId,
   Rational? at,
-}) => showChronoMenu(context, screen, viewMenuRows(tile, hit: hit, at: at));
+}) => showChronoMenu(
+  context,
+  screen,
+  viewMenuRows(tile, hit: hit, objectId: objectId, frameId: frameId, at: at),
+);

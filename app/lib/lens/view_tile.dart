@@ -124,7 +124,18 @@ abstract class ViewTileController {
   void jumpToNow();
   void resetLens();
   void select(String? identity);
+
+  /// Select by OBJECT rather than by occurrence, which is what a lens whose
+  /// marks are widgets has: a roster row names its object, not one of its
+  /// placements.
+  void selectObject(String objectId);
+
   void openSelected();
+
+  /// Open one object's card. EVERY path back to a card lands here -- a
+  /// double-click, the menu's Open, a roster row, a keyboard Enter (ruled
+  /// 2026-08-31) -- so there is one rule per gesture and no per-lens wiring.
+  void openObject(String objectId);
   void deleteSelected();
   void createHere(String kind, Rational days, {Rational? endDays});
 
@@ -199,9 +210,14 @@ class _ViewTileState extends State<ViewTile>
 
   /// ONE selection: the mark itself. The scene reads its identity, so selection
   /// survives a re-query and names one occurrence rather than a whole series.
-  MarkHit? _grabbed, _selected;
+  MarkHit? _grabbed;
   Duration? _lastClick;
   Offset _lastClickAt = Offset.zero;
+
+  /// What is selected here: the occurrence's identity and the object it names. A
+  /// painted mark carries its hit as well; a roster row has no geometry and does
+  /// not need one.
+  ({String identity, String objectId, MarkHit? hit})? _selected;
   Rational _glideFrom = Rational.zero, _glideTarget = Rational.zero;
 
   @override
@@ -346,9 +362,7 @@ class _ViewTileState extends State<ViewTile>
                 valueListenable: _panning,
                 // The painted child is built ONCE and reused: a pan moves the
                 // transform above it and repaints nothing.
-                child: RepaintBoundary(
-                  child: CustomPaint(painter: painter, size: size),
-                ),
+                child: _painted(painter, size),
                 builder: (c, offset, child) => Transform.translate(offset: offset, child: child),
               ),
             ),
@@ -360,6 +374,30 @@ class _ViewTileState extends State<ViewTile>
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// The painted scene, given room for whatever this lens bleeds past its own
+  /// viewport. A surface that bleeds nothing is laid out exactly as before: the
+  /// extra box exists for the pan preview and for nothing else.
+  Widget _painted(LensPainter painter, Size size) {
+    final bleed = painter.bleed;
+    if (bleed == Offset.zero) {
+      return RepaintBoundary(child: CustomPaint(painter: painter, size: size));
+    }
+    final grown = Size(size.width + bleed.dx * 2, size.height + bleed.dy * 2);
+    return OverflowBox(
+      alignment: Alignment.topLeft,
+      minWidth: grown.width,
+      maxWidth: grown.width,
+      minHeight: grown.height,
+      maxHeight: grown.height,
+      child: Transform.translate(
+        offset: -bleed,
+        child: RepaintBoundary(
+          child: CustomPaint(painter: BledPainter(painter, bleed), size: grown),
         ),
       ),
     );
@@ -386,14 +424,18 @@ class _ViewTileState extends State<ViewTile>
   void _down(PointerDownEvent event) {
     stage.focus(widget.tileId);
     final keys = HardwareKeyboard.instance;
+    // TWO QUESTIONS, TWO ANSWERS: what a DRAG grabs decides move-or-create, and
+    // what is UNDER THE POINTER is what a click and the menu mean. One shape
+    // answering both is why a click in the body of an event found nothing at all
+    // (ISSUES 8.31).
     final hit = _painter?.markAt(event.localPosition);
-    _grabbed = hit;
+    _grabbed = _painter?.grabAt(event.localPosition);
     _downAt = event.localPosition;
     _verb = pointerVerb(
       buttons: event.buttons,
       shift: keys.isShiftPressed,
       alt: keys.isAltPressed,
-      onMark: hit != null,
+      onMark: _grabbed != null,
       timeSurface: true,
     );
     if (_verb != 'menu') return;
@@ -406,10 +448,7 @@ class _ViewTileState extends State<ViewTile>
     final from = _downAt;
     if (from == null) return;
     final travel = event.localPosition - from;
-    if (_verb == 'pan') {
-      _panning.value = travel;
-      return;
-    }
+    if (_verb == 'pan') return _panMove(event.localPosition, travel);
     if (travel.distance < _px('pointer.dragThreshold')) return;
     _ghost.value = _ghostFor(from, event.localPosition);
   }
@@ -420,8 +459,8 @@ class _ViewTileState extends State<ViewTile>
     _release();
     if (from == null) return;
     if (verb == 'pan') {
-      final days = _daysForPixels(travel);
-      return days == null ? null : pan(days);
+      final landing = _painter?.panLanding(travel);
+      return landing == null ? null : pan(landing.days);
     }
     if (travel.distance < _px('pointer.dragThreshold')) return _click(event);
     final at = _daysAt(event.localPosition), start = _daysAt(from);
@@ -439,6 +478,40 @@ class _ViewTileState extends State<ViewTile>
     _grabbed = null;
     _ghost.value = null;
     _panning.value = Offset.zero;
+  }
+
+  /// A PAN IS A LIVE TRANSFORM, AND THE TRANSFORM SHOWS WHAT RELEASE COMMITS.
+  ///
+  /// Don, 2026-08-31: "I drag up and right, and then it snaps back to basically
+  /// the same position when I release. Also when I drag, the white space moves
+  /// on the edge vs a drag preview of the new position." Two defects, one class:
+  /// the gesture slid the painted scene by the raw pointer travel and then
+  /// committed whatever the view window could hold of it -- so anything it could
+  /// not hold snapped back, and anything past the painted edge arrived as a hole.
+  ///
+  /// So the painter answers both halves at once: how far the window moves, and
+  /// how much of that the eye may be shown while the gesture is live. The
+  /// transform carries the shown part, which never exceeds the painter's own
+  /// bleed; the moment it would, the pan COMMITS, the scene is drawn again in
+  /// exactly the same place at full fidelity, and the gesture carries on from
+  /// there. Nothing is ever shown that mouse-up will not honour.
+  void _panMove(Offset at, Offset travel) {
+    final painter = _painter;
+    if (painter == null) return;
+    final landing = painter.panLanding(travel);
+    final bleed = painter.bleed;
+    final beyond =
+        landing.shown.dx.abs() > bleed.dx.abs() || landing.shown.dy.abs() > bleed.dy.abs();
+    // A surface with nothing to preview commits AS IT GOES: the eye sees the
+    // truth repainted rather than a promise the release would take back.
+    final unshowable = landing.shown == Offset.zero && !landing.days.isZero;
+    if (beyond || unshowable) {
+      pan(landing.days);
+      _downAt = at;
+      _panning.value = Offset.zero;
+      return;
+    }
+    _panning.value = landing.shown;
   }
 
   /// A click is the cheap glance: it selects, and RE-CLICKING THE SELECTED
@@ -549,10 +622,13 @@ class _ViewTileState extends State<ViewTile>
   @override
   void pan(Rational days) => _views.setFocus(widget.tileId, _focus + days);
 
+  /// A pan asked for in pixels -- by the keyboard, a bar, the minimap. It lands
+  /// the same way a drag does, so nothing can move the window by arithmetic the
+  /// pointer would not agree with.
   @override
   void panPixels(Offset delta) {
-    final days = _daysForPixels(delta);
-    if (days != null) pan(days);
+    final landing = _painter?.panLanding(delta);
+    if (landing != null) pan(landing.days);
   }
 
   /// Zoom means one thing on every surface: more or less time on screen. A lens
@@ -594,35 +670,51 @@ class _ViewTileState extends State<ViewTile>
   }
 
   @override
-  void select(String? identity) => setState(
-    () => _selected = identity == null
-        ? null
-        : _painter?.hits.where((hit) => hit.identity == identity).firstOrNull,
-  );
+  void select(String? identity) => setState(() {
+    if (identity == null) {
+      _selected = null;
+      return;
+    }
+    final hit = _painter?.hits.where((mark) => mark.identity == identity).firstOrNull;
+    // An identity no painter can place is still a selection: a lens whose marks
+    // are widgets has no geometry to look one up in, and on those surfaces the
+    // identity IS the object.
+    _selected = (identity: identity, objectId: hit?.fact.event.id ?? identity, hit: hit);
+  });
+
+  @override
+  void selectObject(String objectId) => select(objectId);
 
   @override
   void openSelected() {
-    final hit = _selected, open = objectCard;
-    if (hit != null && open != null) stage.open(open(hit.fact.event.id));
+    final selected = _selected;
+    if (selected != null) openObject(selected.objectId);
+  }
+
+  @override
+  void openObject(String objectId) {
+    final open = objectCard;
+    if (open != null) stage.open(open(objectId));
   }
 
   /// Undoable, and no confirmation anywhere: reversibility over interruption.
   @override
   void deleteSelected() {
-    final hit = _selected;
-    if (hit == null) return;
-    editor.deleteObject(hit.fact.event.id);
+    final selected = _selected;
+    if (selected == null) return;
+    editor.deleteObject(selected.objectId);
     select(null);
   }
 
   @override
   void createHere(String kind, Rational days, {Rational? endDays}) {
-    final frame = primaryFrame, open = objectCard;
+    final frame = primaryFrame;
     if (frame == null) return;
     final id = editor.createAt(frame, days, endDays, kind: kind);
-    // The card opens on the new object and holds the draft: a create lands in
-    // an editor with the title ready, not on a nameless block.
-    if (open != null) stage.open(open(id));
+    // The card opens on the new object and holds the draft: a create lands in an
+    // editor with the title ready, not on a nameless block -- through the same
+    // door every other path back to a card goes through.
+    openObject(id);
   }
 
   @override

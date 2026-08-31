@@ -29,6 +29,7 @@ import '../capacity.dart';
 import '../color.dart';
 import '../display_weight.dart';
 import '../facts.dart';
+import '../ladder.dart';
 import '../law_context.dart';
 import '../lens_painter.dart';
 import '../marks.dart';
@@ -46,11 +47,14 @@ import 'wall.dart';
 /// number has one home, and Strategic's pair is not a different kind of number
 /// for being named by a catalog control as well.
 const Map<String, String> gridTunableDefaults = {
+  // The rule ladder's own numbers, spread in here: one composed settings map
+  // answers for them, and the two-tier rule is one function every surface that
+  // rules time asks (`lens/ladder.dart`).
+  ...ladderTunableDefaults,
   'grid.header': '18',
   'grid.gutter': '74',
   'grid.pad': '3',
   'grid.rule': '1',
-  'grid.ruleOpacity': '0.55',
   'grid.chipWidth': '64',
   'grid.chipHeight': '13',
   'grid.chipDepth': '1',
@@ -456,6 +460,34 @@ abstract class DayGridPainter extends LensPainter {
 
   int? weekdayOf(BigInt day) => scene.law.cycleIndex('weekday', Rational(day) * law.dayDays);
 
+  /// The two pens, once per paint. Stroked, because a cell is ruled and not
+  /// filled; the tones and widths are the ladder's, so a grid and a rail read
+  /// the same two tiers.
+  late final ({Paint major, Paint minor}) pens = () {
+    final pair = rulePens(scene.theme, scene.tunable);
+    pair.major.style = PaintingStyle.stroke;
+    pair.minor.style = PaintingStyle.stroke;
+    return pair;
+  }();
+
+  /// Does this day open a turn of the law's own weekday cycle? That boundary is
+  /// the major one across a sheet -- the week, where the law declares one.
+  bool startsCycle(BigInt day) {
+    final names = scene.law.weekdayNames();
+    if (names == null || names.isEmpty) return false;
+    return weekdayOf(day) == scene.whole('wall.firstWeekday') % names.length;
+  }
+
+  /// Does this day open one of this grid's own rows? The row is the coarser unit
+  /// every grid lens lays out in -- a week, a month -- read off the layout it
+  /// already produced rather than from a lens name.
+  bool startsRow(BigInt day) {
+    for (final row in rows) {
+      if (row.days.isNotEmpty && row.days.first == day) return true;
+    }
+    return false;
+  }
+
   BigInt? get todayOrdinal => law.mapsToClock ? law.dayOf(scene.nowDays) : null;
 
   void _paintCell(
@@ -481,13 +513,19 @@ abstract class DayGridPainter extends LensPainter {
           ..color = scene.theme.hair.withValues(alpha: scene.px('grid.slashPast')),
       );
     }
-    canvas.drawRect(
-      Rect.fromLTRB(crisp(cell.left), crisp(cell.top), crisp(cell.right), crisp(cell.bottom)),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = scene.px('grid.rule')
-        ..color = scene.theme.hair.withValues(alpha: scene.px('grid.ruleOpacity')),
+    // TWO TIERS, HERE TOO (ruled 2026-08-31): the cell boundary is the MINOR
+    // rule -- a day -- and the coarser unit this grid lays out in carries the
+    // MAJOR one, so the sheet never reads as one undifferentiated tone. Which
+    // boundary is major comes from the LAW's own cycle, never from a Saturday.
+    final ruled = Rect.fromLTRB(
+      crisp(cell.left),
+      crisp(cell.top),
+      crisp(cell.right),
+      crisp(cell.bottom),
     );
+    canvas.drawRect(ruled, pens.minor);
+    if (startsCycle(day)) canvas.drawLine(ruled.topLeft, ruled.bottomLeft, pens.major);
+    if (startsRow(day)) canvas.drawLine(ruled.topLeft, ruled.topRight, pens.major);
     var top = cell.top + pad;
     if (numbersDays) {
       _text(
@@ -591,7 +629,7 @@ abstract class DayGridPainter extends LensPainter {
       Rect.fromLTWH(box.left, box.center.dy - pip / 2, pip, pip),
       fact,
     );
-    hits.add((bounds: box, shape: null, fact: fact, identity: hit.identity));
+    hits.add((bounds: box, shape: null, grab: null, fact: fact, identity: hit.identity));
     if (scene.isSelected(fact)) paintSelection(canvas, Path()..addRect(box));
     final title = '${fact.event.payload?['title'] ?? ''}';
     if (presentationOf(fact, weight) != showName || title.isEmpty) return;
