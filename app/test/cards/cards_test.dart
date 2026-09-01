@@ -339,5 +339,32 @@ void main() {
       await pumpCard(tester, cardChrome(bench.editor), const FramesBrowser());
       expect(find.text('unbased'), findsOneWidget);
     });
+
+    // PULL A FRAME UP AS A COLUMN (ISSUES 9.1: "Board, group by frame -- I see
+    // no power to pull up frames ... the chosen-columns half was never built;
+    // the frames browser's rows are the natural chooser"). The board's own
+    // chooser writes the same key, so this proves the browser's half of it and
+    // not a second mechanism beside it.
+    testWidgets('a row stands its frame as a column on the focused view', (tester) async {
+      final bench = await openCards(_withWorkFrame());
+      final chrome = cardChrome(bench.editor);
+      await pumpCard(tester, chrome, const FramesBrowser());
+      final view = chrome.focusedView!;
+      expect(standingColumns(view), isEmpty, reason: 'nothing stands until it is asked to');
+      // Narrowed to the one row, because every row wears the same word.
+      await tester.enterText(fieldHinted('Find a frame'), 'Work');
+      await tester.pumpAndSettle();
+      await tapText(tester, 'column');
+      expect(
+        standingColumns(view),
+        contains('frame:work'),
+        reason:
+            'ISSUES (9.1): a standing column comes from view[\'columns\'], and nothing '
+            'wrote that key.',
+      );
+      // And it is a toggle, not a one-way door: the same row takes it back.
+      await tapText(tester, 'column');
+      expect(standingColumns(view), isNot(contains('frame:work')));
+    });
   });
 }

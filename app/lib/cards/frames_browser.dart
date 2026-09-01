@@ -32,6 +32,7 @@ Widget frameProjectionRow(
   Iterable<String> groups = const [],
   VoidCallback? onOpen,
   bool basisGap = false,
+  List<Widget> trailing = const [],
 }) {
   final chrome = ChromeScope.of(context);
   final theme = ChronoTheme.of(context);
@@ -86,6 +87,7 @@ Widget frameProjectionRow(
             child: Text('unbased', style: labelStyle(context, color: theme.primary)),
           ),
         if (groups.isNotEmpty) cardChips(context, groups),
+        ...trailing,
         SizedBox(width: cardPx(context, 'card.gap')),
         if (selected)
           InkWell(
@@ -101,11 +103,50 @@ Widget frameProjectionRow(
   );
 }
 
+/// The frames STANDING as columns on a view, whatever surface reads them.
+List<String> standingColumns(ViewState view) => switch (view.view['columns']) {
+  final List<Object?> chosen => [for (final id in chosen) '$id'],
+  _ => const [],
+};
+
+/// PULL A FRAME UP AS A COLUMN (ISSUES 9.1: "Board, group by frame: I see no
+/// power to pull up frames ... the chosen-columns half was never built").
+///
+/// The board's own chooser writes `view['columns']`, and this is the other half
+/// of the same affordance, at the surface where frames are already listed --
+/// "the frames browser's rows are the natural chooser". One key, two doors, and
+/// neither of them a second list of frames.
+Widget standColumn(BuildContext context, ViewState view, Frame frame) {
+  final chrome = ChromeScope.of(context);
+  final theme = ChronoTheme.of(context);
+  final standing = standingColumns(view).contains(frame.id);
+  return Tooltip(
+    message: standing
+        ? 'Standing as a column. A surface with columns holds it open even when '
+              'nothing is in it.'
+        : 'Stand this frame as a column where the surface has columns.',
+    child: InkWell(
+      onTap: () {
+        final was = standingColumns(view);
+        view.write('columns', [
+          for (final id in was)
+            if (id != frame.id) id,
+          if (!standing) frame.id,
+        ]);
+        chrome.views.touch();
+      },
+      child: Text(
+        'column',
+        style: labelStyle(context, color: standing ? theme.primary : theme.hair),
+      ),
+    ),
+  );
+}
+
 class FramesBrowser extends StatefulWidget {
-  const FramesBrowser({super.key, this.onOpen, this.onCreate, this.onClose});
+  const FramesBrowser({super.key, this.onOpen, this.onClose});
 
   final void Function(String frameId)? onOpen;
-  final void Function(String kind)? onCreate;
   final VoidCallback? onClose;
 
   @override
@@ -117,6 +158,17 @@ class _FramesBrowserState extends State<FramesBrowser> {
 
   @override
   Widget build(BuildContext context) {
+    // A CONTROL THAT READS LIVE STATE OWNS ITS LISTENING (ISSUES 9.1, the frozen
+    // projection drop). Every row here reads the focused view -- what it
+    // projects, what leads it, what stands as a column -- so the list re-runs
+    // when that changes rather than showing the state it was born with.
+    return ListenableBuilder(
+      listenable: ChromeScope.of(context).views,
+      builder: (context, _) => _list(context),
+    );
+  }
+
+  Widget _list(BuildContext context) {
     final chrome = ChromeScope.of(context);
     final editor = chrome.editor;
     final view = chrome.focusedView;
@@ -161,6 +213,7 @@ class _FramesBrowserState extends State<FramesBrowser> {
                     frames[index].basis == null &&
                     frames[index].coordinate == null &&
                     frameAuthoringCapabilities('', frames[index].traits).basis,
+                trailing: [standColumn(context, view, frames[index])],
                 onOpen: () => widget.onOpen?.call(frames[index].id),
               ),
             ),
@@ -171,16 +224,38 @@ class _FramesBrowserState extends State<FramesBrowser> {
           context,
           'The ring leads: the frame whose calendar reads the axis. The swatch'
           ' overlays: every selected frame draws. "not" removes what it names --'
-          ' that is what a filter is here. The name opens the frame’s own card.',
+          ' that is what a filter is here. "column" stands the frame as a column'
+          ' where the surface has columns, empty or not. The name opens the'
+          ' frame’s own card.',
         ),
       ],
+      // THE CREATE DOOR MINTS A FRAME (ISSUES 9.1). The footer used to iterate
+      // a const list of three nouns -- "which looks a lot like an enum to me",
+      // and it was one. Frames are groups and kinds are trait bundles, so there
+      // is one create affordance here, shared with every other list of frames,
+      // and what the frame IS is authored on the card that opens.
+      //
+      // AND AUTHORING AN OBJECT IS A DOCUMENT ACT (ISSUES 9.1): "no door in the
+      // app opens a blank object card, so a note cannot be authored outside a
+      // lens at all". A lens coordinate is one way to start the sentence, never
+      // the only way -- so the blank cards are reachable from here.
       footer: [
-        for (final kind in const ['calendar', 'group', 'state'])
-          namedAction(
-            context,
-            '+ ${kind[0].toUpperCase()}${kind.substring(1)}',
-            onTap: widget.onCreate == null ? null : () => widget.onCreate!(kind),
+        cardDoors(context, [
+          newFrameDoor(),
+          ...mintingDoors(),
+          cardDoor(
+            'The document',
+            'What this document is called, where it saves, what crosses the ICS '
+                'boundary.',
+            (factory) => factory.documentCard(),
           ),
+          cardDoor(
+            'Settings',
+            'Every tunable in the program, in words, cut by the surface it '
+                'governs.',
+            (factory) => factory.settingsCard(),
+          ),
+        ]),
       ],
     );
   }

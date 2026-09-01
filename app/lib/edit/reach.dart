@@ -28,15 +28,13 @@ Iterable<String> namedBy(Object? record) => switch (record) {
     ...?_period(record),
   ],
   Event() => [for (final magnitude in record.magnitudes.values) ?magnitude.frame],
-  Pattern() => [?record.templateEvent, ?record.templateRelation],
+  Pattern() => [?record.templateEvent],
   Override() => [overridePatternId(record), ...record.replacements],
+  // ONE SHAPE: a connection names things at its ENDS and nowhere else (ruled
+  // 2026-09-01). The six field readings this used to add were the four record
+  // kinds' spellings, and they are derivations of the ends now -- listing them
+  // beside the ends would only name the same ids twice.
   Relation() => [
-    ?record.event,
-    ?record.frame,
-    ?record.parent,
-    ?record.child,
-    ?record.member,
-    ?record.group,
     for (final end in record.ends) end.id,
   ],
   _ => const <String>[],

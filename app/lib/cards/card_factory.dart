@@ -21,9 +21,11 @@ import '../host/file_picker.dart';
 import '../lens/theme.dart';
 import '../session/files.dart';
 import '../session/settings.dart';
+import '../stage/content.dart';
 import '../stage/tile.dart';
 import 'card_chrome.dart';
 import 'object_card.dart';
+import 'settings_words.dart';
 
 /// The numbers the object cards draw with, as expressions in the one math.
 /// Disjoint by key from the frame cards' map, so one number has one home.
@@ -109,14 +111,36 @@ class CardFactory {
 
   TileSpec frameCard(String frameId) => _card('frame', 'Frame', id: frameId);
 
-  TileSpec newFrameCard({String kind = 'calendar'}) =>
+  /// A frame that does not exist yet. [kind] is a SEED for the trait bundle the
+  /// card opens holding, never a species: absent, the card reads the authored
+  /// starting bundle and offers what the document itself exhibits.
+  TileSpec newFrameCard({String? kind}) =>
       _card('newFrame', 'New frame', kind: kind, nonce: createId('card'));
 
   TileSpec framesBrowser() => _card('frames', 'Frames');
 
   TileSpec documentCard() => _card('document', 'Document');
 
-  TileSpec settingsCard() => _card('settings', 'Settings');
+  /// The settings family (ISSUES 9.1, Don's ruling). One class, one body: the
+  /// main card is the one that names no area, and a sub-card names the area it
+  /// governs. Twenty sub-cards are twenty of THESE, not twenty registered
+  /// classes -- which surfaces exist is authored data, and a class list would be
+  /// exactly the enum the ruling refuses.
+  ///
+  /// An area no card governs opens the MAIN card and says so, rather than a
+  /// blank sub-card claiming to hold settings that are not there.
+  TileSpec settingsCard({String? area}) {
+    final wanted = area?.trim() ?? '';
+    if (wanted.isEmpty) return _card('settings', 'Settings');
+    final family = settingsSubCards({...settings.keys, ...settings.shippedText.keys});
+    if (!family.any((card) => card.address == wanted)) {
+      settings.refusals.add(
+        'No settings card governs "$wanted", so the main settings card opened instead.',
+      );
+      return _card('settings', 'Settings');
+    }
+    return _card('settings', settingsCardTitle(wanted), kind: wanted);
+  }
 
   TileSpec themesCard() => _card('themes', 'Themes');
 
@@ -150,17 +174,63 @@ class CardFactory {
         factory: this,
         request: request,
         tileId: tileId,
-        child: body == null
-            ? Padding(
-                padding: EdgeInsets.all(cardPx(context, 'card.pad')),
-                child: cardNote(context, 'The $title card has no registered body yet.'),
-              )
-            : body(context, request),
+        // THE BODY IS BUILT BELOW THIS HOST (ISSUES 9.1, "clicking the × of a
+        // frame window does not close it"). Invoking `body` with the context
+        // this spec was built under resolves `CardHost.of` to whatever host
+        // stands ABOVE the tile -- the shell's fallback, whose tileId is empty
+        // -- so a card's × called `stage.close('')` and removed nothing. The
+        // Builder puts the body's context under the CardHost this factory just
+        // made, which is what makes "a card's own host overrides this one" true
+        // rather than aspirational, for every body, however it reads its host.
+        child: Builder(
+          builder: (context) => body == null
+              ? Padding(
+                  padding: EdgeInsets.all(cardPx(context, 'card.pad')),
+                  child: cardNote(context, 'The $title card has no registered body yet.'),
+                )
+              : body(context, request),
+        ),
       ),
     );
   }
 
   void open(TileSpec spec) => stage.open(spec);
+
+  /// Every card class as a CONTENT (the one ancestor, ruled 2026-09-01), the
+  /// settings sub-cards included — one entry per sub-card the authored table
+  /// derives, so the connectivity universe holds the whole family by
+  /// derivation.
+  ///
+  /// A record-bound class (the object and frame cards) mints its spec over the
+  /// document's own first record; a document with none falls back to the
+  /// class's NEW door, so the content is always mintable and never invents a
+  /// record the owner did not author.
+  List<TileContent> contents() {
+    String? anyObject() => editor.document.events.keys.firstOrNull;
+    String? anyFrame() => editor.document.frames.keys.firstOrNull;
+    return [
+      DoorContent('card:object', 'Object', (id) {
+        final sample = anyObject();
+        return sample == null ? newObjectCard('event') : objectCard(sample);
+      }),
+      DoorContent('card:newObject', 'New object', (id) => newObjectCard('event')),
+      DoorContent('card:frame', 'Frame', (id) {
+        final sample = anyFrame();
+        return sample == null ? newFrameCard() : frameCard(sample);
+      }),
+      DoorContent('card:newFrame', 'New frame', (id) => newFrameCard()),
+      DoorContent('card:frames', 'Frames', (id) => framesBrowser()),
+      DoorContent('card:document', 'Document', (id) => documentCard()),
+      DoorContent('card:themes', 'Themes', (id) => themesCard()),
+      DoorContent('card:settings', 'Settings', (id) => settingsCard()),
+      for (final sub in settingsSubCards({...settings.keys, ...settings.shippedText.keys}))
+        DoorContent(
+          'card:settings:${sub.address}',
+          sub.title,
+          (id) => settingsCard(area: sub.address),
+        ),
+    ];
+  }
 }
 
 /// What a card is editing, and the doors it can open from where it sits -- read
@@ -180,6 +250,12 @@ class CardHost extends InheritedWidget {
 
   static CardHost of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<CardHost>()!;
+
+  /// The host, or null where a card is rendered outside one -- a spec pumping
+  /// an instrument on its own, a preview. A door reads this: a card with no
+  /// host has nowhere to open a card TO, and says nothing rather than throwing.
+  static CardHost? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<CardHost>();
 
   Editor get editor => factory.editor;
 

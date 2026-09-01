@@ -140,12 +140,14 @@ class World {
           templateRelationId,
           Relation(
             id: templateRelationId,
-            type: 'attachment',
+            type: 'staple',
             extra: {
-              'event': templateEventId,
-              'frame': workFrameId,
+              'kind': 'anchor',
               'role': 'template',
-              'coordinate': civil(2026, 1, 5, 6, 15),
+              'ends': [
+                ObjectEnd(templateEventId, point: 'start').toJson(),
+                FrameEnd(workFrameId, position: Position.coordinate(civil(2026, 1, 5, 6, 15))).toJson(),
+              ],
             },
           ),
         )
@@ -240,12 +242,14 @@ class World {
           relationId,
           Relation(
             id: relationId,
-            type: 'attachment',
+            type: 'staple',
             extra: {
-              'event': eventId,
-              'frame': holidayFrameId,
+              'kind': 'anchor',
               'role': 'placed',
-              'coordinate': date(year, month, day),
+              'ends': [
+                ObjectEnd(eventId, point: 'start').toJson(),
+                FrameEnd(holidayFrameId, position: Position.coordinate(date(year, month, day))).toJson(),
+              ],
             },
           ),
         );
@@ -292,12 +296,14 @@ class World {
           relationId,
           Relation(
             id: relationId,
-            type: 'attachment',
+            type: 'staple',
             extra: {
-              'event': eventId,
-              'frame': workFrameId,
+              'kind': 'anchor',
               'role': 'template',
-              'coordinate': thursdayCoordinate,
+              'ends': [
+                ObjectEnd(eventId, point: 'start').toJson(),
+                FrameEnd(workFrameId, position: Position.coordinate(thursdayCoordinate)).toJson(),
+              ],
             },
           ),
         )
@@ -324,7 +330,13 @@ class World {
     document = _document.put(
       'relations',
       relationId,
-      _document.relations[relationId]!.withField('coordinate', coordinate),
+      // The coordinate lives on the FRAME END now (ruled 2026-09-01).
+      _document.relations[relationId]!.withField('ends', [
+        for (final end in _document.relations[relationId]!.ends)
+          end is FrameEnd
+              ? FrameEnd(end.frame, position: Position.coordinate(coordinate)).toJson()
+              : end.toJson(),
+      ]),
     );
   }
 
@@ -378,7 +390,13 @@ class World {
             id: relationId,
             extra: {
               ...fact.relation.extra,
-              'event': eventId,
+              // The object end is re-said; every other term stands.
+              'ends': [
+                for (final end in fact.relation.ends)
+                  end is ObjectEnd
+                      ? ObjectEnd(eventId, point: end.point).toJson()
+                      : end.toJson(),
+              ],
               'provenance': {'kind': 'explicit', 'replaces': fact.virtualId},
             },
           ),
@@ -796,7 +814,9 @@ void main() {
     world.staple(
       kind: 'anchor',
       ends: [
-        StapleEnd.object(follower),
+        // Says `start` out loud: a silent object end means the WHOLE of it now
+        // (ruled 2026-09-01), which is a different claim.
+        StapleEnd.object(follower, point: 'start'),
         StapleEnd.object(parts.event, point: 'end'),
       ],
     );

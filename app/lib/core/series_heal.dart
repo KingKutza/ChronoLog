@@ -198,16 +198,35 @@ Object? _canonical(Object? value) {
 String relationSignature(Relation relation, String ownerId, Staples staples) {
   final content = <String, Object?>{'type': relation.type};
   for (final entry in relation.extra.entries) {
-    if (entry.key == 'provenance' || entry.key == 'coordinate') continue;
+    // `ends` carries the identity and the instant now (ruled 2026-09-01), so it
+    // is normalized below rather than compared as written: two occurrences of one
+    // series necessarily name different ids, and a coordinate is authored text
+    // whose spelling is not its meaning.
+    if (entry.key == 'provenance' || entry.key == 'ends') continue;
     content[entry.key] = entry.value == ownerId ? _self : entry.value;
   }
-  final coordinate = relation.coordinate;
-  if (coordinate != null) {
-    final frame = relation.frame;
-    final days = frame == null ? null : staples.daysOf(frame, Coordinate.fromJson(coordinate));
-    content['at'] = days?.toJson() ?? 'unresolved:${_canonicalText(coordinate)}';
-  }
+  content['ends'] = [
+    for (final end in relation.ends) _endSignature(end, ownerId, staples),
+  ];
   return _canonicalText(content);
+}
+
+/// One end reduced to its content: the owner's own id normalized away, and any
+/// instant reduced to the EXACT DAY it denotes rather than the shape it is
+/// written in. An instant that cannot be resolved keeps its written form, which
+/// can only make the comparison stricter -- the safe direction.
+Object? _endSignature(StapleEnd end, String ownerId, Staples staples) {
+  final json = {...end.toJson()};
+  for (final key in const ['object', 'frame', 'series']) {
+    if (json[key] == ownerId) json[key] = _self;
+  }
+  final coordinate = obj(json.remove('coordinate'));
+  if (coordinate != null) {
+    final frame = end is FrameEnd ? end.frame : null;
+    final days = frame == null ? null : staples.daysOf(frame, Coordinate.fromJson(coordinate));
+    json['at'] = days?.toJson() ?? 'unresolved:${_canonicalText(coordinate)}';
+  }
+  return json;
 }
 
 /// Every relation that names this object.
@@ -223,10 +242,7 @@ String relationSignature(Relation relation, String ownerId, Staples staples) {
 /// leaves the survivor anchored to nothing.
 List<Relation> relationsReferencing(Document document, String eventId) => [
   for (final relation in document.relations.values)
-    if (relation.event == eventId ||
-        relation.member == eventId ||
-        (relation.isStaple && relation.ends.any((end) => end.id == eventId)))
-      relation,
+    if (relation.isStaple && relation.ends.any((end) => end.id == eventId)) relation,
 ];
 
 /// The group attachments materialization copies off the pattern's template:
@@ -237,7 +253,7 @@ List<Relation> templateGroupAttachments(Document document, String? templateEvent
   if (templateEventId == null || templateEventId.isEmpty) return const [];
   return [
     for (final relation in document.relations.values)
-      if (relation.type == 'attachment' && relation.event == templateEventId)
+      if (relation.isStaple && relation.event == templateEventId)
         if (document.frames[relation.frame]?.traits.contains('group') ?? false) relation,
   ];
 }
@@ -279,7 +295,7 @@ class SeriesHeal {
     if (patternId.isEmpty || !document.patterns.containsKey(patternId)) return null;
     final attachment = firstMatch(
       relationsReferencing(document, replacement.id),
-      (relation) => relation.type == 'attachment',
+      (relation) => isPlacement(relation, replacement.id),
     );
     if (attachment == null) return null;
     final extent = _extentOf(replacement.id);

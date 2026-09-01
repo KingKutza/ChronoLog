@@ -164,7 +164,11 @@ void main() {
     );
     await pump(tester, BoardLens(scene));
     expect(tester.takeException(), isNull);
-    expect(find.text('Parked · 0'), findsOneWidget);
+    // The column's NAME is its own widget beside its count (ISSUES 9.1): a
+    // heading that welds the two into one string is a name the surface cannot
+    // hand to anything.
+    expect(find.text('Parked'), findsOneWidget);
+    expect(find.text('· 0'), findsWidgets);
     // Every column head carries its own capture, seeded with that column's fact.
     expect(find.byType(CaptureBar), findsWidgets);
   });

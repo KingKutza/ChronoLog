@@ -15,9 +15,11 @@
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../core/exact.dart';
+import '../../stage/content.dart';
 import '../../stage/tile.dart';
 import '../gestures.dart';
 import '../law_context.dart';
@@ -43,13 +45,18 @@ class _MinimapTileState extends State<MinimapTile> with SingleTickerProviderStat
   /// frame repaints the field without rebuilding the tile around it.
   final ValueNotifier<double> _clock = ValueNotifier<double>(0);
   Duration _elapsed = Duration.zero;
-  final Notches _wheel = Notches();
+  final Notches _wheel = Notches(), _zoomWheel = Notches();
 
   MinimapPainter? _painter;
   MinimapRange? _range;
   MinimapField? _field;
   String? _tile;
   Rational _grab = Rational.zero, _span = Rational.one;
+
+  /// HOW BROAD THIS FIELD'S OWN RANGE IS, as a multiple of the shipped one. The
+  /// minimap's zoom verb moves THIS (ISSUES 9.1) -- the focused view's window is
+  /// what the box on the field draws, and scrubbing it is a different verb.
+  Rational _breadth = Rational.one;
   bool _frozen = false, _stale = true;
 
   @override
@@ -110,7 +117,9 @@ class _MinimapTileState extends State<MinimapTile> with SingleTickerProviderStat
     final law = surface.editor.engine.lawOf(frame);
     final focus = surface.views.focusOf(tile);
     _span = state.spanDays(law, surface.settings);
-    final range = _frozen && _range != null ? _range! : slideRange(_range, focus, _span, read);
+    final range = _frozen && _range != null
+        ? _range!
+        : slideRange(_range, focus, _span * _breadth, read);
     if (_stale || _field == null || range != _range || tile != _tile) {
       _range = range;
       _tile = tile;
@@ -171,14 +180,44 @@ class _MinimapTileState extends State<MinimapTile> with SingleTickerProviderStat
     widget.surface.views.setFocus(tile, painter.unproject(at) + _grab);
   }
 
+  /// The wheel, answering the WHOLE vocabulary. A surface that cannot honour a
+  /// verb refuses in words; it never silently reroutes the gesture into a
+  /// different one, which is what the missing ctrl arm was doing -- every
+  /// ctrl+wheel fell through to the pan path and nudged the view's focus
+  /// (ISSUES 9.1).
   void _signal(PointerSignalEvent event) {
     final tile = _tile;
     if (event is! PointerScrollEvent || tile == null) return;
-    final steps = _wheel.take(event.scrollDelta.dy, _px('pointer.wheelNotch'));
+    final notch = _px('pointer.wheelNotch');
+    if (HardwareKeyboard.instance.isControlPressed) return _zoomRange(event, notch);
+    final steps = _wheel.take(event.scrollDelta.dy, notch);
     if (steps == 0) return;
     final views = widget.surface.views;
     final step = widget.surface.settings.value('pointer.panStepFraction') * Rational.fromInt(steps);
     views.setFocus(tile, views.focusOf(tile) + _span * step);
+  }
+
+  /// Zoom, on this surface, is the breadth of its own range. The direction comes
+  /// from the one pointer setting every surface reads, so wheel-up means the
+  /// same thing here as it does on a lens.
+  void _zoomRange(PointerScrollEvent event, double notch) {
+    final settings = widget.surface.settings;
+    final direction = settings.value('pointer.zoomDirection').toDouble();
+    final steps = _zoomWheel.take(event.scrollDelta.dy * direction, notch);
+    if (steps == 0) return;
+    final factor = settings.value('minimap.zoomStep');
+    var next = _breadth;
+    for (var step = 0; step < steps.abs(); step += 1) {
+      next = steps < 0 ? next / factor : next * factor;
+    }
+    final least = settings.value('minimap.breadthMin');
+    final most = settings.value('minimap.breadthMax');
+    setState(() {
+      _breadth = next < least ? least : (next > most ? most : next);
+      // The range's width is what changed, so the accumulation over it is no
+      // longer the field this tile is holding.
+      _stale = true;
+    });
   }
 }
 
@@ -191,3 +230,19 @@ TileSpec minimapTileSpec(String id, Surface surface) => TileSpec(
   title: 'Minimap',
   build: (_) => MinimapTile(surface: surface),
 );
+
+/// The minimap as a CONTENT (the one ancestor, ruled 2026-09-01).
+class MinimapContent extends TileContent {
+  const MinimapContent(this.surface);
+
+  final Surface surface;
+
+  @override
+  String get kind => 'minimap';
+
+  @override
+  String get title => 'Minimap';
+
+  @override
+  TileSpec spec(String id) => minimapTileSpec(id, surface);
+}

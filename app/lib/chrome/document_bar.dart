@@ -131,30 +131,30 @@ Widget _lamp(BuildContext c, Color color) {
 Widget _save(BuildContext c, {bool word = true}) {
   final editor = ChromeScope.of(c).editor;
   final state = _saveState(c);
-  return Semantics(
-    label: 'Save',
-    button: true,
-    enabled: editor != null,
-    child: controlChip(
-      c,
-      hint: 'Write the document now — ${state.said}',
-      onTap: editor == null ? null : () => editor.store.save(force: true),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '◍',
-            style: dataStyle(
-              c,
-              color: editor == null ? ChronoTheme.of(c).hair : state.color,
-            ),
+  // The chip carries the button semantics itself now (ISSUES 9.1). This one
+  // NAMES itself in either form rather than being read off its own text: the
+  // lamp beside the word is a mark, and a control that draws a mark says the
+  // verb instead of spelling it.
+  return controlChip(
+    c,
+    hint: 'Write the document now — ${state.said}',
+    semantics: 'Save',
+    onTap: editor == null ? null : () => editor.store.save(force: true),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '◍',
+          style: dataStyle(
+            c,
+            color: editor == null ? ChronoTheme.of(c).hair : state.color,
           ),
-          if (word) ...[
-            SizedBox(width: cardPx(c, 'document.saveGap')),
-            Text('Save', style: bodyStyle(c)),
-          ],
+        ),
+        if (word) ...[
+          SizedBox(width: cardPx(c, 'document.saveGap')),
+          Text('Save', style: bodyStyle(c)),
         ],
-      ),
+      ],
     ),
   );
 }

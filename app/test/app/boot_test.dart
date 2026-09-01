@@ -134,7 +134,10 @@ void main() {
     final height = workspace.chrome.px('chrome.barHeight');
     // A BAR IS A TILE: its content thickness is what it arrives at and the
     // least it takes, and the stage divides what is left (ruled 2026-08-28).
-    final full = _surface.width - workspace.chrome.px('stage.grip') - tileChrome(workspace.chrome);
+    // It spends nothing on chrome of its own: the grip at its leading end is
+    // retired with the window bar (ISSUES 9.1), so a bar is its tile's whole
+    // width less its own hairline.
+    final full = _surface.width - tileChrome(workspace.chrome);
     for (final bar in [DocumentBar, ViewBar, ContextBar]) {
       expect(tester.getSize(find.byType(bar)).width, closeTo(full, 2), reason: '$bar');
       expect(tester.getSize(find.byType(bar)).height, closeTo(height, 1), reason: '$bar');
@@ -304,6 +307,7 @@ void main() {
       stage: workspace.stage,
       objectCard: workspace.factory.objectCard,
       frameCard: workspace.factory.frameCard,
+      settingsCard: workspace.factory.settingsCard,
     ));
     await pumpWorkspace(tester, workspace);
     expect(findNode(workspace.stage.root, card), isNull);

@@ -19,6 +19,7 @@
 
 import '../../core/exact.dart';
 import '../../core/projection.dart';
+import '../../core/staples.dart';
 import '../tunables.dart';
 
 /// The window the field covers. Wider than what the lens shows, so there is
@@ -112,7 +113,14 @@ class MinimapField {
 /// magnitude, which is why a heavily stapled object reads heavier than a bare
 /// one of the same length.
 double magnitudeOf(ProjectionEngine engine, Projection projection, Fact fact) {
-  final staples = engine.indexes.staplesOf(fact.event.id).length;
+  // FLAGGED (core zone, ruled 2026-09-01): "every connection it carries" means
+  // every connection BEYOND the one that puts it here. A placement is a staple
+  // now, and `Rational.one` below is already its own presence -- counting the
+  // placement again would say every object is structured merely by existing.
+  final staples = engine.indexes
+      .staplesOf(fact.event.id)
+      .where((staple) => !isPlacement(staple, fact.event.id))
+      .length;
   final duration = engine.eventDurationDays(fact.event);
   final weight = engine.weightOf(fact, projection).weight;
   return (Rational.one + Rational.fromInt(staples) + duration).toDouble() * weight.toDouble();

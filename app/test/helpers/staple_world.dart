@@ -99,10 +99,19 @@ class World {
       document = document.put(
         'relations',
         relation,
+        // A placement IS a staple (ruled 2026-09-01): the object's start
+        // identified with a point on the frame.
         Relation(
           id: relation,
-          type: 'attachment',
-          extra: {'event': id, 'frame': frame, 'role': 'placed', 'coordinate': placedAt},
+          type: 'staple',
+          extra: {
+            'kind': 'anchor',
+            'role': 'placed',
+            'ends': [
+              ObjectEnd(id, point: 'start').toJson(),
+              FrameEnd(frame, position: Position.coordinate(placedAt)).toJson(),
+            ],
+          },
         ),
       );
     }
@@ -111,16 +120,31 @@ class World {
 
   String pattern({Json rrule = const {'FREQ': 'WEEKLY'}, Json? templateAt}) {
     final id = _id('pattern');
-    String? template;
+    // The template placement is DERIVED from the template EVENT now, so the
+    // pattern needs an event to derive from rather than a relation id to store.
+    String? templateEvent;
     if (templateAt != null) {
-      template = _id('relation');
+      templateEvent = _id('event');
+      document = document.put(
+        'events',
+        templateEvent,
+        Event(id: templateEvent, traits: const ['event'], payload: const {'title': 'Template'}),
+      );
+      final template = _id('relation');
       document = document.put(
         'relations',
         template,
         Relation(
           id: template,
-          type: 'attachment',
-          extra: {'frame': 'calendar:work', 'coordinate': templateAt, 'role': 'template'},
+          type: 'staple',
+          extra: {
+            'kind': 'anchor',
+            'role': 'template',
+            'ends': [
+              ObjectEnd(templateEvent, point: 'start').toJson(),
+              FrameEnd('calendar:work', position: Position.coordinate(templateAt)).toJson(),
+            ],
+          },
         ),
       );
     }
@@ -133,7 +157,7 @@ class World {
         extra: {
           'kind': 'ics-rrule',
           'rrule': rrule,
-          'templateRelation': ?template,
+          'templateEvent': ?templateEvent,
           'frame': 'calendar:work',
         },
       ),

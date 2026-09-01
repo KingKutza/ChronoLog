@@ -313,6 +313,13 @@ class ProjectionEngine {
   final Map<String, List<Fact>> _series = {}, _windows = {};
   int _seriesFacts = 0, _windowFacts = 0;
 
+  /// WHY A PATTERN PRODUCED LESS THAN IT SAYS (ISSUES 9.1). Kept beside the
+  /// generated facts rather than thrown, so a series whose second segment is
+  /// broken still delivers its first -- and says what the second cost. Dropped
+  /// in lockstep with the caches the generator filled, because a refusal read off
+  /// a cache hit that never re-ran the generator would be the silence again.
+  final Map<String, String> _patternRefusals = {};
+
   // --- Being told what changed (D6) -----------------------------------------
 
   /// The full-rebuild path: a new document, nothing preserved.
@@ -365,8 +372,16 @@ class ProjectionEngine {
               attachmentTouched = true;
             }
           }
+          // DERIVED, and only derived (ruled 2026-09-01). A pattern's template
+          // placement comes from its template event, so an edit to a connection
+          // that places that event moves the series -- and nothing on the
+          // pattern record says so, because nothing on it is asked.
           for (final pattern in document.patterns.values) {
-            if (pattern.templateRelation == op.id) doomed.add(pattern.id);
+            for (final relation in [document.relations[op.id], _asRelation(op)]) {
+              if (relation?.event != null && relation!.event == pattern.templateEvent) {
+                doomed.add(pattern.id);
+              }
+            }
           }
       }
     }
@@ -430,11 +445,13 @@ class ProjectionEngine {
     if (doomed == null) {
       _series.clear();
       _windows.clear();
+      _patternRefusals.clear();
       _seriesFacts = 0;
       _windowFacts = 0;
       return;
     }
     for (final patternId in doomed) {
+      _patternRefusals.remove(patternId);
       _seriesFacts -= _series.remove(patternId)?.length ?? 0;
       for (final key in _windows.keys.where((key) => virtualPatternId(key) == patternId).toList()) {
         _windowFacts -= _windows.remove(key)?.length ?? 0;
@@ -639,8 +656,15 @@ class ProjectionEngine {
     if (placements) ...indexes.framesOf(objectId),
     ...indexes.directGroupsOf(objectId),
     for (final staple in indexes.staplesOf(objectId))
-      for (final end in indexes.endsOf(staple))
-        if (end is FrameEnd) end.frame,
+      // A PLACEMENT IS STILL ROUTE ONE'S BUSINESS (ruled 2026-09-01 does not
+      // change this). Every connection is a staple now, so "a staple" stopped
+      // being a way to say "not this object's own placement" -- and counting one
+      // here would pull a''s A-resolved coordinate into a B-only projection,
+      // which is exactly what the comment above forbids. Asked of the SENTENCE,
+      // so the exclusion means what it always meant.
+      if (placements || !isPlacement(staple, objectId))
+        for (final end in indexes.endsOf(staple))
+          if (end is FrameEnd) end.frame,
   ];
 
   /// This frame and every frame it is transitively inside, by hops. Zero for
@@ -715,15 +739,26 @@ class ProjectionEngine {
   }
 
   _Explicit _direct(String frameId) {
+    // The template placement is DERIVED, never read off the pattern's stored id
+    // (ISSUES 9.1): a pattern minted without `templateRelation` used to skip
+    // nothing here, so the template's own placement drew itself as an ordinary
+    // event -- the "appears on one day only" half of the field report.
     final templates = {
       for (final pattern in matchingPatterns(frameId))
-        if (pattern.kind == 'ics-rrule') pattern.templateRelation,
+        if (pattern.kind == 'ics-rrule') staples.templatePlacement(pattern)?.id,
     };
     final placed = <Fact>[];
     final extents = <String, Extent?>{};
     var maxDuration = Rational.zero;
     String? error;
-    for (final relation in indexes.attachmentsOf(frameId)) {
+    // Placements the document holds, and the placements STAPLES SAY (ISSUES 9.1):
+    // an object whose only position is a staple has already been positioned by
+    // that sentence, and enumerating it here is what lets a surface stop minting
+    // a companion placement record beside the staple to make it draw.
+    for (final relation in [
+      ...indexes.attachmentsOf(frameId),
+      ...?staples.stapledPlacements.byFrame[frameId],
+    ]) {
       if (templates.contains(relation.id)) continue;
       final event = document.events[relation.event];
       if (event == null) continue;
@@ -813,8 +848,26 @@ class ProjectionEngine {
   List<Fact> _expand(Pattern pattern, Rational lower, Rational upper, int limit) =>
       switch (pattern.kind) {
         'ics-rrule' => _occurrences(pattern, lower, upper, limit),
-        _ => const [],
+        // A GENERATOR THIS BUILD CANNOT READ SAYS SO (ISSUES 9.1, the same class
+        // as the starved series). An unfamiliar language is DATA and is never
+        // refused as invalid -- it loads, it saves, it is not touched -- but a
+        // record whose whole purpose is to generate, sitting silently generating
+        // nothing, is the defect Don's morning report named. It is told once, in
+        // words, beside whatever else the query answered.
+        final String kind => _unreadable(pattern, kind),
+        null => _unreadable(pattern, ''),
       };
+
+  List<Fact> _unreadable(Pattern pattern, String kind) {
+    _refuseFor(
+      pattern,
+      kind.isEmpty
+          ? 'This generator does not say what kind of rule it is, so nothing can read it.'
+          : 'This build cannot read a "$kind" generator, so it projects nothing.'
+                ' The record is kept exactly as it is.',
+    );
+    return const [];
+  }
 
   /// A series projects PER SEGMENT, and every segment's facts keep the SAME
   /// pattern provenance: a rule change is not a new identity.
@@ -827,19 +880,46 @@ class ProjectionEngine {
   /// bound, so the generator's skip-ahead stays exactly what an un-segmented
   /// series always had.
   List<Fact> _occurrences(Pattern pattern, Rational lower, Rational upper, int limit) {
-    final template = document.relations[pattern.templateRelation];
     final source = document.events[pattern.templateEvent];
-    if (template == null || source == null) return const [];
+    if (source == null) {
+      throw RecurrenceRefusal(
+        'This repeat names no template event, so there is nothing to repeat.'
+        ' Say which object the rule is about, or delete the rule.',
+      );
+    }
+    // DERIVED, not read off the record (ISSUES 9.1). Absent, stale or wrong, the
+    // stored relation id cannot starve the generator: the placement comes from
+    // the template event, and Don's document heals on load by this read alone.
+    final template = staples.templatePlacement(pattern);
+    if (template == null) {
+      throw RecurrenceRefusal(
+        'This repeat says "${_ruleWords(pattern)}", but its template'
+        ' ${_titleOf(source)} sits on no frame, so there is no first occurrence to'
+        ' repeat from. Place it, and the rule projects.',
+      );
+    }
     // A phase staple anchors the cycle's phase for the SERIES, not for one
     // segment, so it is resolved once and replaces every segment's own base --
     // without rewriting any template, which is what makes removing it restore the
     // original phase for free.
     final phase = staples.seriesPhaseDays(pattern);
     final projected = <Fact>[];
+    // A SEGMENT THAT CANNOT PRODUCE SAYS SO. Skipping one silently is the same
+    // defect the missing template was: the rule is stated, the answer is empty,
+    // and nobody said why. The reasons are collected rather than thrown at once
+    // because a series can have several segments and the working ones are still
+    // owed to the caller -- they are surfaced beside the facts by [_populate].
+    final starved = <String>[];
     for (final segment in staples.seriesSegments(pattern)) {
       if (projected.length >= limit) break;
       final base = segment.rule.baseCoordinate;
-      if (base == null) continue;
+      if (base == null) {
+        starved.add(
+          'segment ${segment.index + 1} of "${_ruleWords(pattern)}" has no coordinate'
+          ' to repeat from',
+        );
+        continue;
+      }
       final rule = _rrule(segment.rule.rrule);
       final refusal = unsupportedCalendarScale(rule, _registeredScale);
       if (refusal != null) throw RecurrenceRefusal(refusal);
@@ -847,7 +927,11 @@ class ProjectionEngine {
       Rational from;
       try {
         from = phase ?? coordinateDays(frame, base);
-      } on Object catch (_) {
+      } on Object catch (failure) {
+        starved.add(
+          'segment ${segment.index + 1} of "${_ruleWords(pattern)}" starts at a'
+          ' coordinate frame $frame cannot read (${refusalText(failure)})',
+        );
         continue;
       }
       final until = _effectiveUntil(segment, rule);
@@ -896,14 +980,18 @@ class ProjectionEngine {
               magnitudes: magnitudes,
               extra: {...source.extra, 'provenance': provenance},
             ),
+            // The occurrence's own placement, said the one way a placement is
+            // said: the template's staple with its object end re-pointed at
+            // this occurrence and its frame end carrying this instant.
             relation: template.copyWith(
               id: '$virtualId/attachment',
               extra: {
                 ...template.extra,
-                'event': virtualId,
-                'frame': frame,
-                'coordinate': coordinate,
                 'provenance': provenance,
+                'ends': [
+                  ObjectEnd(virtualId, point: startPoint).toJson(),
+                  FrameEnd(frame, position: Position.coordinate(coordinate)).toJson(),
+                ],
               },
             ),
             day: day,
@@ -914,8 +1002,26 @@ class ProjectionEngine {
         if (projected.length >= limit) break;
       }
     }
+    if (starved.isNotEmpty) _refuseFor(pattern, starved.join('; '));
     return projected;
   }
+
+  /// The rule as the card reads it back, so a refusal quotes the sentence the
+  /// author is looking at rather than describing a record.
+  String _ruleWords(Pattern pattern) {
+    final rrule = obj(pattern.extra['rrule']) ?? const {};
+    return [for (final entry in rrule.entries) '${entry.key}=${entry.value}'].join(';');
+  }
+
+  String _titleOf(Event event) {
+    final title = str(event.payload?['title']) ?? '';
+    return title.trim().isEmpty ? event.id : '"$title"';
+  }
+
+  /// A stated rule that cannot produce, in words. The FIRST reason is kept, so a
+  /// pattern with many broken segments names itself once -- the same discipline
+  /// [_direct] keeps for a frame full of broken records.
+  void _refuseFor(Pattern pattern, String message) => _patternRefusals[pattern.id] ??= message;
 
   /// The earlier of a segment's own written UNTIL and the staple that closes it.
   /// Compared as exact days, never as text: ICS writes month `01` where an editor
@@ -971,8 +1077,13 @@ class ProjectionEngine {
     if (series != null) {
       _series[pattern.id] = series;
     } else {
-      final relation = document.relations[pattern.templateRelation];
-      if (relation?.coordinate == null) return const [];
+      final relation = staples.templatePlacement(pattern);
+      if (relation?.coordinate == null) {
+        // The bounded-rule fast path had the same silent empty the generator
+        // did: no template placement, no horizon, no facts, no sentence. It
+        // refuses in the generator's own words instead (ISSUES 9.1).
+        return _expand(pattern, lower, upper, limit);
+      }
       final base = coordinateDays(relation!.frame ?? '', relation.coordinate);
       final interval = BigInt.parse('${rrule['INTERVAL'] ?? 1}');
       final factor = switch ('${rrule['FREQ'] ?? ''}'.toUpperCase()) {
@@ -1212,6 +1323,12 @@ class ProjectionEngine {
       _windowed(source, lower, upper, includeOverlaps, offer);
     }
     for (final objectId in objects) {
+      // A STAPLED OBJECT THAT STILL SITS NOWHERE SAYS SO. Reported only for the
+      // objects this projection actually reaches, so a document-wide loop nobody
+      // asked about does not shout at every query.
+      if (staples.stapledPlacements.refusals[objectId] case final String message) {
+        errors[objectId] = (source: objectId, message: message);
+      }
       for (final frameId in indexes.framesOf(objectId)) {
         // A placement on a frame this query already reads was collected by route
         // one; the object routes only import the placements that sit elsewhere.
@@ -1264,6 +1381,13 @@ class ProjectionEngine {
         if (emitted.length >= remaining) truncated = true;
       } on Object catch (failure) {
         errors[pattern.id] = (source: pattern.id, message: refusalText(failure));
+      }
+      // A REFUSAL BESIDE THE FACTS. A thrown refusal ends the pattern and is the
+      // stronger statement, so it stands; a partial one is reported here, which
+      // is the only way a series can hand back what it could produce AND say
+      // what it could not (ISSUES 9.1).
+      if (_patternRefusals[pattern.id] case final String message) {
+        errors.putIfAbsent(pattern.id, () => (source: pattern.id, message: message));
       }
     }
     return (facts: kept, truncated: truncated);
@@ -1335,6 +1459,8 @@ class ProjectionEngine {
   }) {
     final rings = _rings(fact);
     final primary = projection.primaryFrame;
+    final home = at == null ? null : homeOf(fact);
+    final signed = at == null ? null : proximityDaysOf(fact, at, home: home);
     WeightRing ring(String id, int distance) => weightRing(
       id,
       _authoredWeight(document.frames[id]?.extra),
@@ -1349,10 +1475,25 @@ class ProjectionEngine {
           if (entry.key != primary) ring(entry.key, entry.value),
       ],
       projector: primary == null ? null : ring(primary, rings[primary] ?? 0),
-      falloffDistance: at == null ? null : distanceFromHome(homeOf(fact), at),
+      falloffDistance: at == null ? null : distanceFromHome(home, at),
       halfDistanceDays: halfDistanceDays,
+      environment: {proximityVariable: ?signed},
     );
   }
+
+  /// PROXIMITY, AND THERE IS ONE OF IT (ISSUES 9.1).
+  ///
+  /// Signed days from the instant a projector is looking from to this fact's
+  /// home: positive ahead, negative behind, zero while the object is happening.
+  /// Bound into every weight formula's environment under [proximityVariable] by
+  /// [weightOf], and read directly by an optional ring like `display.proximity`
+  /// that wants the same number -- because it IS the same number, and two
+  /// derivations of one idea disagree the first time a home gains breadth.
+  ///
+  /// [home] is an optimization only: a caller that already resolved the fact's
+  /// home passes it rather than paying for the connection walk twice.
+  Rational? proximityDaysOf(Fact fact, Rational at, {DayExtent? home}) =>
+      signedDistanceFromHome(home ?? homeOf(fact), at);
 
   /// Every frame that could modify this fact's weight, by SHORTEST graph
   /// distance. The fact's own placement frame sits at one, its enclosing groups
@@ -1393,6 +1534,12 @@ class ProjectionEngine {
     final own = staples.resolveObjectExtent(objectId);
     note(objectId, own.startDays, own.endDays);
     for (final row in staples.effectiveObjectStaples(objectId)) {
+      // LISTING EVERYTHING IS NOT POSITIONING FROM EVERYTHING (ISSUES 9.1). The
+      // connection set is whole now -- memberships and containments included --
+      // and a home is built only from the connections that make a claim about
+      // where. "This belongs to that" says nothing about when, and reading a
+      // position out of it would invent one.
+      if (!row.positions) continue;
       switch (row.far) {
         case final FrameEnd end:
           note(end.frame, staples.frameEndDays(end), null);

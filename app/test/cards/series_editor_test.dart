@@ -90,22 +90,20 @@ void main() {
     expect(patterns, hasLength(1), reason: 'saying "daily" mints the pattern');
     final pattern = patterns.single;
     expect(str(obj(pattern.extra['rrule'])?['FREQ']), 'DAILY', reason: 'the rule it was told');
-    // The generator reads the pattern's TEMPLATE PLACEMENT for its base
-    // coordinate and returns nothing at all without one, so a pattern that names
-    // no template relation is a series that cannot project.
+    // REWRITTEN under the ruling of 2026-09-01 (ISSUES 9.1): the card no longer
+    // stores the template placement's id, because storing it a second time is
+    // what made "minted without it" a reachable silent state at all. What this
+    // light asserted -- that the generator can find the placement -- is asserted
+    // of the DERIVATION now, which is the one truth.
     expect(
-      pattern.templateRelation,
-      isNotNull,
-      reason:
-          'ISSUES (8.31, evening): "A daily repeat did not project ... suspect the seam '
-          'between the edit card and the pattern record" — the card mints a pattern '
-          'with no templateRelation, and the occurrence generator returns nothing '
-          'without one.',
+      pattern.extra.containsKey('templateRelation'),
+      isFalse,
+      reason: 'ruled 2026-09-01: new patterns omit it; the placement is derived',
     );
     expect(
-      bench.editor.document.relations[pattern.templateRelation]?.frame,
+      bench.editor.staples.templatePlacement(pattern)?.frame,
       _frame,
-      reason: 'and the template placement is the one the card was opened over',
+      reason: 'and the derived template placement is the one the card was opened over',
     );
   });
 

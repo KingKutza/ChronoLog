@@ -330,16 +330,50 @@ abstract class Relation with _$Relation implements DocumentRecord {
   @override
   Json toJson() => withExtras({'id': id, 'type': type}, extra);
 
-  String? get event => str(extra['event']);
-  String? get frame => str(extra['frame']);
-  String? get parent => str(extra['parent']);
-  String? get child => str(extra['child']);
-  String? get group => str(extra['group']);
-  String? get member => str(extra['member']);
+  /// THE ACCESSORS ARE DERIVATIONS OF THE ENDS (Don, ruled 2026-09-01).
+  ///
+  /// "Break the stupid compatibility, break it every time, that is the point of
+  /// alpha." There is one record shape now -- the staple -- and the words a
+  /// caller used to read off four different record kinds are READINGS of the one
+  /// shape. `attachment`, `membership`, `contains` and `composition` records
+  /// still LOAD, byte for byte, exactly as any unknown type does; nothing reads
+  /// them, so a document written by a prior prebuild starts meaning-fresh.
+  ///
+  /// Each reading names the shape it is about, so none of them is ambiguous: a
+  /// PLACEMENT is an object end and a frame end carrying a coordinate; an
+  /// AFFILIATION is an object end and a frame end carrying none; a CONTAINMENT
+  /// is object ends alone, in authored order.
+  String? get event => _objectEnds.firstOrNull?.object;
+  String? get frame => _frameEnds.firstOrNull?.frame;
+
+  /// Authored order is the one carrier of direction (staples are directional,
+  /// not typed): the first object end is held by the second.
+  String? get child => _objectEnds.length < 2 ? null : _objectEnds.first.object;
+  String? get parent => _objectEnds.length < 2 ? null : _objectEnds[1].object;
+
+  /// The affiliation reading. Which end is a FRAME is what makes the group side;
+  /// no arrow is read, because an identification carries no direction.
+  String? get group => frame;
+  String? get member => _frameEnds.isEmpty ? null : event;
+
   String? get role => str(extra['role']);
   String? get kind => str(extra['kind']);
-  Json? get coordinate => obj(extra['coordinate']);
+
+  /// The instant this connection names on its frame, or null when it names none
+  /// -- which is the whole difference between placing an object and affiliating
+  /// it with a sheet.
+  Json? get coordinate => switch (_frameEnds.firstOrNull?.position) {
+    // The RAW written map, never a re-serialized parse: a coordinate is authored
+    // text and a round trip through the parser can change its spelling, which is
+    // exactly the silent edit the heal compares against.
+    CoordinatePosition(:final json) => json,
+    _ => null,
+  };
+
   Json? get payload => obj(extra['payload']);
+
+  List<ObjectEnd> get _objectEnds => ends.whereType<ObjectEnd>().toList();
+  List<FrameEnd> get _frameEnds => ends.whereType<FrameEnd>().toList();
 
   Spread? get spread {
     final raw = obj(extra['spread']);

@@ -44,12 +44,13 @@ import 'object_harness.dart';
     'relation:lunch',
     Relation(
       id: 'relation:lunch',
-      type: 'attachment',
-      extra: const {
-        'event': 'event:lunch',
-        'frame': frame,
+      type: 'staple',
+      extra: {
+        'kind': 'anchor',
         'role': 'placed',
-        'coordinate': {
+        'ends': [
+          ObjectEnd('event:lunch', point: 'start').toJson(),
+          FrameEnd(frame, position: Position.coordinate({
           'levels': [
             {'level': 'year', 'value': '2026'},
             {'level': 'month', 'value': '8'},
@@ -57,7 +58,8 @@ import 'object_harness.dart';
             {'level': 'hour', 'value': '11'},
             {'level': 'minute', 'value': '30'},
           ],
-        },
+        })).toJson(),
+        ],
       },
     ),
   );

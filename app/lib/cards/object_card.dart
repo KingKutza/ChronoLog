@@ -38,6 +38,7 @@ import '../lens/marks.dart';
 import '../session/settings.dart';
 import 'card_chrome.dart';
 import 'card_factory.dart';
+import 'sentence_rows.dart';
 import 'staple_editor.dart';
 import 'state_control.dart';
 import 'weight_explainer.dart';
@@ -265,6 +266,24 @@ class _ObjectCardState extends State<ObjectCard> {
       primary: [
         ..._properties(context, event, definition, kind),
         cardRule(context),
+        // THE WAYS ONWARD, at the head of the region they belong to (ISSUES
+        // 9.1, the dead-end band: "moving around the app must be seamless, so
+        // every card offers at least one way on"). The sentences below carry
+        // you to whatever this object is already stapled to; these are the
+        // doors an object stapled to NOTHING still owes, and they read as what
+        // they are — somewhere to find the thing this wants to be said about.
+        cardDoors(context, [
+          cardDoor(
+            'All frames',
+            'The one list of every frame in this document — somewhere to staple this.',
+            (factory) => factory.framesBrowser(),
+          ),
+          cardDoor(
+            'The document',
+            'What this document is called, and where it saves.',
+            (factory) => factory.documentCard(),
+          ),
+        ]),
         StapleEditor(objectId: _objectId),
         cardRow(context, 'State', StateControl(objectId: _objectId)),
         ..._seriesMode(context),
@@ -480,20 +499,24 @@ class _ObjectCardState extends State<ObjectCard> {
       cardRow(
         context,
         'This occurrence',
-        cardWrap(context, [
-          namedAction(
-            context,
-            'Edit the series',
-            hint: 'Opens the template the whole series is generated from.',
-            onTap: template == null ? null : () => CardHost.of(context).openObject(template),
-          ),
-          Flexible(
-            child: cardNote(
+        // A Wrap gives its children no flex, so a Flexible inside one is a
+        // parent-data error the framework throws on -- the note wraps its own
+        // text and takes the room the Wrap gives it.
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            namedAction(
+              context,
+              'Edit the series',
+              hint: 'Opens the template the whole series is generated from.',
+              onTap: template == null ? null : () => CardHost.of(context).openObject(template),
+            ),
+            cardNote(
               context,
               'This one deviates. Match the pattern again and it retires itself.',
             ),
-          ),
-        ]),
+          ],
+        ),
       ),
     ];
   }
@@ -562,7 +585,12 @@ class _Recurrence extends StatelessWidget {
                     'templateEvent': objectId,
                     // THE SEAM. Without the template relation the series has no
                     // base coordinate and projects nothing.
-                    if (placement != null) 'templateRelation': placement.id,
+                    // FLAGGED (core zone, Don ruled 2026-09-01): a new pattern
+                    // does NOT store its template placement's id. The placement
+                    // is derived from the template event -- `templatePlacement`
+                    // is the one truth -- and storing it twice is what made a
+                    // starved series authorable. Old records keep their field
+                    // and keep loading; it is simply not believed.
                     if (frame != null) ...{
                       'frame': frame,
                       'appliesTo': [frame],

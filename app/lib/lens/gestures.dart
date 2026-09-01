@@ -29,6 +29,13 @@ const Map<String, String> pointerTunableDefaults = {
   'pointer.wheelNotch': '90',
   // Ctrl+wheel: what one notch multiplies the visible span by.
   'pointer.zoomStep': '1.25',
+  // WHICH WAY IS IN (ISSUES 9.1, "scroll-wheel zoom is reversed: wheel up zooms
+  // out"). Butter is muscle memory from other apps, and every map and browser
+  // the hand has learned zooms IN on wheel-up. The direction is a SIGNED
+  // FACTOR here rather than a minus sign buried in the handler: ship it
+  // positive for wheel-up-zooms-in, author it negative to have the old way
+  // back, and every surface that zooms reads this one key.
+  'pointer.zoomDirection': '1',
   // A plain notch on a coarse surface: this share of the visible span.
   'pointer.panStepFraction': '1/18',
   // The ghost.

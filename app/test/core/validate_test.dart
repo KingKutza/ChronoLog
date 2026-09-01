@@ -63,15 +63,6 @@ List<Plant> plants(Corpus corpus) {
       'references a missing template event',
     ),
     (
-      'patterns',
-      Pattern(
-        id: 'pattern:p',
-        language: 'x',
-        extra: {'kind': 'ics-rrule', 'templateEvent': event, 'templateRelation': 'relation:nope'},
-      ),
-      'references a missing template relation',
-    ),
-    (
       'overrides',
       Override(id: 'override:p', virtualId: stableVirtualId('pattern:nope', 'k')),
       'references a missing virtual pattern',
@@ -89,47 +80,29 @@ List<Plant> plants(Corpus corpus) {
       'relations',
       Relation(
         id: 'relation:p',
-        type: 'attachment',
-        extra: {'event': 'event:nope', 'frame': frame},
+        type: 'staple',
+        extra: {
+          'ends': [
+            ObjectEnd('event:nope', point: 'start').toJson(),
+            StapleEnd.frame(frame).toJson(),
+          ],
+        },
       ),
-      'references a missing event',
+      'end 1 references a missing object',
     ),
     (
       'relations',
       Relation(
         id: 'relation:p',
-        type: 'attachment',
-        extra: {'event': event, 'frame': 'frame:nope'},
+        type: 'staple',
+        extra: {
+          'ends': [
+            ObjectEnd(event, point: 'start').toJson(),
+            StapleEnd.frame('frame:nope').toJson(),
+          ],
+        },
       ),
-      'references a missing frame',
-    ),
-    (
-      'relations',
-      Relation(
-        id: 'relation:p',
-        type: 'composition',
-        extra: {'parent': 'frame:nope', 'child': frame},
-      ),
-      'references a missing frame',
-    ),
-    (
-      'relations',
-      Relation(
-        id: 'relation:p',
-        type: 'membership',
-        extra: {'group': corpus.groupIds.first, 'member': 'event:nope'},
-      ),
-      'references a missing member',
-    ),
-    (
-      'relations',
-      Relation(id: 'relation:p', type: 'contains', extra: {'parent': 'event:nope', 'child': event}),
-      'references a missing parent',
-    ),
-    (
-      'relations',
-      Relation(id: 'relation:p', type: 'contains', extra: {'parent': event, 'child': 'event:nope'}),
-      'references a missing child',
+      'end 2 references a missing frame',
     ),
     (
       'relations',
@@ -192,13 +165,16 @@ List<Plant> plants(Corpus corpus) {
     ('patterns', Pattern(id: 'pattern:p', extra: {'templateEvent': event}), 'lacks a language'),
     (
       'relations',
-      Relation(id: 'relation:p', type: 'contains', extra: {'parent': event, 'child': event}),
-      'makes an object contain itself',
-    ),
-    (
-      'relations',
-      Relation(id: 'relation:p', type: 'membership', extra: {'group': frame, 'member': event}),
-      'references a missing group',
+      // Containment is a staple whose ends are all silent objects (ruled
+      // 2026-09-01); a thing holding itself still says nothing.
+      Relation(
+        id: 'relation:p',
+        type: 'staple',
+        extra: {
+          'ends': [ObjectEnd(event).toJson(), ObjectEnd(event).toJson()],
+        },
+      ),
+      'connects one object to itself',
     ),
     (
       // N points are one point, n >= 0 (ruled 2026-08-31): one end is a pin
@@ -212,21 +188,6 @@ List<Plant> plants(Corpus corpus) {
         extra: {'ends': 'not a list'},
       ),
       'must carry its ends as a list',
-    ),
-    (
-      'relations',
-      Relation(
-        id: 'relation:p',
-        type: 'staple',
-        extra: {
-          'role': 'member',
-          'ends': [
-            {'frame': frame},
-            {'object': event},
-          ],
-        },
-      ),
-      'carries a top-level role',
     ),
     (
       'relations',

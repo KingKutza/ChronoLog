@@ -67,6 +67,19 @@ const Map<String, String> frameCardTextDefaults = {
   // setting"). The value names one of the card's own verbs; a name no card
   // offers is refused in words rather than guessed at.
   'card.closeVerb': 'save',
+  // WHAT A NEW FRAME STARTS AS. A seed, not a species (ISSUES 9.1: "kinds are
+  // TRAIT BUNDLES, not species"). The create door mints A FRAME; this is the
+  // bundle the card opens holding, and every word of it is authored on the card.
+  'card.newFrameTraits': 'set calendar',
+  // SETTINGS OVER SETTINGS (ISSUES 9.1, Don's ruling: "the counts are shapes,
+  // not literals"). Which keys the main settings card puts in front of you is
+  // itself a setting -- so "the top fifteen most general" is an authored list a
+  // person can rewrite, never a hardcoded fifteen.
+  'settings.general':
+      'chrome.body chrome.hit theme.name motion.duration card.closeVerb '
+          'document.saveAt document.icsPaths edit.historyDepth edit.newSpanDays '
+          'edit.snapGrainMinutes pointer.zoomStep pointer.dragThreshold '
+          'stage.splitRatio stage.maxTabs weight.halfDistanceDays',
 };
 
 /// The .ics files a directory holds, by full path, in name order. A path that
@@ -244,6 +257,31 @@ class _DocumentCardState extends State<DocumentCard> {
           mono: true,
           width: double.infinity,
         ),
+        // THE WAYS ONWARD. The document is where a person arrives with nothing
+        // in mind, so it owes the doors to everything else -- including the
+        // blank object cards, because authoring an object is a document act and
+        // not a lens act (ISSUES 9.1).
+        cardDoors(context, [
+          cardDoor(
+            'Frames',
+            'The one list of every frame in this document.',
+            (factory) => factory.framesBrowser(),
+          ),
+          newFrameDoor(),
+          ...mintingDoors(),
+          cardDoor(
+            'Settings',
+            'Every tunable in the program, in words, cut by the surface it '
+                'governs.',
+            (factory) => factory.settingsCard(),
+          ),
+          cardDoor(
+            'The palette',
+            'The colours the whole surface is drawn in. Apply is live; Save '
+                'writes a file.',
+            (factory) => factory.themesCard(),
+          ),
+        ]),
         cardWrap(context, [
           namedAction(
             context,

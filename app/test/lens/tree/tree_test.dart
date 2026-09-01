@@ -10,6 +10,7 @@ import 'dart:math';
 
 import 'package:chronolog/core/projection.dart';
 import 'package:chronolog/core/records.dart';
+import 'package:chronolog/core/staples.dart';
 import 'package:chronolog/edit/editor.dart';
 import 'package:chronolog/lens/capacity.dart';
 import 'package:chronolog/lens/theme.dart';
@@ -21,6 +22,7 @@ import 'package:chronolog/lens/tunables.dart';
 import 'package:chronolog/session/settings.dart';
 import 'package:chronolog/lens/view_tile.dart';
 import 'package:chronolog/stage/tile.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -47,7 +49,15 @@ Scene tangle(int seed) {
     world.document = world.document.put(
       'relations',
       id,
-      Relation(id: id, type: 'contains', extra: {'parent': parent, 'child': child}),
+      // CONTAINMENT is a staple: object ends alone, both silent, with authored
+      // order the one carrier of held-by (ruled 2026-09-01).
+      Relation(
+        id: id,
+        type: 'staple',
+        extra: {
+          'ends': [ObjectEnd(child).toJson(), ObjectEnd(parent).toJson()],
+        },
+      ),
     );
   }
 
@@ -156,17 +166,37 @@ void main() {
     expect(graph.hidden, greaterThan(0));
   });
 
-  test('the layout is deterministic and puts each ring at its own distance', () {
+  test('the layout is deterministic, and rings stay in order and a step apart', () {
+    // The law changed with the occupancy ruling (ISSUES 9.1): a ring is no
+    // longer AT `distance * step`, it is at least that far out and further where
+    // its own occupancy asks for room. What stays true is that it is
+    // deterministic, that every ring-mate shares one radius, and that a ring
+    // never falls inside the one within it.
     final graph = graphOver(tangle(specSeed).document);
     const centre = Offset(400, 300);
     final first = radialLayout(graph, centre, step: 100, turn: 0.6);
-    final again = radialLayout(graph, centre, step: 100, turn: 0.6);
-    expect(first, again);
+    expect(first, radialLayout(graph, centre, step: 100, turn: 0.6));
+    final radii = <int, double>{};
     for (final node in graph.nodes) {
+      final radius = (first[node.id]! - centre).distance;
       expect(
-        (first[node.id]! - centre).distance,
-        closeTo(node.distance * 100, 1),
-        reason: 'ring ${node.distance}',
+        radius,
+        greaterThanOrEqualTo(node.distance * 100 - 1),
+        reason: 'ring ${node.distance} came inside its own hop',
+      );
+      final ring = radii[node.distance];
+      if (ring == null) {
+        radii[node.distance] = radius;
+      } else {
+        expect(radius, closeTo(ring, 1), reason: 'ring ${node.distance} is one radius');
+      }
+    }
+    final hops = radii.keys.toList()..sort();
+    for (var index = 1; index < hops.length; index += 1) {
+      expect(
+        radii[hops[index]]!,
+        greaterThanOrEqualTo(radii[hops[index - 1]]! + 100 - 1),
+        reason: 'ring ${hops[index]} crowded the ring within it',
       );
     }
   });
@@ -206,7 +236,7 @@ void main() {
       );
       final held = {
         for (final row in bench.editor.document.relations.values)
-          if (row.type == 'contains') '${row.parent} ${row.child}',
+          for (final edge in stapledContainments(row)) '${edge.parent} ${edge.child}',
       };
       final events = graph.nodes.where((node) => node.map == 'events').toList();
       final movable = [
@@ -224,9 +254,62 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 50));
       final after = bench.editor.document.relations.values
-          .where((row) => row.type == 'contains')
+          .where((row) => stapledContainments(row).isNotEmpty)
           .length;
       expect(after, before + 1, reason: 'one relation, and one only');
+    },
+  );
+
+  testWidgets(
+    'the Tree pans and wheels, and moving the view authors nothing',
+    timeout: const Timeout(Duration(seconds: 45)),
+    (tester) async {
+      // ISSUES 9.1: "Tree has no way to pan around." The ruled pointer
+      // vocabulary belongs to any lens whose content can exceed its viewport --
+      // the roster carve-out was about MINTING, never about motion -- so the
+      // same verbs the time surfaces answer are answered here: middle-drag pans,
+      // the wheel pans, and neither writes a thing.
+      final bench = (await tester.runAsync(
+        () => openEditor(tangle(specSeed).document, label: 'tree-pan'),
+      ))!;
+      addTearDown(() => tester.runAsync(() => closeEditor(bench)));
+      await tester.pumpWidget(
+        Directionality(textDirection: TextDirection.ltr, child: TreeLens(tile: FakeTile(bench.editor))),
+      );
+      Offset origin() => tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((paint) => paint.painter)
+          .whereType<TreePainter>()
+          .first
+          .origin;
+      final was = bench.editor.document.relations.length;
+      expect(origin(), Offset.zero, reason: 'a fresh view has not been moved');
+
+      final centre = tester.getCenter(find.byType(TreeLens));
+      const travel = Offset(60, -40);
+      final pan = await tester.startGesture(centre, buttons: kMiddleMouseButton);
+      await pan.moveBy(travel);
+      await tester.pump();
+      await pan.up();
+      await tester.pump();
+      expect(
+        origin(),
+        travel,
+        reason: 'ISSUES (9.1): a middle-drag moved the Tree by nothing at all',
+      );
+
+      final panned = origin();
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pointer.hover(centre));
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 240)));
+      await tester.pump();
+      expect(origin(), isNot(panned), reason: 'ISSUES (9.1): the wheel moved nothing either');
+
+      expect(
+        bench.editor.document.relations.length,
+        was,
+        reason: 'moving the view is not authoring: a roster lens never mints',
+      );
     },
   );
 }

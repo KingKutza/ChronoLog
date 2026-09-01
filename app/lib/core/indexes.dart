@@ -58,35 +58,39 @@ List<String> _names(Object? value) => [
 class Indexes {
   Indexes(this.document) {
     for (final relation in document.relations.values) {
-      switch (relation.type) {
-        case 'attachment':
-          _attachment(relation);
-        case 'staple':
-          for (final end in endsOf(relation)) {
-            (_staples[end.id] ??= []).add(relation);
-          }
-        case 'contains':
-          if (relation.parent case final String parent) {
-            if (relation.child case final String child) {
-              (_children[parent] ??= <String>{}).add(child);
-              (_parents[child] ??= <String>{}).add(parent);
-            }
-          }
-        case 'membership':
-          // An authored edge that says it is not a membership is not a refusal
-          // and not a second exclusion mechanism (R2) -- it is simply not an
-          // edge. Filtering is authored as NOT in the projection now.
-          if (relation.extra['include'] == false || relation.extra['mode'] == 'exclude') break;
-          if (relation.group case final String group) {
-            if (relation.member case final String member) {
-              _edge(group, member, (
-                kind: 'authored',
-                relation: relation.id,
-                group: group,
-                via: null,
-              ));
-            }
-          }
+      // ONE SHAPE, ONE WALK (Don, ruled 2026-09-01). The four record kinds this
+      // pass used to branch on are gone: a connection is a staple, and what it
+      // SAYS is read off its ends. A record still spelled `attachment`,
+      // `membership`, `contains` or `composition` falls through here exactly as
+      // any unknown type always has -- inert data, loaded and saved byte for
+      // byte, and read by nobody. A document from a prior prebuild starts
+      // meaning-fresh rather than being converted by code kept alive for it.
+      if (!relation.isStaple) continue;
+      for (final end in endsOf(relation)) {
+        (_staples[end.id] ??= []).add(relation);
+      }
+      // WHERE IT PUTS THINGS. A frame end carrying a coordinate places the
+      // object ends it is stapled to; the first such claim wins and is not
+      // overwritten.
+      _placed(relation);
+      // AFFILIATION: a frame end that names NO point says the object is
+      // somewhere on that sheet and nothing about where. WHICH END IS A FRAME is
+      // what makes the group side; no arrow is read, because an identification
+      // carries no direction.
+      for (final edge in stapledAffiliations(relation)) {
+        _edge(edge.frame, edge.object, (
+          kind: 'staple',
+          relation: relation.id,
+          group: edge.frame,
+          via: null,
+        ));
+      }
+      // CONTAINMENT: object ends alone, every one of them silent -- the same
+      // affiliation sentence with no group side, whose authored ORDER is what
+      // the tree reads as held-by.
+      for (final edge in stapledContainments(relation)) {
+        (_children[edge.parent] ??= <String>{}).add(edge.child);
+        (_parents[edge.child] ??= <String>{}).add(edge.parent);
       }
     }
     for (final pattern in document.patterns.values) {
@@ -131,7 +135,7 @@ class Indexes {
   /// This staple's two ends, parsed exactly once per document generation.
   List<StapleEnd> endsOf(Relation relation) => _ends[relation.id] ??= relation.ends;
 
-  void _attachment(Relation relation) {
+  void _placed(Relation relation) {
     final event = relation.event;
     if (event == null) return;
     // "Seen, and it has none" is recorded distinctly from "not seen": an object
@@ -146,7 +150,14 @@ class Indexes {
     final frame = relation.frame;
     if (frame == null) return;
     (_attachments[frame] ??= []).add(relation);
-    (_framesOf[event] ??= <String>{}).add(frame);
+    // PLACED, not merely connected. [framesOf] is what the leaf predicate's
+    // "connection is not inclusion" guard reads -- "when the object ALSO has a
+    // placement on the asked-about frame, only that placement represents it
+    // there" -- so an AFFILIATION must not enter it. A staple that says the
+    // object is somewhere on a sheet without saying where places nothing, and
+    // reading it as a placement would make the object's own calendar position
+    // invisible to the very frame it is affiliated with.
+    if (isPlacement(relation)) (_framesOf[event] ??= <String>{}).add(frame);
     if (document.frames[frame]?.traits.contains('calendar') ?? false) {
       _calendarOf.putIfAbsent(event, () => frame);
     }
@@ -234,6 +245,19 @@ class Indexes {
     return closed;
   }
 
+  /// The membership closure read from the member's side, inverted once. Asked
+  /// per object inside draw loops, so a scan of every group per lookup is the
+  /// difference between usable and unusable at 500 calendars.
+  late final Map<String, Set<String>> _groupsOf = () {
+    final out = <String, Set<String>>{};
+    for (final entry in members.entries) {
+      for (final member in entry.value.keys) {
+        (out[member] ??= <String>{}).add(entry.key);
+      }
+    }
+    return out;
+  }();
+
   // --- What the engine asks -------------------------------------------------
 
   /// The object's placement relation, or null.
@@ -274,6 +298,42 @@ class Indexes {
     for (final id in members[frameId]?.keys ?? const <String>[])
       if (document.frames.containsKey(id)) id,
   };
+
+  /// EVERY FRAME THIS OBJECT IS STAPLED TO, HOWEVER AUTHORED.
+  ///
+  /// "There is no membership, only staples. The only relationship any object or
+  /// frame can have to another is a staple." (Don, ruled 2026-09-01, answering
+  /// the board report.) The four record kinds this document still stores them in
+  /// -- an attachment's frame, a membership edge, a containment parent, an
+  /// authored staple's frame end -- are four SPELLINGS of one sentence, and a
+  /// reader that counts only one of them makes the others invisible: Don's AI
+  /// Tiger Team connection, said by the picker as an anchor staple, could not
+  /// column on a board that read memberships alone.
+  ///
+  /// So this is the ONE read for the question, and it is a READ: nothing is
+  /// migrated, every record still loads and saves byte for byte. What a future
+  /// melt of the kinds themselves would take is that every writer mints one
+  /// staple record and every derivation below reads its ends -- this method is
+  /// where that change would land, and the only place, which is the point of
+  /// having it.
+  ///
+  /// Transitive by membership, because a frame inside a frame the object is in
+  /// is a frame the object is in; direct by every other route, because a staple
+  /// says what it says and nothing more.
+  List<String> stapledFrames(String objectId) {
+    final found = <String>{
+      ...?_framesOf[objectId],
+      ...?_parents[objectId],
+      for (final staple in staplesOf(objectId))
+        for (final end in endsOf(staple))
+          if (end is FrameEnd) end.frame,
+      ...?_groupsOf[objectId],
+    };
+    return [
+      for (final id in found)
+        if (document.frames.containsKey(id)) id,
+    ]..sort();
+  }
 
   /// The objects transitively inside this frame by MEMBERSHIP. Their placements
   /// live on whatever frames they are attached to; membership is a connection

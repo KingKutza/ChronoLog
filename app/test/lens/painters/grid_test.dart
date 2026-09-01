@@ -367,12 +367,16 @@ void main() {
     expect(below, isNotEmpty, reason: 'nothing was painted past the edge to slide in');
   });
 
-  test('a pan commits exactly the shift it showed: the repaint moves fidelity, never position', () {
+  test('a pan commits exactly the pixels it took: the repaint moves fidelity, never position', () {
     // Don, 2026-08-31: "I drag up and right, and then it snaps back to basically
     // the same position when I release." The painter answers with the focus
-    // movement AND what the eye may be shown; the law is that the two agree --
-    // painting again with the committed focus puts the watched time exactly the
-    // shown offset from where it was.
+    // movement, what the eye may be shown, and WHICH PIXELS THE MOVEMENT TOOK;
+    // the law is that the last two agree with the first -- painting again with
+    // the committed focus puts the watched time exactly `taken` from where it
+    // was, and whatever the commit did not take stays shown (ISSUES 9.1, the
+    // Intimate ratchet: sideways this surface can only commit whole columns, so
+    // the slide is continuous and the commit is stepped, and the remainder is
+    // carried rather than dropped).
     final random = Random(specSeed);
     final document = randomWorld(specSeed, count: 40).document;
     var checked = 0;
@@ -391,9 +395,9 @@ void main() {
       expect(was, isNotEmpty);
       expect(now, isNotEmpty, reason: 'a pan of $shift lost the time it was panning');
       expect(
-        now.any((point) => was.any((from) => (point - (from + landing.shown)).distance < 1)),
+        now.any((point) => was.any((from) => (point - (from + landing.taken)).distance < 1)),
         isTrue,
-        reason: 'a pan of $shift showed ${landing.shown} and settled at '
+        reason: 'a pan of $shift took ${landing.taken} and settled at '
             '${now.first - was.first}',
       );
       checked += 1;
@@ -416,26 +420,24 @@ void main() {
     }
   });
 
-  test('a mark is grabbed by its leading edge and CLICKED anywhere on its body', () {
-    // Two regions, two questions (ISSUES 8.31): the strip is what a drag takes
-    // hold of, so a create-drag passes through an occupied span; the body is
-    // what a click, a menu and the cursor mean, so an event can be selected and
-    // opened from anywhere on it.
+  test('the whole block grabs, and the whole block is what a click means', () {
+    // ISSUES 9.1, Don: "click on an event or todo and drag it, the event does
+    // not move -- it drags to create a new event." The nine-pixel leading strip
+    // that used to be the only grab region is gone: the common gesture gets the
+    // common verb, a drag anywhere on a block moves it, and creating THROUGH an
+    // occupied span is what wears alt (which the one pointer table already
+    // answers). A mark that declares no grab is grabbed wherever it is hit.
     final scene = sceneOf(randomWorld(specSeed, count: 400).document, const ['calendar:a']);
     final painter = IntimatePainter(scene);
     render(painter, surface);
     final wide = painter.hits.where((hit) => hit.bounds.width > 40).toList();
     expect(wide, isNotEmpty);
     for (final hit in wide.take(4)) {
+      expect(hit.grab, isNull, reason: 'no region of a block is closed to a drag');
       expect(
-        hit.grab!.contains(hit.bounds.centerLeft + const Offset(2, 0)),
-        isTrue,
-        reason: 'the leading edge moves it',
-      );
-      expect(
-        hit.grab!.contains(hit.bounds.center),
-        isFalse,
-        reason: 'the body creates through it',
+        painter.grabAt(hit.bounds.center),
+        isNotNull,
+        reason: 'the body moves it',
       );
       expect(
         hit.shape!.contains(hit.bounds.center),

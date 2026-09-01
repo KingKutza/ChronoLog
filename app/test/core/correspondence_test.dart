@@ -163,16 +163,18 @@ void main() {
       final onA = 5 + random.nextInt(400), onB = 3 + random.nextInt(400);
       document = document.put('relations', 'relation:placed', Relation(
         id: 'relation:placed',
-        type: 'attachment',
+        type: 'staple',
         extra: {
-          'event': 'event:e',
-          'frame': 'frame:a',
+          'kind': 'anchor',
           'role': 'placed',
-          'coordinate': coordinateAt(lawA, onA),
+          'ends': [
+            ObjectEnd('event:e', point: 'start').toJson(),
+            FrameEnd('frame:a', position: Position.coordinate(coordinateAt(lawA, onA))).toJson(),
+          ],
         },
       ));
       document = putStaple(document, kind: 'anchor', ends: [
-        const StapleEnd.object('event:e'),
+        const StapleEnd.object('event:e', point: 'start'),
         frameAt('frame:b', lawB, onB),
       ]).document;
       final staples = Staples(document);
@@ -362,19 +364,21 @@ void main() {
         'relation:placed',
         Relation(
           id: 'relation:placed',
-          type: 'attachment',
+          type: 'staple',
           extra: {
-            'event': 'event:e',
-            'frame': 'frame:a',
+            'kind': 'anchor',
             'role': 'placed',
-            'coordinate': coordinateAt(lawA, onA),
+            'ends': [
+              ObjectEnd('event:e', point: 'start').toJson(),
+              FrameEnd('frame:a', position: Position.coordinate(coordinateAt(lawA, onA))).toJson(),
+            ],
           },
         ),
       );
       document = putStaple(
         document,
         kind: 'anchor',
-        ends: [const StapleEnd.object('event:e'), frameAt('frame:b', lawB, onB)],
+        ends: [const StapleEnd.object('event:e', point: 'start'), frameAt('frame:b', lawB, onB)],
       ).document;
 
       final staples = Staples(document);
@@ -420,12 +424,14 @@ void main() {
         'relation:placed',
         Relation(
           id: 'relation:placed',
-          type: 'attachment',
+          type: 'staple',
           extra: {
-            'event': 'event:e',
-            'frame': 'frame:a',
+            'kind': 'anchor',
             'role': 'placed',
-            'coordinate': coordinateAt(lawA, onA),
+            'ends': [
+              ObjectEnd('event:e', point: 'start').toJson(),
+              FrameEnd('frame:a', position: Position.coordinate(coordinateAt(lawA, onA))).toJson(),
+            ],
           },
         ),
       );
@@ -435,7 +441,7 @@ void main() {
         document,
         kind: 'anchor',
         ends: [
-          const StapleEnd.object('event:e'),
+          const StapleEnd.object('event:e', point: 'start'),
           draw.isEven
               ? const StapleEnd.frame('frame:b', position: Position.authoredVoid())
               : const StapleEnd.frame('frame:b'),
@@ -485,7 +491,7 @@ void main() {
       final named = putStaple(
         document,
         kind: 'anchor',
-        ends: [const StapleEnd.object('event:e'), frameAt('frame:b', lawB, onB)],
+        ends: [const StapleEnd.object('event:e', point: 'start'), frameAt('frame:b', lawB, onB)],
       ).document;
       expect(FrameProjection(named.toJson()).framesProject('frame:b', 'frame:a'), isTrue,
           reason: 'seed $runSeed draw $draw');

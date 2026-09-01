@@ -5,16 +5,17 @@
 // tile is, and there is no floating layer to ask about. Motion is
 // transform-only and retargets rather than queueing.
 //
-// WHAT YOU DRAG IS VISIBLE (ruled 2026-08-28). Every tile wears a permanent
-// handle, and which one it wears is what it IS. A tile in a stack wears the
-// stack's strip: one tab per tile, each with its own label and its own close,
-// the strip itself the thing you drag and the surface you right-click. A tile on
-// its own wears a WINDOW BAR instead -- its name and a triple dot, no tab shape
-// and no close -- because "1 tab is not a tab it is just a window" (Don,
-// 2026-08-31), and closing is one of the verbs the handle offers rather than a
-// mark you can hit by accident. A bar, which has no thickness to spare, wears
-// the same verbs as a grip at its leading end. The hover-reveal box is gone --
-// an affordance you have to discover by hovering is not an affordance.
+// A STACK WEARS A STRIP; A LONE WINDOW WEARS NOTHING AT ALL (ISSUES 9.1, Don:
+// "Single tabs have been replaced with a nontab title in the same place,
+// defeating the purpose of removing them. The point was that the bar disappeared
+// on a single tab"). Two tiles or more is a stack, and a stack's strip is one
+// tab per tile with its own label and its own close, the strip itself the thing
+// you drag and the surface you right-click. One tile is a WINDOW: no bar, no
+// name, no grip -- nothing rests, and the tile spends no thickness on chrome.
+// Its drag point is the triple dot the pointer REVEALS at its left edge, centred
+// in y, with the same verbs behind it (drag, drop, right-click menu). This
+// retires the standing "every tile names itself", which is Don's own ruling:
+// the name in that place was the defect being reported.
 //
 // A BAR IS A TILE LIKE ANY OTHER. Its content thickness is what it takes when
 // it is first placed and the LEAST it will ever take; above that it is dragged,
@@ -34,11 +35,13 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import '../chrome/controls.dart';
+import '../chrome/keyboard.dart';
 import '../chrome/menus.dart';
 import '../core/exact.dart';
 import '../core/math.dart';
 import '../lens/theme.dart';
 import 'layout_tree.dart';
+import 'placement_rules.dart';
 
 /// Stage geometry, as named settings.
 const Map<String, String> stageTunableDefaults = {
@@ -57,15 +60,26 @@ const Map<String, String> stageTunableDefaults = {
   // a thing you hit without aiming ("Bigger x on the tabs", Don 2026-08-31), and
   // a strip shorter than `chrome.hit` could not carry one.
   'stage.strip': '2 * 16',
-  // The grip a bar wears instead of a strip: its leading end, costing the bar
-  // no thickness at all.
-  'stage.grip': '12',
+  // A LONE WINDOW'S HANDLE, across the tile's leading edge: the target the hand
+  // gets, with the mark (`stage.mark`) drawn in the middle of it. It costs the
+  // tile nothing, because the handle rides over the body rather than taking a
+  // strip off it.
+  'stage.grip': '2 * 14',
   // The two marks the stage draws with -- the close on a tab and the handle on a
   // window -- at the size the MARK is drawn, inside the hand's target it sits in.
   'stage.mark': '2 * 9',
-  // The air after a lone window's handle, so the mark is not flush against the
-  // tile's own edge.
+  // The air before a lone window's revealed handle, so the mark is not flush
+  // against the tile's own edge.
   'stage.handleInset': '2 * 2',
+  // WHERE THE POINTER FINDS THE HANDLE: a band down the tile's leading edge,
+  // and nowhere else (ISSUES 9.1, Don's ruling on the reveal region). Wide
+  // enough to hold the inset and the mark's own target with room to catch, so
+  // the hand does not have to aim at the glyph to bring it out.
+  'stage.handleBand': '2 * 18',
+  // How solid a drag bar reads while the alignment chord is held: the channel
+  // that is otherwise the stage's own ground, washed so every seam on the page
+  // can be seen at once.
+  'stage.seamWash': '0.22',
   // A bar's least thickness across its container's axis: its height in a
   // column, its width in the rarer row. A floor, never a fixed size.
   'stage.barWidth': '240',
@@ -88,7 +102,12 @@ const Map<String, String> stageTunableDefaults = {
 /// pointer and lands where it was let go. Snap rungs are opt-in and authored
 /// here (`floor(ratio * 4 + 1/2) / 4` for quarters), not a shipped ladder with
 /// a gate beside it (ruled 2026-08-28).
-const Map<String, String> stageTextDefaults = {'stage.snapTo': 'ratio'};
+const Map<String, String> stageTextDefaults = {
+  'stage.snapTo': 'ratio',
+  // WHERE A NEW TILE LANDS, AUTHORED (ISSUES 9.1). The whole rule list, in the
+  // form `PlacementRule.fromJson` already parsed and nothing ever fed it.
+  'stage.placement': defaultPlacementSource,
+};
 
 class StageView extends StatelessWidget {
   const StageView({super.key});
@@ -107,8 +126,7 @@ class StageView extends StatelessWidget {
 /// A tab strip is what tells two or more tiles apart, so one child is not a
 /// stack, wears no strip, and renders as the plain window it is -- whether it
 /// was born alone or was left alone when its neighbour closed.
-bool isStack(LayoutNode? node) =>
-    node is Branch && node.mode == 'tabs' && node.children.length > 1;
+bool isStack(LayoutNode? node) => node is Branch && node.mode == 'tabs' && node.children.length > 1;
 
 Widget _node(BuildContext c, LayoutNode node) => switch (node) {
   TileLeaf leaf => _Tile(key: ValueKey(leaf.id), leaf: leaf),
@@ -242,11 +260,30 @@ Rational Function(Rational) settleWith(Chrome chrome) {
   };
 }
 
-/// ONE VISIBLE SEAM IS ONE DIVIDER (ruled 2026-08-28). Every divider on screen
-/// registers here so a drag can gather the ones collinear and contiguous with
-/// it -- however many containers meet along that line -- and move them together
-/// for the whole gesture.
+/// A DRAG BAR MOVES THE TWO WINDOWS IT SITS BETWEEN (ISSUES 9.1, Don's ruling
+/// on dividers). Collinear dividers merging by PROXIMITY was the 8.28 default
+/// and is vetoed: "the minimap's horizontal seam linked to the lens card's
+/// horizontal seam and no dragging unstuck them". Alignment across the page is
+/// still one gesture, but it is AUTHORED AND VISIBLE -- hold `keys.alignSeams`
+/// and every drag bar on the stage paints, a drag carries its whole collinear
+/// run, and a click locks or unlocks that run so it stays linked with the chord
+/// let go. Nothing is ever inferred from how close two seams happen to be.
+///
+/// Every divider on screen registers here so the chord can find the run.
 final Set<_DividerState> _liveDividers = {};
+
+/// Is the alignment chord held? One handler for the whole stage rather than one
+/// per divider, and one notifier every drag bar watches: the mode is a property
+/// of the surface, not of whichever seam the pointer is near.
+final ValueNotifier<bool> aligningSeams = ValueNotifier(false);
+
+String _alignChord = '';
+
+bool _readChord(KeyEvent event) {
+  aligningSeams.value = chordHeld(_alignChord);
+  // Never consumed: this reads a state, it does not answer a keystroke.
+  return false;
+}
 
 class _Divider extends StatefulWidget {
   const _Divider({
@@ -278,14 +315,23 @@ class _DividerState extends State<_Divider> {
   @override
   void initState() {
     super.initState();
+    if (_liveDividers.isEmpty) HardwareKeyboard.instance.addHandler(_readChord);
     _liveDividers.add(this);
   }
 
   @override
   void dispose() {
     _liveDividers.remove(this);
+    if (_liveDividers.isEmpty) {
+      HardwareKeyboard.instance.removeHandler(_readChord);
+      aligningSeams.value = false;
+    }
     super.dispose();
   }
+
+  /// This seam's name, which is what a lock is authored against: the container
+  /// it cuts and which cut of it. Stable across rebuilds, saved with the layout.
+  String get _seamId => '${widget.branch.id}:${widget.index}';
 
   bool get _horizontal => widget.horizontal;
 
@@ -321,11 +367,24 @@ class _DividerState extends State<_Divider> {
     ChromeScope.of(context).stage.touch();
   }
 
+  /// WHAT THIS DRAG MOVES. By default: this seam, and therefore the two windows
+  /// either side of it. The collinear run is gathered only when the alignment
+  /// mode is on -- the chord held, or this seam locked into a run by someone who
+  /// held it -- so a link is something you said and can see, never a coincidence
+  /// of pixels.
+  void _resolveSeam() {
+    if (!aligningSeams.value && !ChromeScope.of(context).stage.seamLocked(_seamId)) {
+      _seam = [this];
+      return;
+    }
+    _seam = _collinear();
+  }
+
   /// Collinear and contiguous: the same axis, the same pixel line, extents that
   /// touch. Grown transitively, so a run of three stacked seams is one seam.
-  void _resolveSeam() {
+  List<_DividerState> _collinear() {
     final mine = _rect;
-    if (mine == null) return;
+    if (mine == null) return [this];
     final tolerance = ChromeScope.of(context).px('stage.dividerHit');
     final pool = [
       for (final divider in _liveDividers)
@@ -344,7 +403,15 @@ class _DividerState extends State<_Divider> {
         grew = true;
       }
     }
-    _seam = chosen;
+    return chosen;
+  }
+
+  /// The one verb of the alignment mode: this run is linked, or it is not. Off
+  /// the chord a tap does nothing here -- a seam is for dragging, and a click
+  /// that quietly re-plumbed the page is the defect being fixed.
+  void _toggleLock() {
+    if (!aligningSeams.value) return;
+    ChromeScope.of(context).stage.toggleSeamLock(_seamId);
   }
 
   void _drag(double pixels, {bool settle = false}) {
@@ -358,7 +425,7 @@ class _DividerState extends State<_Divider> {
     final chrome = ChromeScope.of(context);
     final theme = ChronoTheme.of(context);
     final painted = chrome.px('stage.divider');
-    final line = _sized(_horizontal, chrome.px('chrome.hair'), ColoredBox(color: theme.hair));
+    _alignChord = chrome.settings.text('keys.alignSeams');
     final nudge = chrome.settings.value('stage.nudge').toDouble();
     final back = _horizontal ? LogicalKeyboardKey.arrowLeft : LogicalKeyboardKey.arrowUp;
     final on = _horizontal ? LogicalKeyboardKey.arrowRight : LogicalKeyboardKey.arrowDown;
@@ -381,19 +448,41 @@ class _DividerState extends State<_Divider> {
             maxHeight: _horizontal ? null : hit,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
+              onTap: _toggleLock,
               onDoubleTap: _reset,
               onHorizontalDragStart: _horizontal ? (_) => _resolveSeam() : null,
               onHorizontalDragUpdate: _horizontal ? (d) => _drag(d.delta.dx) : null,
               onHorizontalDragEnd: _horizontal ? (_) => _drag(0, settle: true) : null,
               onVerticalDragStart: _horizontal ? null : (_) => _resolveSeam(),
               onVerticalDragUpdate: _horizontal ? null : (d) => _drag(d.delta.dy),
-              onVerticalDragEnd: _horizontal ? null : (_) => _drag(0, settle: true),
+              onVerticalDragEnd: _horizontal ? null : (d) => _drag(0, settle: true),
               child: Container(
                 width: _horizontal ? hit : null,
                 height: _horizontal ? null : hit,
                 color: const Color(0x00000000),
                 alignment: Alignment.center,
-                child: line,
+                // WHAT IS LINKED IS WHAT IS SHOWN. At rest a seam is the
+                // hairline down the middle of its channel; under the chord the
+                // whole channel washes, so every drag bar on the page can be
+                // seen at once, and a LOCKED run wears the ink rather than the
+                // hair -- the authored link, visible without holding anything.
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: aligningSeams,
+                  builder: (context, aligning, _) {
+                    final locked = chrome.stage.seamLocked(_seamId);
+                    return AnimatedContainer(
+                      duration: chrome.motion,
+                      curve: chrome.curve,
+                      width: _horizontal ? (aligning ? painted : chrome.px('chrome.hair')) : null,
+                      height: _horizontal ? null : (aligning ? painted : chrome.px('chrome.hair')),
+                      color: locked
+                          ? theme.primary
+                          : (aligning
+                                ? theme.ink.withValues(alpha: chrome.px('stage.seamWash'))
+                                : theme.hair),
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -478,6 +567,10 @@ List<MenuRow> stripMenu(BuildContext c, TileLeaf leaf) {
     menuRow('Reset sizes', stage.evenRatios),
     menuRow('Close', () => stage.close(leaf.id), hint: chrome.settings.text('keys.closeTile')),
     menuRow('Close others', others.isEmpty ? null : () => stage.closeOthers(leaf.id)),
+    // THE STAGE'S OWN MENU OPENS THE STAGE'S OWN SETTINGS (ISSUES 9.1, Don's
+    // ruling on the settings surface). The handle is where the tile's verbs
+    // live, so it is where the numbers behind them are reached from.
+    ...settingsRows(c, 'stage', 'The stage'),
   ];
 }
 
@@ -627,66 +720,117 @@ class _ControlState extends State<_Control> {
   }
 }
 
-/// A LONE WINDOW'S BAR. "1 tab is not a tab it is just a window" (Don,
-/// 2026-08-31): so a tile that is not in a stack wears no tab and no close --
-/// closing is one of the verbs its handle offers, and a mark you can hit by
-/// accident has no business on a window that has nothing to be told apart from.
+/// A LONE WINDOW'S HANDLE (ISSUES 9.1, Don): "on a single tab the bar
+/// DISAPPEARS entirely; the drag point is the triple dot as a HOVER element on
+/// the tile's left edge, centered in y. Same verbs behind it -- right-click
+/// menu, drag, drop -- just no resting chrome."
 ///
-/// What it keeps is the half of a handle that IS a handle: its own NAME, so you
-/// can see which tile you are about to grab, and the triple dot a bar's grip
-/// wears, with the same verbs behind it. The whole bar is the thing you drag and
-/// the surface you right-click, exactly as a strip is.
-Widget windowBar(BuildContext context, TileLeaf leaf) {
-  final chrome = ChromeScope.of(context);
-  final theme = ChronoTheme.of(context);
-  final title = chrome.stage.tiles[leaf.id]?.title ?? leaf.title;
-  final cap = chrome.settings.value('chrome.labelCap').round().toInt();
-  return SizedBox(
-    height: chrome.px('stage.strip'),
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.surface,
-        border: Border(
-          bottom: BorderSide(color: theme.hair, width: chrome.px('chrome.hair')),
-        ),
-      ),
-      child: DragTarget<String>(
-        onWillAcceptWithDetails: (details) => details.data != leaf.id,
-        onAcceptWithDetails: (details) => dropOnHandle(context, leaf, details.data),
-        builder: (context, candidate, _) => tileGrab(
-          context,
-          leaf,
-          _Ground(
-            washed: candidate.isNotEmpty,
-            // The name and the handle ride at their own width and are CLIPPED
-            // rather than squeezed, exactly as a strip's tabs are: a window is
-            // any width, down to a sliver, and the whole bar stays the thing you
-            // drag whatever survives the clip.
-            child: ClipRect(
-              child: OverflowBox(
-                alignment: Alignment.centerLeft,
-                maxWidth: double.infinity,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(width: chrome.px('chrome.pad')),
-                    Text(
-                      title.length > cap ? '${title.substring(0, cap)}…' : title,
-                      softWrap: false,
-                      style: labelStyle(context, color: theme.strong),
-                    ),
-                    SizedBox(width: chrome.px('chrome.gap')),
-                    stageMark(context, handleMark, color: theme.strong),
-                    SizedBox(width: chrome.px('stage.handleInset')),
-                  ],
-                ),
-              ),
+/// So NOTHING RESTS: no bar, no name, no grip, and not one pixel of the tile's
+/// thickness spent. It paints where the hand can learn ONE place -- the left
+/// edge, centred in y -- and it carries the whole handle behind it: drag it to
+/// move the tile, drop onto it to tab or swap, right-click it for the tile's
+/// verbs.
+///
+/// TWO WAYS TO BRING IT OUT, one for each kind of hand (ruled 9.1). A POINTER
+/// finds it by being in the band down the leading edge -- `stage.handleBand`
+/// wide, the reveal region and nothing outside it. A HAND WITH NO POINTER
+/// long-presses ANYWHERE in the tile, and what comes out is the same handle
+/// doing the same things; the tile's own gesture surface arms that, because a
+/// press is a property of the tile rather than of the band.
+///
+/// One handle for every lone tile, bars included. A bar used to wear a grip at
+/// its leading end and a lens a bar across its top; they were the same verbs
+/// drawn twice, and this is the one of them.
+/// WHICH TILE IS HOLDING ITS HANDLE OUT, by press. One notifier for the whole
+/// stage rather than one per tile: a press is how a hand with no pointer says
+/// "this one", and a pointer can only be in one place, so a press elsewhere
+/// putting the last one away is the same rule the hover already follows.
+final ValueNotifier<String?> heldHandle = ValueNotifier(null);
+
+class _Handle extends StatefulWidget {
+  const _Handle({required this.leaf});
+
+  final TileLeaf leaf;
+
+  @override
+  State<_Handle> createState() => _HandleState();
+}
+
+class _HandleState extends State<_Handle> {
+  bool _over = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final chrome = ChromeScope.of(context);
+    final theme = ChronoTheme.of(context);
+    final band = chrome.px('stage.handleBand');
+    return Stack(
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: EdgeInsets.only(left: chrome.px('stage.handleInset')),
+            child: ValueListenableBuilder<String?>(
+              valueListenable: heldHandle,
+              builder: (context, held, _) {
+                final shown = _over || held == widget.leaf.id;
+                // UNREVEALED IT IS NOT THERE. Not drawn at zero opacity, not a
+                // transparent target on the leading edge of every lens waiting
+                // to eat the drags that start there: absent, which is what
+                // "nothing rests" means. It arrives on the one curve, like
+                // every other ground.
+                return IgnorePointer(
+                  ignoring: !shown,
+                  child: AnimatedSwitcher(
+                    duration: chrome.motion,
+                    switchInCurve: chrome.curve,
+                    switchOutCurve: chrome.curve,
+                    child: !shown
+                        ? const SizedBox.shrink()
+                        : DragTarget<String>(
+                            onWillAcceptWithDetails: (details) => details.data != widget.leaf.id,
+                            onAcceptWithDetails: (details) =>
+                                dropOnHandle(context, widget.leaf, details.data),
+                            builder: (context, candidate, _) => tileGrab(
+                              context,
+                              widget.leaf,
+                              _Ground(
+                                washed: candidate.isNotEmpty,
+                                child: SizedBox(
+                                  width: chrome.px('stage.grip'),
+                                  child: stageMark(context, handleMark, color: theme.strong),
+                                ),
+                              ),
+                            ),
+                          ),
+                  ),
+                );
+              },
             ),
           ),
         ),
-      ),
-    ),
-  );
+        // THE BAND, and only the band: hovering the middle of a lens reveals
+        // nothing. It rides IN FRONT of the mark it reveals and behind
+        // nothing else: the mark's own region is opaque to the mouse tracker,
+        // so a band behind it would lose the pointer the moment it worked and
+        // flicker forever. Translucent, so it takes no pointer event and the
+        // tile's own content answers every press exactly as before.
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: band,
+          child: MouseRegion(
+            opaque: false,
+            hitTestBehavior: HitTestBehavior.translucent,
+            onEnter: (_) => setState(() => _over = true),
+            onExit: (_) => setState(() => _over = false),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// A STACK'S strip: one tab per tile in it, each with its own close, and the
@@ -787,31 +931,6 @@ class _Strip extends StatelessWidget {
   }
 }
 
-/// A bar's handle: the same verbs, as a grip at its leading end, so chrome is
-/// as movable as anything else without spending a strip's worth of thickness. A
-/// bar has no room for the hand's target a window's corner handle gets, so the
-/// grip is as wide as the bar can spare and as tall as the bar itself.
-Widget _grip(BuildContext context, TileLeaf leaf) {
-  final chrome = ChromeScope.of(context);
-  final theme = ChronoTheme.of(context);
-  return DragTarget<String>(
-    onWillAcceptWithDetails: (details) => details.data != leaf.id,
-    onAcceptWithDetails: (details) => dropOnHandle(context, leaf, details.data),
-    builder: (context, candidate, _) => tileGrab(
-      context,
-      leaf,
-      Container(
-        width: chrome.px('stage.grip'),
-        color: candidate.isEmpty
-            ? theme.surface
-            : theme.ink.withValues(alpha: chrome.px('stage.dropWash')),
-        alignment: Alignment.center,
-        child: Text(handleMark, style: labelStyle(context, color: theme.strong)),
-      ),
-    ),
-  );
-}
-
 class _Tile extends StatefulWidget {
   const _Tile({super.key, required this.leaf});
 
@@ -873,7 +992,8 @@ class _TileState extends State<_Tile> {
     final id = widget.leaf.id;
     final focused = chrome.stage.focusedId == id;
     // A TAB STRIP IS FOR A STACK. In one, the strip above already carries this
-    // tile's tab; alone, it is a window and wears a handle instead.
+    // tile's tab; alone, it is a window -- and a window wears NO resting chrome
+    // at all (ISSUES 9.1), only the handle the pointer reveals over its body.
     final tabbed = isStack(parentOf(chrome.stage.displayRoot, id));
     final handled = !tabbed && chrome.stage.leaves.length > 1;
     final body =
@@ -882,60 +1002,61 @@ class _TileState extends State<_Tile> {
     // EVERY TILE BODY SITS ON PAPER. A painter draws marks, not a ground;
     // without this the window's own black shows through the surface.
     final ground = ColoredBox(color: theme.paper, child: body);
-    final stack = widget.leaf.type == 'bar'
-        // A bar has no thickness to spend on a strip, so its handle rides at
-        // its leading end instead. Same verbs, same drop, no lost height.
-        ? Row(
-            children: [
-              if (handled) _grip(context, widget.leaf),
-              Expanded(child: ground),
-            ],
-          )
-        : Column(
-            children: [
-              if (handled) windowBar(context, widget.leaf),
-              Expanded(child: ground),
-            ],
-          );
     final radius = BorderRadius.circular(chrome.px('stage.radius'));
-    return GestureDetector(
+    // THE PRESS IS THE TOUCH HAND'S HOVER (ruled 9.1): held anywhere in the
+    // tile it brings out the same handle, in the same place, with the same
+    // verbs. Putting it away is a Listener rather than a tap, because a press
+    // that lands on a control belongs to that control and would never reach a
+    // recognizer here -- and a press INSIDE the band is the hand reaching for
+    // the handle it just asked for, so that one leaves it standing.
+    return Listener(
       behavior: HitTestBehavior.translucent,
-      onTapDown: (_) => chrome.stage.focus(id),
-      child: DragTarget<String>(
-        // Every tile receives a drop, bars included: what the placement rules
-        // keep out of the chrome is the DEFAULT landing, never a deliberate one.
-        onWillAcceptWithDetails: (details) => details.data != id,
-        onMove: (details) {
-          final zone = _zoneAt(details.offset);
-          if (zone != _zone) setState(() => _zone = zone);
-        },
-        onLeave: (_) => setState(() => _zone = null),
-        onAcceptWithDetails: (details) {
-          final zone = _zone ?? 'center';
-          setState(() => _zone = null);
-          chrome.stage.move(details.data, id, zone);
-        },
-        builder: (context, candidate, _) => AnimatedContainer(
-          duration: chrome.motion,
-          curve: chrome.curve,
-          // Selection and focus are INK, never a colour -- and at the SAME
-          // weight as the resting hairline, so taking focus moves no pixel.
-          decoration: BoxDecoration(
-            color: theme.paper,
-            borderRadius: radius,
-            border: Border.all(
-              color: focused ? theme.ink : theme.hair,
-              width: chrome.px('chrome.hair'),
+      onPointerDown: (event) {
+        if (event.localPosition.dx > chrome.px('stage.handleBand')) heldHandle.value = null;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTapDown: (_) => chrome.stage.focus(id),
+        onLongPress: handled ? () => heldHandle.value = id : null,
+        child: DragTarget<String>(
+          // Every tile receives a drop, bars included: what the placement rules
+          // keep out of the chrome is the DEFAULT landing, never a deliberate one.
+          onWillAcceptWithDetails: (details) => details.data != id,
+          onMove: (details) {
+            final zone = _zoneAt(details.offset);
+            if (zone != _zone) setState(() => _zone = zone);
+          },
+          onLeave: (_) => setState(() => _zone = null),
+          onAcceptWithDetails: (details) {
+            final zone = _zone ?? 'center';
+            setState(() => _zone = null);
+            chrome.stage.move(details.data, id, zone);
+          },
+          builder: (context, candidate, _) => AnimatedContainer(
+            duration: chrome.motion,
+            curve: chrome.curve,
+            // Selection and focus are INK, never a colour -- and at the SAME
+            // weight as the resting hairline, so taking focus moves no pixel.
+            decoration: BoxDecoration(
+              color: theme.paper,
+              borderRadius: radius,
+              border: Border.all(
+                color: focused ? theme.ink : theme.hair,
+                width: chrome.px('chrome.hair'),
+              ),
             ),
-          ),
-          child: ClipRRect(
-            borderRadius: radius,
-            child: Stack(
-              children: [
-                Positioned.fill(child: stack),
-                if (candidate.isNotEmpty && _zone != null)
-                  Positioned.fill(child: _preview(context, _zone!)),
-              ],
+            child: ClipRRect(
+              borderRadius: radius,
+              child: Stack(
+                children: [
+                  Positioned.fill(child: ground),
+                  // The handle costs the body nothing: it rides OVER the tile
+                  // rather than taking a strip off the top of it.
+                  if (handled) Positioned.fill(child: _Handle(leaf: widget.leaf)),
+                  if (candidate.isNotEmpty && _zone != null)
+                    Positioned.fill(child: _preview(context, _zone!)),
+                ],
+              ),
             ),
           ),
         ),

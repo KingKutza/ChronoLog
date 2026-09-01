@@ -7,6 +7,8 @@
 // identifiers, not dotted paths: `countOfType`, `countOfClass`, `tabsInTarget`,
 // `leaves`.
 
+import 'dart:convert';
+
 import '../core/exact.dart';
 import '../core/math.dart';
 import 'layout_tree.dart';
@@ -28,6 +30,7 @@ class PlacementRule {
     required this.action,
     this.axis = 'row',
     this.ratio = '1/2',
+    this.direction = 'right',
     this.maxTabs,
     this.container,
     this.before = false,
@@ -36,10 +39,15 @@ class PlacementRule {
   /// Null matches anything. [predicate] is a one-math truth expression.
   final String? type, klass, predicate;
 
-  /// `tabWithNewest` | `splitFocused` | `into`.
+  /// `tabWithNewest` | `tabWithNeighbor` | `splitFocused` | `into`.
   final String action;
 
   final String axis;
+
+  /// Which neighbour of the focused tile a `tabWithNeighbor` rule reaches for:
+  /// `left` | `right` | `up` | `down`. A rule that names a direction with no
+  /// tile that way places nothing and falls through to the next rule.
+  final String direction;
 
   /// One-math expressions, so a rule ships no bare number either.
   final String ratio;
@@ -52,6 +60,7 @@ class PlacementRule {
     'action': action,
     'axis': axis,
     'ratio': ratio,
+    'direction': direction,
     if (type != null) 'type': type,
     if (klass != null) 'class': klass,
     if (predicate != null) 'predicate': predicate,
@@ -70,6 +79,7 @@ class PlacementRule {
       action: '${source['action']}',
       axis: text('axis') ?? 'row',
       ratio: text('ratio') ?? '1/2',
+      direction: text('direction') ?? 'right',
       maxTabs: text('maxTabs'),
       container: text('container'),
       before: source['before'] == true,
@@ -77,12 +87,44 @@ class PlacementRule {
   }
 }
 
-/// Same type and class tabs with the newest of its kind -- the first one of a
-/// kind finds no such tile and falls through to the split.
-const List<PlacementRule> defaultPlacementRules = [
-  PlacementRule(action: 'tabWithNewest', maxTabs: 'stageMaxTabs'),
-  PlacementRule(action: 'splitFocused', axis: 'row', ratio: 'stageSplitRatio'),
-];
+/// THE ACTIONS THAT TAB. The stage asks the rule list what an action does
+/// rather than naming one action by hand, so an authored rule that tabs some
+/// other way needs no second branch in `Stage._place`.
+const Set<String> tabActions = {'tabWithNewest', 'tabWithNeighbor'};
+
+/// THE SHIPPED RULE LIST, WRITTEN THE WAY AN AUTHORED ONE IS (ISSUES 9.1, Don's
+/// ruling on placement). The parser was already here and nothing fed it; this
+/// is what `stage.placement` ships, and `defaultPlacementRules` is READ FROM IT
+/// rather than spelled a second time -- one list, one home, so the default and
+/// the authored form cannot drift.
+///
+/// The order is the ruling: same kind tabs with the newest of its kind; failing
+/// that, a new tile TABS INTO THE RIGHT-HAND NEIGHBOUR when there is one ("if I
+/// am in a lens and there is a window to the right, and I would open a new
+/// window: default to tabbing there"); and only with no neighbour that way does
+/// it split again. Every term of it -- which neighbour, tab versus split, per
+/// type and per class -- is a line of this list.
+const String defaultPlacementSource =
+    '[{"action":"tabWithNewest","maxTabs":"stageMaxTabs"},'
+    '{"action":"tabWithNeighbor","direction":"right","maxTabs":"stageMaxTabs"},'
+    '{"action":"splitFocused","axis":"row","ratio":"stageSplitRatio"}]';
+
+/// An authored rule list, read. A source that will not read is NO rules rather
+/// than half of them: a partly-read list would place tiles by a rule the author
+/// never wrote.
+List<PlacementRule> rulesFromSource(String source) {
+  if (source.trim().isEmpty) return const [];
+  try {
+    final read = jsonDecode(source);
+    if (read is! List) return const [];
+    final parsed = [for (final entry in read) ?PlacementRule.fromJson(entry)];
+    return parsed.length == read.length ? parsed : const [];
+  } on FormatException {
+    return const [];
+  }
+}
+
+final List<PlacementRule> defaultPlacementRules = rulesFromSource(defaultPlacementSource);
 
 /// The first rule that can place [tile], or null when none can.
 Placement? evaluatePlacement(
@@ -99,6 +141,7 @@ Placement? evaluatePlacement(
     if (rule.klass != null && rule.klass != tile.klass) continue;
     final target = switch (rule.action) {
       'tabWithNewest' => _newestOfKind(leaves, openOrder, tile),
+      'tabWithNeighbor' => _neighborOf(root, focusedId, rule.direction, tile),
       'into' => containerNamed(root, rule.container ?? '')?.id,
       // A bar is chrome pinned to an edge and is never split into: a tile with
       // nowhere else to go splits the root instead (ruled 2026-08-28).
@@ -121,7 +164,7 @@ Placement? evaluatePlacement(
     if (!_holds(rule.predicate, env)) continue;
     final limit = _number(rule.maxTabs, env);
     final ratio = _number(rule.ratio, env) ?? Rational.fromInt(1, 2);
-    if (rule.action == 'tabWithNewest' && limit != null && Rational.fromInt(tabs) >= limit) {
+    if (tabActions.contains(rule.action) && limit != null && Rational.fromInt(tabs) >= limit) {
       // A FULL STACK OVERFLOWS BESIDE ITSELF (ruled 2026-08-28). Splitting the
       // target leaf would put the new tile inside whichever page happened to be
       // showing, where nothing says it is there; splitting the STACK puts it
@@ -147,6 +190,17 @@ Placement? evaluatePlacement(
     );
   }
   return null;
+}
+
+/// The tile that way from the focused one, when it can host a tab: never the
+/// tile being placed, and never a bar -- chrome is not a DEFAULT landing, which
+/// is the same carve-out the split rule makes (ruled 2026-08-28).
+String? _neighborOf(LayoutNode? root, String? focusedId, String direction, TileLeaf tile) {
+  if (focusedId == null || tile.type == 'bar') return null;
+  final id = directionalNeighbor(root, focusedId, direction);
+  final leaf = findNode(root, id ?? '');
+  if (leaf is! TileLeaf || leaf.id == tile.id || leaf.type == 'bar') return null;
+  return leaf.id;
 }
 
 String? _newestOfKind(List<TileLeaf> leaves, List<String> openOrder, TileLeaf tile) {

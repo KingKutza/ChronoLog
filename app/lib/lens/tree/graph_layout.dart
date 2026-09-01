@@ -92,9 +92,31 @@ String _labelOf(ProjectionEngine engine, String id) {
   return title.isEmpty ? id : title;
 }
 
+/// The narrowest gap two ring-mates may sit at, as a share of one ring step.
+/// A default, not a law: the Tree passes `tree.ringSpacing` and this is what
+/// answers for a caller that has no settings to hand (the same shape as
+/// `defaultHalfDistanceDays` in `core/falloff.dart`).
+const double defaultRingSpacing = 3 / 4;
+
+/// A RING EARNS ITS RADIUS FROM ITS OCCUPANCY (ISSUES 9.1, Don: "the issue of
+/// overlap needs fixed in the tree view... I can see this getting worse with
+/// more than a dozen items").
+///
 /// A ring per hop, deterministic by id: the selection at the centre, its
 /// neighbours around it, theirs further out. No random seed and no iteration
 /// count, so the same graph draws the same way every time it is opened.
+///
+/// The radius is NOT `distance * step` any more. That gave a ring the same room
+/// whatever it held, so forty children packed shoulder to shoulder while three
+/// floated far apart -- and the lines and labels riding those positions overlap
+/// exactly as reported. A ring of `n` mates spaced evenly at radius `r` puts
+/// adjacent mates `2 * r * sin(pi / n)` apart, so the radius that keeps a stated
+/// gap is that equation solved for `r`. Overscale is the reason: usable at 500
+/// or improperly built for 3.
+///
+/// Rings stay in order and stay a step apart whatever their occupancies do, so a
+/// crowded inner ring pushes the sparse ring outside it rather than swallowing
+/// it.
 ///
 /// [turn] offsets each ring so a chain of single children does not draw as one
 /// straight spoke of coincident labels.
@@ -103,18 +125,27 @@ Map<String, Offset> radialLayout(
   Offset centre, {
   required double step,
   required double turn,
+  double spacing = defaultRingSpacing,
 }) {
   final rings = <int, List<GraphNode>>{};
   for (final node in graph.nodes) {
     (rings[node.distance] ??= []).add(node);
   }
   final places = <String, Offset>{};
-  for (final entry in rings.entries) {
-    final ring = entry.value..sort((a, b) => a.id.compareTo(b.id));
-    final radius = entry.key * step;
+  final gap = step * spacing;
+  // Hops in order, so each ring can be held outside the one within it.
+  final hops = rings.keys.toList()..sort();
+  var inner = -step;
+  for (final hop in hops) {
+    final ring = rings[hop]!..sort((a, b) => a.id.compareTo(b.id));
+    // What this ring's own occupancy asks for. One node asks for nothing: it
+    // has no ring-mate to be crowded by.
+    final earned = ring.length < 2 ? 0.0 : gap / (2 * math.sin(math.pi / ring.length));
+    final radius = math.max(math.max(hop * step, inner + step), earned);
+    inner = radius;
     for (final (index, node) in ring.indexed) {
-      final angle = -math.pi / 2 + entry.key * turn + index / ring.length * math.pi * 2;
-      places[node.id] = ring.length == 1 && entry.key == 0
+      final angle = -math.pi / 2 + hop * turn + index / ring.length * math.pi * 2;
+      places[node.id] = radius <= 0
           ? centre
           : centre + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
     }

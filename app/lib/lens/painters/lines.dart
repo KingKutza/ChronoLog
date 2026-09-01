@@ -30,6 +30,7 @@ import '../facts.dart';
 import '../law_context.dart';
 import '../lens_painter.dart';
 import '../lines/plan.dart';
+import '../marks.dart';
 import '../minimap/labels.dart';
 import '../now.dart';
 import '../radial/geometry.dart';
@@ -131,6 +132,7 @@ class LinesPainter extends LensPainter {
         ? Rational.zero
         : -span * Rational.parse((shift.dx / field.width).toStringAsFixed(9)),
     shown: Offset.zero,
+    taken: shift,
   );
 
   @override

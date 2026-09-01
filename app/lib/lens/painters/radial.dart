@@ -189,20 +189,6 @@ Path arcBand(Offset centre, double radius, double half, double from, double to) 
   ..extendWithPath(arcPath(centre, math.max(half / 2, radius - half), to, from), Offset.zero)
   ..close();
 
-/// A dashed segment. Flutter has no dash phase, and the connection vocabulary
-/// needs one wherever a drawn edge is a claim about a connection rather than a
-/// span of time -- a staple drop on Lines, a staple edge on Tree.
-void dashLine(Canvas canvas, Offset from, Offset to, Paint paint, double on, double off) {
-  final total = (to - from).distance;
-  if (total <= 0 || on <= 0) return;
-  for (var at = 0.0; at < total; at += on + math.max(off, 0)) {
-    canvas.drawLine(
-      Offset.lerp(from, to, at / total)!,
-      Offset.lerp(from, to, math.min(at + on, total) / total)!,
-      paint,
-    );
-  }
-}
 
 /// One candidate label around a ring, before collision suppression.
 typedef RingLabel = ({String text, double angle, double radius});

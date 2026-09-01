@@ -53,6 +53,14 @@ const Map<String, String> ladderTunableDefaults = {
   // How far past the ends of the authored ladder the search may double or
   // halve. A bound, not a limit on zoom: it is spent per rung, not per lens.
   'rule.extension': '24',
+  // HOW HARD A SURFACE CLINGS TO ITS OWN NAMED PAIR (ISSUES 9.1, Don: the ruler
+  // spacing "is not nearly opinionated enough and is far too narrow"). A lens
+  // may name a preferred pair; geometry alone would abandon it the moment a
+  // finer rung merely fits, which is what made the surface subdivide into a
+  // pair nobody had an opinion about. This is how far past its target spacing
+  // the preferred minor may stretch before the lens yields -- at one, the lens
+  // holds no opinion at all and the ladder decides everything.
+  'rule.preference': '4',
 };
 
 /// One rung of the ladder: what a MAJOR rule spans and what a MINOR one does, in
@@ -82,6 +90,15 @@ List<Rational> ladderSteps(Rational Function(String key) read, String prefix, St
 /// month -- so the rungs above a day are the calendar's own and not ours.
 ///
 /// Both directions, always two tiers.
+///
+/// [prefer] is a pair the CALLER holds an opinion about (Intimate's hour and
+/// quarter-hour), and [preference] is how hard it clings to it: the pair is kept
+/// while its minor still clears its target spacing and has not stretched past
+/// that target by more than this factor. Preference only ever makes the surface
+/// COARSER than geometry alone would -- both tiers still clear their targets, by
+/// more -- which is the half of the report that reads "far too narrow" (ISSUES
+/// 9.1). The lens yields to the ladder's own rungs, so what it yields to is a
+/// rung somebody authored and never a synthesized multiple.
 Rung rungFor({
   required double unitPixels,
   required double minorTarget,
@@ -89,9 +106,23 @@ Rung rungFor({
   required List<Rational> steps,
   List<Rational> extra = const [],
   int reach = 24,
+  Rung? prefer,
+  double preference = 1,
 }) {
   final minorWanted = minorTarget <= 0 ? 0.0 : minorTarget;
   final majorWanted = majorTarget < minorWanted ? minorWanted : majorTarget;
+  if (prefer != null && preference > 1) {
+    final minor = prefer.minor.toDouble() * unitPixels;
+    final major = prefer.major.toDouble() * unitPixels;
+    if (prefer.minor > Rational.zero &&
+        prefer.major > prefer.minor &&
+        (prefer.major % prefer.minor).isZero &&
+        minor >= minorWanted &&
+        major >= majorWanted &&
+        minor <= minorWanted * preference) {
+      return prefer;
+    }
+  }
   final rungs = <Rational>[
     for (final step in [...steps, ...extra])
       if (step > Rational.zero) step,

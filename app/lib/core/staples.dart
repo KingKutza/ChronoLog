@@ -143,10 +143,33 @@ StapleKind? stapleKind(String? kind) => kind == null ? null : stapleKinds[kind];
 
 // --- Ends -------------------------------------------------------------------
 
-/// The default point of an object end. A connection that says nothing about
-/// which point it touches says the object's start -- the honest reading, and the
-/// one every pre-connection document's placement already meant.
-const String defaultPoint = 'start';
+/// The object's own beginning, said explicitly. Every write that MEANS the start
+/// says this: since the silence below stopped meaning it, a site that leaves the
+/// point off is making a different claim, and the difference has to be visible
+/// at the write rather than inferred at the read.
+const String startPoint = 'start';
+
+/// ALL OF IT -- a point whose size is the object's whole extent.
+///
+/// "Staples to a point: this point is that point. Staples to an object, no
+/// point: ALL of this object is that point -- which in practice would be
+/// affiliation." (Don, ruled 2026-09-01.) A point has a size, and the whole is
+/// one of the sizes a point may have; it is not a second kind of end.
+const String wholePoint = 'all';
+
+/// What an object end that says nothing about which point it touches means.
+///
+/// RULED 2026-09-01, and it is a reversal: the silence used to read as the
+/// object's START. It reads as THE WHOLE OF IT now, exactly parallel to a frame
+/// end that names no point meaning "somewhere on that sheet, nothing about
+/// where". Both silences say the same thing in their own vocabulary -- the whole
+/// of this side is identified with the other -- and that is what an AFFILIATION
+/// is.
+///
+/// Pre-alpha, and the field data holds no silent object ends (every writer named
+/// its point), so there is no compat machinery: the reversal is the reading, and
+/// every site that meant the start now says [startPoint].
+const String defaultPoint = wholePoint;
 
 /// Reading a staple's n ends.
 ///
@@ -523,22 +546,118 @@ Rational? extentPointDays(Extent? extent, String point, {Rational? offsetDays}) 
   final start = extent?.startDays, end = extent?.endDays;
   if (start == null || end == null) return null;
   return switch (point) {
-    'start' => start,
+    startPoint => start,
     'end' => end,
     'midpoint' => (start + end) / Rational.fromInt(2),
+    // THE WHOLE IS NOT AN INSTANT (ruled 2026-09-01). A point of size `all`
+    // names the entire extent, and collapsing it to one number would pick an
+    // edge and call it the answer. Null is the honest reply, and the caller
+    // above turns it into a sentence.
+    wholePoint => null,
     _ => start + (offsetDays ?? Rational.zero),
   };
 }
 
 // --- The implicit placement staple ------------------------------------------
 
+/// AFFILIATION (Don, ruled 2026-09-01).
+///
+/// "Staples to an object, no point: ALL of this object is that point -- which in
+/// practice would be affiliation. There would not so much be membership, as it
+/// is not directional."
+///
+/// So the sentence is symmetric and the word is affiliation, not membership: an
+/// identification carries NO DIRECTION, and the `member` -> `group` arrow the old
+/// record spelled is SPELLING, NOT DATA. Nothing here reads an arrow, and nothing
+/// reads a verb -- a kind label would be the enum the trinity forbids.
+///
+/// WHAT MAKES A GROUP SIDE IS STRUCTURE: a frame end that names no point. The
+/// frame is the sheet the object is somewhere on, which is the whole of what a
+/// `membership` record ever said, and it is a fact about which END IS A FRAME
+/// rather than about which field was written first. An affiliation between two
+/// OBJECTS has no group side at all -- both ends simply belong together, and it
+/// reads the same from either one.
+///
+/// This is the one reading every affiliation reader goes through, so a staple
+/// written by the editor and a `membership` record written by an older build are
+/// the same edge to the projection, to the state grammar and to the card.
+Iterable<({String object, String frame})> stapledAffiliations(Relation staple) sync* {
+  if (!staple.isStaple) return;
+  final ends = staple.ends;
+  for (final end in ends) {
+    if (end is! FrameEnd || end.position != null) continue;
+    for (final other in ends) {
+      if (other is ObjectEnd) yield (object: other.object, frame: end.frame);
+    }
+  }
+}
+
+/// CONTAINMENT, said as a staple (ruled 2026-09-01, the silent object end).
+///
+/// Every end names an object and every one of them is SILENT -- "all of this is
+/// all of that" -- which is the affiliation sentence between two objects, with
+/// no group side and no arrow. What the tree reads as parent and child is the
+/// AUTHORED ORDER, which is the one ruled carrier of direction ("staples
+/// directional not typed; direction is the order"): each end is held by the one
+/// after it. The identification itself stays symmetric, and a reader looking
+/// from either end finds the same connection.
+///
+/// ADJACENT PAIRS ONLY. Three ends say A is in B is in C; they do not say A is
+/// DIRECTLY in C, and minting that edge would invent a containment nobody wrote
+/// where the closure above already derives what follows.
+Iterable<({String child, String parent})> stapledContainments(Relation staple) sync* {
+  if (!staple.isStaple) return;
+  final ends = staple.ends;
+  if (ends.length < 2) return;
+  for (final end in ends) {
+    if (end is! ObjectEnd || (end.point ?? '').trim().isNotEmpty) return;
+  }
+  for (var index = 0; index + 1 < ends.length; index += 1) {
+    yield (child: ends[index].id, parent: ends[index + 1].id);
+  }
+}
+
 /// Any coordinate-carrying attachment places.
 ///
 /// Completion is not an attachment any more (it is a state-frame membership plus
 /// an optional end staple), and a membership relation is a different type
 /// entirely, so neither needs excluding here.
+/// RE-SAY WHICH OBJECT a connection is about, keeping every other term.
+///
+/// One definition (ruled 2026-09-01): the id lives on an END, so a writer that
+/// spelled it as a field is writing somewhere nothing reads. Every end naming an
+/// object is re-pointed, which is what a materialized occurrence wants -- it is
+/// the same sentence about a different object.
+Relation sayingObject(Relation relation, String objectId) => relation.withField('ends', [
+  for (final end in relation.ends)
+    end is ObjectEnd
+        ? ObjectEnd(objectId, point: end.point, offset: end.offset, extra: end.extra).toJson()
+        : end.toJson(),
+]);
+
+/// RE-SAY THE INSTANT a connection's frame end names, keeping every other term.
+Relation sayingInstant(Relation relation, Json? coordinate) => relation.withField('ends', [
+  for (final end in relation.ends)
+    end is FrameEnd
+        ? FrameEnd(
+            end.frame,
+            position: coordinate == null ? null : Position.coordinate(coordinate),
+            extra: end.extra,
+          ).toJson()
+        : end.toJson(),
+]);
+
+/// A PLACEMENT IS A STAPLE THAT ANCHORS AND NAMES AN INSTANT.
+///
+/// Three structural facts, no record kind (ruled 2026-09-01): it ANCHORS a point
+/// of an object's extent, which is what tells it apart from an `end` staple
+/// carrying a completion instant on the same sheet; its frame end NAMES A
+/// COORDINATE, which is what tells it apart from an affiliation; and it names
+/// this object. The anchoring trait comes from the one kind registry that
+/// already answered this question -- nothing new decides it here.
 bool isPlacement(Relation relation, [String? objectId]) =>
-    relation.type == 'attachment' &&
+    relation.isStaple &&
+    (stapleKind(relation.kind)?.anchors ?? false) &&
     (objectId == null || relation.event == objectId) &&
     relation.coordinate != null;
 
@@ -604,8 +723,7 @@ List<List<PointClaim>> pointIdentifications(Iterable<Relation> relations) {
       // NO KIND GATE. A kind selects a derivation, never a meaning.
       final claims = [
         for (final end in relation.readEnds)
-          if (end is FrameEnd)
-            (frame: end.frame, position: end.position, source: relation.id),
+          if (end is FrameEnd) (frame: end.frame, position: end.position, source: relation.id),
       ];
       if (claims.length > 1) groups.add(claims);
       if (claims.isEmpty) continue;
@@ -618,7 +736,7 @@ List<List<PointClaim>> pointIdentifications(Iterable<Relation> relations) {
     if (!isPlacement(relation)) continue;
     final frame = relation.frame;
     if (frame == null) continue;
-    (byObjectPoint['${relation.event} $defaultPoint'] ??= <PointClaim>[]).add((
+    (byObjectPoint['${relation.event} $startPoint'] ??= <PointClaim>[]).add((
       frame: frame,
       position: Position.coordinate(relation.coordinate ?? const {}),
       source: relation.id,
@@ -640,6 +758,13 @@ List<List<PointClaim>> pointIdentifications(Iterable<Relation> relations) {
 /// [fars] is every end the connection identifies this one WITH, in authored
 /// order; [far] is its single member for the pair case and null otherwise, which
 /// is what a one-counterpart editor field still wants to read.
+///
+/// [positions] says whether this connection makes a claim about WHERE. The
+/// implicit placement and every authored staple record do; a membership, a
+/// containment and a coordinate-less attachment say only that two things are
+/// connected, and a derivation about position must not read a claim out of a
+/// sentence that made none. It is what keeps LISTING everything (ruled 9.1) from
+/// silently becoming POSITIONING from everything.
 typedef ConnectionRow = ({
   bool implicit,
   Relation? relation,
@@ -648,6 +773,7 @@ typedef ConnectionRow = ({
   StapleEnd? near,
   StapleEnd? far,
   List<StapleEnd> fars,
+  bool positions,
 });
 
 /// One correspondence entry, oriented so `from` is the asked-about frame's own
@@ -1041,39 +1167,143 @@ class Staples {
 
   // --- Anchoring ------------------------------------------------------------
 
-  /// The object's own placement relation, read as an implicit `start` connection
-  /// to the frame it is attached to. This is the migration, and it is a READING
-  /// rather than a rewrite: an event placed by a plain attachment relation IS an
-  /// event stapled at its start to that frame.
+  /// The object's own placement, which is a staple like every other connection:
+  /// its start identified with a point on a frame. The name survives the melt
+  /// because callers ask a question about the OBJECT, not about a record kind.
   Relation? placementRelation(String objectId) => placementOf(objectId);
 
-  /// The object's whole effective connection set: its implicit placement staple
-  /// first, then every authored staple, each tagged with what an editor needs to
-  /// write it back.
+  /// A SERIES' TEMPLATE PLACEMENT, DERIVED -- AND ONLY DERIVED.
+  ///
+  /// The pattern names its template EVENT and an event's placement is derivable
+  /// from the event, so storing the placement's id a second time was what made
+  /// "minted without it" a reachable silent state at all (ISSUES 9.1). The field
+  /// is not written and is NOT READ: a record that still carries one keeps it,
+  /// byte for byte, and it means nothing. There is one truth and this is it.
+  Relation? templatePlacement(Pattern pattern) {
+    final event = pattern.templateEvent;
+    return event == null ? null : placementOf(event);
+  }
+
+  /// AN OBJECT WHOSE ONLY POSITION IS A STAPLE (ISSUES 9.1, "New todo on this").
+  ///
+  /// A placement is read as an implicit start staple to a frame. This is that
+  /// reading run BACKWARDS, and it is the same one sentence: a staple that says
+  /// this object's point and a positioned point are ONE POINT has already said
+  /// where the object is, so there is nothing left for a companion placement
+  /// record to add -- and a companion record is worse than redundant, because it
+  /// bakes in a coordinate that goes stale the moment the far end is re-said,
+  /// while the staple rides.
+  ///
+  /// The extent substrate already resolves through object-to-object staples
+  /// transitively and already refuses on cycles and unreachable ends; what was
+  /// missing is that nothing ENUMERATED such an object, so it resolved to a
+  /// position no surface ever asked for. This is that enumeration, grouped by the
+  /// frame the staples land the object on, as the placement the staples say.
+  ///
+  /// The relations handed back are DERIVED and are never in the document: they
+  /// carry the staple's own id in their provenance so a surface can say which
+  /// sentence positions the object, and their id is stable across generations so
+  /// dedupe and selection hold still.
+  late final ({Map<String, List<Relation>> byFrame, Map<String, String> refusals})
+  stapledPlacements = _deriveStapledPlacements();
+
+  ({Map<String, List<Relation>> byFrame, Map<String, String> refusals}) _deriveStapledPlacements() {
+    // AN OBJECT IS ALREADY SPOKEN FOR when some staple names it AND names a
+    // frame -- placed there, or affiliated with it -- because the explicit pass
+    // enumerates it through that connection. What is derived here is the object
+    // whose only connections are to other OBJECTS, which nothing else would ever
+    // offer to a frame.
+    final attached = <String>{}, stapled = <String>{};
+    for (final relation in document.relations.values) {
+      if (!relation.isStaple) continue;
+      final objects = [
+        for (final end in relation.ends)
+          if (end is ObjectEnd) end.object,
+      ];
+      stapled.addAll(objects);
+      if (relation.ends.any((end) => end is FrameEnd)) attached.addAll(objects);
+    }
+    final byFrame = <String, List<Relation>>{};
+    final refusals = <String, String>{};
+    for (final objectId in stapled.toList()..sort()) {
+      // An object with ANY attachment already enumerates through it -- including
+      // the coordinate-less one that is bare membership, which the explicit pass
+      // places from its resolved extent. Only an object nothing has ever placed
+      // is derived here, so no object is ever offered twice.
+      if (attached.contains(objectId) || !document.events.containsKey(objectId)) continue;
+      final Extent extent;
+      try {
+        extent = resolveObjectExtent(objectId);
+      } on Object catch (failure) {
+        refusals[objectId] = refusalText(failure);
+        continue;
+      }
+      final days = extent.startDays, frame = extent.frame;
+      if (days == null || frame == null) {
+        refusals[objectId] = _unpositioned(objectId, extent);
+        continue;
+      }
+      final coordinate = lawOf(frame)?.fromDays(days).toJson();
+      if (coordinate == null) {
+        refusals[objectId] =
+            'Frame $frame has no coordinate law, so nothing can be'
+            ' written on it.';
+        continue;
+      }
+      final staple = extent.anchors.firstOrNull?.staple;
+      (byFrame[frame] ??= []).add(
+        Relation(
+          id: 'staple-placement/${staple?.id ?? objectId}/$objectId',
+          type: 'staple',
+          extra: {
+            'kind': 'anchor',
+            'role': 'placed',
+            'provenance': {'kind': 'staple', 'staple': ?staple?.id},
+            'ends': [
+              ObjectEnd(objectId, point: startPoint).toJson(),
+              FrameEnd(frame, position: Position.coordinate(Json.from(coordinate))).toJson(),
+            ],
+          },
+        ),
+      );
+    }
+    return (byFrame: byFrame, refusals: refusals);
+  }
+
+  /// WHY A STAPLED OBJECT STILL SITS NOWHERE, in words. A cycle and an
+  /// unreachable far end are different facts and are told apart, because the
+  /// author fixes them differently: one is a loop to break, the other a point to
+  /// say.
+  String _unpositioned(String objectId, Extent extent) {
+    final title = str(document.events[objectId]?.payload?['title']);
+    final named = title == null || title.trim().isEmpty ? objectId : '"$title"';
+    if (extent.cyclic) {
+      return '$named is positioned only by connections, and they resolve back'
+          ' through it -- a loop places nothing. Say one of these points against'
+          ' something already positioned.';
+    }
+    final reasons = {for (final contest in extent.unresolved) contest.reason};
+    return reasons.isEmpty
+        ? '$named is connected to nothing that has a position, so there is nowhere'
+              ' to draw it.'
+        : '$named is positioned only by connections, and ${reasons.join('; ')}.';
+  }
+
+  /// THE OBJECT'S WHOLE CONNECTION SET -- ALL OF IT (Don, ruled 2026-09-01).
+  ///
+  /// One list, and now it is one loop: a connection IS a staple, so there is no
+  /// implicit row to synthesize from a placement record and no table of other
+  /// record kinds to fold in. Both accommodations are gone with the kinds they
+  /// accommodated -- a record still spelled `attachment`, `membership` or
+  /// `contains` is inert data and is listed by nobody, because nothing reads it.
+  ///
+  /// One ROW PER OWN END, not per staple: a staple that pierces this object at
+  /// two of its own points says two things about it, and a row that named only
+  /// the first would leave the second unauthorable.
   List<ConnectionRow> effectiveObjectStaples(String objectId) {
     final rows = <ConnectionRow>[];
-    final placement = placementRelation(objectId);
-    if (placement != null) {
-      final parameters = placement.extra['parameters'];
-      final far = FrameEnd(
-        placement.frame ?? '',
-        position: Position.coordinate(placement.coordinate ?? const {}),
-        extra: parameters == null ? const {} : {'parameters': parameters},
-      );
-      rows.add((
-        implicit: true,
-        relation: placement,
-        staple: null,
-        kind: 'anchor',
-        near: ObjectEnd(objectId, point: defaultPoint),
-        far: far,
-        fars: [far],
-      ));
-    }
-    // One ROW PER OWN END, not per staple: a staple that pierces this object at
-    // two of its own points says two things about it, and a row that named only
-    // the first would leave the second unauthorable.
     for (final staple in staplesForObject(objectId)) {
+      final anchors = stapleKind(staple.kind)?.anchors ?? false;
       for (final index in staple.endIndexesOf<ObjectEnd>(objectId)) {
         final fars = staple.othersThan(index);
         rows.add((
@@ -1084,6 +1314,9 @@ class Staples {
           near: staple.readEnds[index],
           far: fars.length == 1 ? fars.single : null,
           fars: fars,
+          // An affiliation says the two belong together and nothing about where,
+          // so a derivation about position must read no claim out of it.
+          positions: anchors,
         ));
       }
     }
@@ -1131,6 +1364,22 @@ class Staples {
       for (final index in staple.endIndexesOf<ObjectEnd>(objectId)) {
         final near = staple.readEnds[index];
         final role = endPoint(near);
+        // AN ANCHOR CANNOT NAME THE WHOLE (ruled 2026-09-01). A point of size
+        // `all` is the entire extent, and an anchor asks where ONE point sits --
+        // so a staple that anchors this object by its whole is saying something
+        // no position can be derived from, and it says so instead of quietly
+        // picking an edge.
+        if (role == wholePoint) {
+          unresolved.add(
+            _contest(
+              role,
+              'this connection names the whole of this object rather than a point'
+              ' of it, so it says what it is affiliated with and not where it sits',
+              staple: staple,
+            ),
+          );
+          continue;
+        }
         final fars = staple.othersThan(index);
         if (fars.isEmpty) {
           unresolved.add(
@@ -1181,6 +1430,17 @@ class Staples {
             if (upstream.cyclic) cyclic = true;
             final point = endPoint(far);
             days = extentPointDays(upstream, point, offsetDays: magnitudeDays(far.offset));
+            if (point == wholePoint) {
+              unresolved.add(
+                _contest(
+                  role,
+                  "this connection's other end names the whole of that object"
+                  ' rather than a point of it, and a whole is not an instant',
+                  staple: staple,
+                ),
+              );
+              continue;
+            }
             if (days != null) {
               spread = spread + upstream.spread;
               frame = upstream.frame;
@@ -1240,45 +1500,11 @@ class Staples {
       // standing == days: one point said twice. Agreement is not a contest.
     }
 
-    // The object's own placement relation IS an implicit start connection to the
-    // frame it is attached to. On ANOTHER sheet that is a second spelling of the
-    // same start, so it joins [positions] and nothing is reported. In the SAME
-    // space as a believed start anchor it is a genuine second claim: anchors take
-    // precedence -- that is the documented order -- but the contest has to be
-    // REPORTED rather than silently won, because the surface that authored both
-    // is the only place that can resolve it.
-    final placement = placementRelation(objectId);
-    if (placement != null) {
-      final at = daysOf(placement.frame ?? '', Coordinate.fromJson(placement.coordinate));
-      final space = spaceOfFrame(placement.frame);
-      final sheet = positions[defaultPoint];
-      final standing = sheet?[space];
-      if (at == null) {
-        // Nothing to spell, so nothing to identify with -- but a placement that
-        // cannot be read while a staple already anchors the start is still a
-        // second claim the author has to be told about.
-        if (sheet != null) {
-          overdetermined.add(
-            _contest(
-              defaultPoint,
-              "this object's own placement also names its start",
-              relation: placement,
-            ),
-          );
-        }
-      } else if (standing == null) {
-        positions.putIfAbsent(defaultPoint, () => <String, Rational>{})[space] = at;
-      } else if (standing != at) {
-        overdetermined.add(
-          _contest(
-            defaultPoint,
-            "this object's own placement also names its start",
-            relation: placement,
-            days: at,
-          ),
-        );
-      }
-    }
+    // THE PLACEMENT BLOCK IS GONE (ruled 2026-09-01). It existed to fold a
+    // record of another kind into this pass as if it were a staple; the
+    // placement IS a staple now, so the loop above already walked it, and
+    // keeping a second path would be two readings of one record disagreeing.
+
     return (
       anchors: resolved,
       overdetermined: overdetermined,
@@ -1410,24 +1636,18 @@ class Staples {
     // A zero-staple object is legitimate -- LEXICON.md: "Zero-staple objects are
     // possible; most carry one or more." It simply has no extent to report,
     // which a caller must handle rather than be handed a fabricated date for.
-    final placement = placementRelation(objectId);
-    final startDays = placement == null
-        ? null
-        : daysOf(placement.frame ?? '', Coordinate.fromJson(placement.coordinate));
+    // And it really is zero-staple now: a placement is an anchoring staple like
+    // any other, so there is no second kind of record left to fall back to.
     return Extent(
-      startDays: startDays,
-      endDays: startDays == null ? null : startDays + magnitude,
       magnitudeDays: magnitude,
-      source: placement == null
-          ? 'unstapled'
-          : startDays == null
-          ? 'unresolved'
-          : 'placement',
+      // "Nobody said" and "somebody said something that will not resolve" are
+      // different facts and are named differently, or a broken coordinate reads
+      // as an object nobody ever placed.
+      source: found.unresolved.isEmpty && !found.cyclic ? 'unstapled' : 'unresolved',
       overdetermined: found.overdetermined,
       unresolved: found.unresolved,
       positions: found.positions,
       cyclic: found.cyclic,
-      frame: placement?.frame,
     );
   }
 
@@ -1478,7 +1698,7 @@ class Staples {
   /// entries' worth of meaning -- a bounded segment 0 and nothing after it --
   /// which is why a lone end-staple works through this without a special case.
   List<Segment> seriesSegments(Pattern pattern) {
-    final template = document.relations[pattern.templateRelation];
+    final template = templatePlacement(pattern);
     final partitioning =
         <({Relation staple, FrameEnd end, Rational days})>[
           for (final staple in staplesForSeries(pattern.id))

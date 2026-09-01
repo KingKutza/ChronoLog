@@ -9,6 +9,7 @@
 import 'package:chronolog/cards/card_chrome.dart';
 import 'package:chronolog/cards/connection_picker.dart';
 import 'package:chronolog/cards/object_card.dart';
+import 'package:chronolog/cards/sentence_rows.dart';
 import 'package:chronolog/cards/staple_editor.dart';
 import 'package:chronolog/cards/weight_explainer.dart';
 import 'package:chronolog/core/document.dart';
@@ -158,14 +159,18 @@ void main() {
       final before = bench.editor.document.relations.length;
       bench.editor.setContains(world.a, world.b, true);
       final relations = bench.editor.document.relations.values
-          .where((relation) => relation.type == 'contains')
+          // RULED 2026-09-01: containment is a staple, read by the sentence it
+          // says rather than by a record kind.
+          .where((relation) => stapledContainments(relation).isNotEmpty)
           .toList();
       expect(relations, hasLength(1));
       expect(bench.editor.document.relations.length, before + 1);
       // It passes no judgment: the reverse edge is legal data too.
       bench.editor.setContains(world.b, world.a, true);
       expect(
-        bench.editor.document.relations.values.where((r) => r.type == 'contains'),
+        bench.editor.document.relations.values.where(
+          (r) => stapledContainments(r).isNotEmpty,
+        ),
         hasLength(2),
       );
     });

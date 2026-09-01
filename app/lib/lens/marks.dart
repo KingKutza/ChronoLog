@@ -239,6 +239,24 @@ class MarkSpec {
   }
 }
 
+/// A dashed run between two points, in the ONE mark vocabulary (ruled 9.1: the
+/// to-do spectrum is "line geometry in the mark vocabulary, not a computed
+/// region"). Flutter has no dash phase, so a dashed straight line is drawn as
+/// its own segments -- and it lives HERE, in the one mark vocabulary, because a
+/// drawn edge that claims a connection rather than a span of time is a mark: a
+/// staple drop on Lines, a staple edge on Tree, a to-do's line to now.
+void dashLine(Canvas canvas, Offset from, Offset to, Paint paint, double on, double off) {
+  final total = (to - from).distance;
+  if (total <= 0 || on <= 0) return;
+  for (var at = 0.0; at < total; at += on + math.max(off, 0)) {
+    canvas.drawLine(
+      Offset.lerp(from, to, at / total)!,
+      Offset.lerp(from, to, math.min(at + on, total) / total)!,
+      paint,
+    );
+  }
+}
+
 /// The glyph geometry, in a unit square scaled to [bounds]. Straight from the
 /// stylesheet's own shapes: milestone is a square on its corner, terminator the
 /// same diamond SPLIT so the two never collide in grayscale, celestial the

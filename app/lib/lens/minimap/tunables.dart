@@ -11,6 +11,15 @@
 const Map<String, String> minimapTunableDefaults = {
   // --- The range, and the bins the field accumulates into --------------------
   'minimap.rangeMultiple': '5',
+  // CTRL+WHEEL ZOOMS THE MINIMAP'S OWN RANGE (ISSUES 9.1). The pointer table is
+  // ONE vocabulary -- ctrl+wheel is zoom, everywhere -- and this surface's zoom
+  // target is the BREADTH OF ITS OWN RANGE, not the view's window: the field
+  // shows more or less context around the same focus. One notch multiplies the
+  // range multiple by this, held between the two bounds so the field can never
+  // be zoomed into a single bin or out to a range nothing accumulates over.
+  'minimap.zoomStep': '1.25',
+  'minimap.breadthMin': '1/8',
+  'minimap.breadthMax': '64',
   'minimap.bandLow': '0.12',
   'minimap.bandHigh': '0.88',
   'minimap.anchorLow': '0.25',

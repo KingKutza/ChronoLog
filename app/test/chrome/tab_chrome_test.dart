@@ -1,11 +1,19 @@
-// TABS ON TILES (ISSUES 8.31, evening, Don live).
+// TABS ON TILES (ISSUES 8.31, evening, Don live), as amended by ISSUES 9.1.
 //
 // Three of the four points are shape, not taste, and each one is a claim the
 // rendered stage can be asked about:
 //
 //   "1 tab is not a tab it is just a window" -- a stack with ONE child renders as
-//   a plain window with no tab strip; the strip exists only at two or more, and
-//   the lone window carries its triple-dot control instead.
+//   a plain window with no tab strip; the strip exists only at two or more.
+//
+//   AMENDED (ISSUES 9.1): the lone window's triple dot does not REST there
+//   either, and RULED (9.1) that the pointer finds it in a band down the tile's
+//   LEADING EDGE -- hovering the middle of a lens reveals nothing -- while a
+//   hand with no pointer long-presses anywhere in the tile for the same handle. "Single tabs have been replaced with a nontab title in the same
+//   place, defeating the purpose of removing them... on a single tab the bar
+//   DISAPPEARS entirely; the drag point is the triple dot as a HOVER element on
+//   the tile's left edge, centered in y." The halves below that pinned a
+//   permanent handle were the drift; the strip-at-two-or-more halves stand.
 //
 //   "Bigger x on the tabs" -- the close target is a hit target, sized for
 //   fingers-and-haste rather than pixel-hunting, and settings-keyed like every
@@ -17,8 +25,11 @@
 // The fourth point ("just more aesthetic tabs") is the look pass's business and
 // is not asserted here: a golden would pin taste, and taste is Don's.
 
+import 'package:chronolog/chrome/context_bar.dart';
 import 'package:chronolog/chrome/controls.dart';
+import 'package:chronolog/chrome/document_bar.dart';
 import 'package:chronolog/chrome/shell.dart';
+import 'package:chronolog/chrome/view_bar.dart';
 import 'package:chronolog/session/view_state.dart';
 import 'package:chronolog/stage/layout_tree.dart';
 import 'package:chronolog/stage/tile.dart';
@@ -60,6 +71,18 @@ Future<Chrome> pumpStage(WidgetTester tester) async {
   return chrome;
 }
 
+/// A tile's own rectangle: its body where the tile has one, the bar it is
+/// otherwise. Derived, so nothing here has to know what the preset placed.
+Finder tileFinder(String id) {
+  final body = find.byKey(ValueKey('body-$id'));
+  if (body.evaluate().isNotEmpty) return body;
+  return find.byType(switch (id) {
+    'bar:document' => DocumentBar,
+    'bar:view' => ViewBar,
+    _ => ContextBar,
+  });
+}
+
 /// How many of the stage's leaves sit in a TAB STACK -- a `tabs` branch holding
 /// two or more children. Derived from the tree, never counted by hand, so the
 /// expectation follows whatever arrangement the preset ships.
@@ -85,13 +108,131 @@ void main() {
           'tile wears a tab strip with its own close, and the strip is supposed to '
           'exist only at two or more.',
     );
-    // And the lone window is not left with no handle at all: it carries the
-    // triple-dot control every other lone tile does.
+  });
+
+  testWidgets('nothing at all rests on a lone window: not a name, not a mark', (tester) async {
+    final chrome = await pumpStage(tester);
+    expect(tabbedLeaves(chrome), 0, reason: 'every tile here is a window, not a tab');
+    // Every tile's own title, from the stage's own record: none may be drawn
+    // anywhere while every tile stands alone.
+    for (final leaf in chrome.stage.leaves) {
+      expect(
+        find.text(chrome.stage.tiles[leaf.id]!.title),
+        findsNothing,
+        reason:
+            'ISSUES (9.1): "single tabs have been replaced with a nontab title in the '
+            'same place, defeating the purpose of removing them" -- ${leaf.id} still '
+            'names itself at rest.',
+      );
+    }
     expect(
       find.text(handleGlyph),
-      findsNWidgets(chrome.stage.leaves.length - tabbedLeaves(chrome)),
-      reason: 'every lone window carries its triple-dot control',
+      findsNothing,
+      reason: 'ISSUES (9.1): the triple dot is a HOVER element -- nothing rests.',
     );
+  });
+
+  testWidgets('the pointer finds the handle in the leading band, and nowhere else', (
+    tester,
+  ) async {
+    final chrome = await pumpStage(tester);
+    final band = chrome.px('stage.handleBand');
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await pointer.addPointer(location: Offset.zero);
+    addTearDown(pointer.removePointer);
+    // EVERY lone tile answers the same way, bars included: the claim is about
+    // the class, not about whichever tile the preset happens to put where.
+    for (final leaf in chrome.stage.leaves) {
+      final body = tester.getRect(tileFinder(leaf.id));
+      // The middle of the tile is the tile's own content and nothing else.
+      await pointer.moveTo(body.center);
+      await tester.pumpAndSettle();
+      expect(
+        find.text(handleGlyph),
+        findsNothing,
+        reason:
+            'ISSUES (9.1, ruled): the reveal region is the LEFT-EDGE BAND -- hovering '
+            'the middle of ${leaf.id} brought the handle out.',
+      );
+      await pointer.moveTo(Offset(body.left + band / 2, body.center.dy));
+      await tester.pumpAndSettle();
+      final mark = find.text(handleGlyph);
+      expect(
+        mark,
+        findsOneWidget,
+        reason:
+            'ISSUES (9.1): the drag point is the triple dot as a hover element -- '
+            '${leaf.id} showed none with the pointer in its leading band.',
+      );
+      final at = tester.getRect(mark);
+      expect(
+        at.left - body.left,
+        lessThan(body.width / 4),
+        reason: 'ISSUES (9.1): "on the tile\'s left edge"',
+      );
+      expect(
+        (at.center.dy - body.center.dy).abs(),
+        lessThan(at.height),
+        reason: 'ISSUES (9.1): "centered in y"',
+      );
+      await pointer.moveTo(Offset.zero);
+      await tester.pumpAndSettle();
+      expect(find.text(handleGlyph), findsNothing, reason: 'and it leaves with the pointer');
+    }
+  });
+
+  testWidgets('a long press anywhere in the tile brings out the same handle', (tester) async {
+    final chrome = await pumpStage(tester);
+    // RULED (9.1): a hand with no pointer has no hover to find the band with,
+    // so the press is its hover -- held anywhere in the tile, answered by the
+    // handle in the one place the handle ever lives.
+    for (final leaf in chrome.stage.leaves) {
+      final body = tester.getRect(tileFinder(leaf.id));
+      await tester.longPressAt(body.center);
+      await tester.pumpAndSettle();
+      final mark = find.text(handleGlyph);
+      expect(
+        mark,
+        findsOneWidget,
+        reason:
+            'ISSUES (9.1, ruled): long-press anywhere in the tile reveals the handle -- '
+            '${leaf.id} answered a held press with nothing.',
+      );
+      final at = tester.getRect(mark);
+      expect(at.left - body.left, lessThan(body.width / 4), reason: 'in the one place');
+      expect((at.center.dy - body.center.dy).abs(), lessThan(at.height), reason: 'centred in y');
+      // The next press puts it away: a touch surface has no "leave" but this.
+      await tester.tapAt(body.center);
+      await tester.pumpAndSettle();
+      expect(find.text(handleGlyph), findsNothing, reason: 'and a press puts it away again');
+    }
+  });
+
+  testWidgets('the revealed handle carries the same verbs the strip does', (tester) async {
+    final chrome = await pumpStage(tester);
+    final minimap = chrome.stage.leaves.firstWhere((leaf) => leaf.type == 'minimap');
+    final band = chrome.px('stage.handleBand');
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await pointer.addPointer(location: Offset.zero);
+    addTearDown(pointer.removePointer);
+    final body = tester.getRect(tileFinder(minimap.id));
+    await pointer.moveTo(Offset(body.left + band / 2, body.center.dy));
+    await tester.pumpAndSettle();
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text(handleGlyph)),
+      buttons: kSecondaryButton,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    for (final verb in const ['Zoom', 'Close']) {
+      expect(
+        find.textContaining(verb),
+        findsWidgets,
+        reason:
+            'ISSUES (9.1): "same verbs behind it -- right-click menu, drag, drop" -- '
+            '"$verb" was not offered on the revealed handle.',
+      );
+    }
   });
 
   testWidgets('two tiles in ONE stack do wear a tab strip, one close each', (tester) async {

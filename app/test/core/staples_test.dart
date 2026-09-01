@@ -499,11 +499,15 @@ void main() {
       final extent = world.staples.resolveObjectExtent(object);
       final connection = _days(2026, 8, 10) + Rational.fromInt(9, 24);
       final own = _days(2026, 8, 10) + Rational.fromInt(19, 48);
-      expect(extent.startDays, connection);
       expect(extent.startDays, isNot((connection + own) / Rational.fromInt(2)));
-      final contest = extent.overdetermined.singleWhere((item) => item.staple == null);
-      expect(contest.relation!.type, 'attachment');
-      expect(contest.role, 'start');
+      // REWRITTEN under the ruling of 2026-09-01: the placement IS a staple, so
+      // this is two anchors claiming one point in one space, and neither is
+      // privileged by being spelled in a different record kind. One is believed
+      // by the substrate's stable order and the other is REPORTED -- never
+      // averaged, which is the claim above.
+      final contest = extent.overdetermined.singleWhere((item) => item.role == 'start');
+      expect(contest.staple, isNotNull);
+      expect([connection, own], contains(extent.startDays));
     });
 
     test('REGRESSION GUARD: an object with no anchor staples resolves to plain '
@@ -521,11 +525,16 @@ void main() {
         );
         final extent = world.staples.resolveObjectExtent(object);
         final start = _days(2026, month, day) + Rational.fromInt(hour, 24);
-        expect(extent.source, 'placement');
+        // RULED 2026-09-01: a placement is an anchoring staple like any other, so
+      // it reports the source every anchor reports.
+      expect(extent.source, 'anchor+magnitude');
         expect(extent.startDays, start);
         expect(extent.endDays, start + _minutes(duration));
         expect(extent.magnitudeDays, _minutes(duration));
-        expect(extent.anchors, isEmpty);
+        // RULED 2026-09-01: the object's own placement is an anchoring staple,
+        // so it is the one anchor here rather than no anchor at all.
+        expect(extent.anchors, hasLength(1));
+        expect(extent.anchors.single.role, 'start');
         expect(extent.overdetermined, isEmpty);
         expect(extent.spread.before, Rational.zero);
       }
@@ -580,7 +589,16 @@ void main() {
         world.document = world.document.put(
           'relations',
           placement.id,
-          placement.withField('coordinate', civil(2026, 8, 10, 9 + shiftHours, 0, 0)),
+          // The coordinate lives on the FRAME END now (ruled 2026-09-01).
+          placement.withField('ends', [
+            for (final end in placement.ends)
+              end is FrameEnd
+                  ? FrameEnd(
+                      end.frame,
+                      position: Position.coordinate(civil(2026, 8, 10, 9 + shiftHours, 0, 0)),
+                    ).toJson()
+                  : end.toJson(),
+          ]),
         );
         final after = world.staples.resolveObjectExtent(previous).startDays!;
         expect(after - before, Rational.fromInt(shiftHours, 24));
@@ -615,7 +633,7 @@ void main() {
           expect(extent.cyclic, isTrue, reason: 'the cycle is reported');
           expect(extent.unresolved, isNotEmpty);
         }
-        expect(staples.resolveObjectExtent(unrelated).source, 'placement');
+        expect(staples.resolveObjectExtent(unrelated).source, 'anchor+magnitude');
       }
     });
 
@@ -704,19 +722,23 @@ void main() {
           _frameAt(civil(2026, 8, 10, 17, 0, 0)),
         ],
       );
+      // REWRITTEN under the ruling of 2026-09-01. The premise -- "the placement
+      // is a READING of a record of another kind" -- is retired: the placement
+      // IS a staple, so there is no implicit row to synthesize and no second
+      // record shape for one to be synthesized from. What survives is the claim
+      // that mattered: the object's start is one row, said out loud.
       final rows = world.staples.effectiveObjectStaples(object);
       expect(rows, hasLength(2));
-      expect(rows.first.implicit, isTrue);
-      expect(rows.first.staple, isNull);
-      expect(rows.first.relation!.type, 'attachment');
+      expect(rows.first.implicit, isFalse);
+      expect(rows.first.staple, isNotNull);
       expect(endPoint(rows.first.near), 'start');
       expect((rows.first.far! as FrameEnd).frame, 'calendar:work');
       expect(rows.last.implicit, isFalse);
       expect(rows.last.kind, 'anchor');
-      // No migration: the attachment is still an attachment, and the only new
-      // record is the staple that was authored.
+      // One shape: every connection in the document is a staple, and the only
+      // new record is the one that was authored.
       expect(world.document.relations.length, before + 1);
-      expect(world.document.relations.values.where((r) => r.type == 'attachment'), hasLength(1));
+      expect(world.document.relations.values.every((r) => r.isStaple), isTrue);
     });
   });
 
@@ -874,8 +896,13 @@ void main() {
         ],
       );
       final extent = world.staples.resolveObjectExtent(object);
-      expect(extent.source, 'placement');
-      expect(extent.anchors, isEmpty);
+      // RULED 2026-09-01: a placement is an anchoring staple like any other, so
+      // it reports the source every anchor reports.
+      expect(extent.source, 'anchor+magnitude');
+      // RULED 2026-09-01: the placement anchors; what this test is about is that
+      // the CORRESPONDENCE does not add a second one.
+      expect(extent.anchors, hasLength(1));
+      expect(extent.anchors.single.staple.kind, 'anchor');
     });
   });
 

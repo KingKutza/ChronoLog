@@ -52,18 +52,35 @@ Document _objects(Document document, int count, Random random) {
   return next;
 }
 
+/// AFFILIATION (Don, ruled 2026-09-01): the object's whole on a sheet, said as a
+/// staple whose frame end names no point. Which end is a FRAME is what makes the
+/// group side; there is no arrow.
 Document _member(Document document, String group, String member, String id) => document.put(
   'relations',
   id,
-  Relation(id: id, type: 'membership', extra: {'group': group, 'member': member}),
+  Relation(
+    id: id,
+    type: 'staple',
+    extra: {
+      'ends': [ObjectEnd(member).toJson(), StapleEnd.frame(group).toJson()],
+    },
+  ),
 );
 
+/// CONTAINMENT: object ends alone, both silent -- "all of this is all of that"
+/// -- with authored order the one carrier of held-by.
 Document _contains(Document document, String parent, String child) {
   final id = 'contains:$parent>$child';
   return document.put(
     'relations',
     id,
-    Relation(id: id, type: 'contains', extra: {'parent': parent, 'child': child}),
+    Relation(
+      id: id,
+      type: 'staple',
+      extra: {
+        'ends': [ObjectEnd(child).toJson(), ObjectEnd(parent).toJson()],
+      },
+    ),
   );
 }
 
@@ -497,13 +514,15 @@ void main() {
               'relation:place-$index',
               Relation(
                 id: 'relation:place-$index',
-                type: 'attachment',
+                type: 'staple',
                 extra: {
-                  'event': id,
-                  'frame': 'frame:wall-time',
+                  'kind': 'anchor',
                   'role': 'observed',
-                  'coordinate': daysToCivilCoordinate(Rational(BigInt.from(random.nextInt(9999))))
-                      .toJson(),
+                  'ends': [
+                    ObjectEnd(id, point: 'start').toJson(),
+                    FrameEnd('frame:wall-time', position: Position.coordinate(daysToCivilCoordinate(Rational(BigInt.from(random.nextInt(9999))))
+                      .toJson())).toJson(),
+                  ],
                 },
               ),
             );

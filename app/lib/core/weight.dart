@@ -22,7 +22,27 @@ import 'math.dart';
 /// restating the literal.
 const String weightVariable = 'w';
 
+/// The other name a weight formula may read: SIGNED DAYS FROM THE INSTANT THE
+/// PROJECTOR IS LOOKING FROM to this object's home -- positive ahead, negative
+/// behind, zero while the object is happening.
+///
+/// Proximity is not a second weight mechanism, and nothing here special-cases
+/// it: it is one more bound value in the one math, so `display.proximity` and
+/// `display.weight` are the same kind of authored sentence and a projector that
+/// wants near things loud writes it as arithmetic rather than asking for a knob.
+/// A formula that never names it is unaffected.
+const String proximityVariable = 'days';
+
 final RegExp _plainNumber = RegExp(r'^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$');
+
+/// Is this authored text a bare number rather than a formula?
+///
+/// THE ONE TEST (ISSUES 9.1). Every knob that offers sugar -- a plain number
+/// meaning something specific to that knob -- has to ask the same question the
+/// same way, or two knobs disagree about whether `.5` is a number. Exported
+/// rather than re-written per knob, which is what `display.proximity` was doing
+/// with its own copy of this expression.
+bool isPlainWeightNumber(String text) => _plainNumber.hasMatch(text);
 
 /// THE SUGAR RULE, and the migration it exists for: every `display.weight`
 /// authored before formulas existed is a plain number `n`, and its meaning was
@@ -43,7 +63,7 @@ String normalizeWeightFormula(Object? value) {
   }
   final text = value.toString().trim();
   if (text.isEmpty) return weightVariable;
-  return _plainNumber.hasMatch(text) ? '$weightVariable * ($text)' : text;
+  return isPlainWeightNumber(text) ? '$weightVariable * ($text)' : text;
 }
 
 /// Evaluates one ring's authored weight (a number, a formula string, or
@@ -56,16 +76,36 @@ String normalizeWeightFormula(Object? value) {
 /// silent at this layer; [validateWeightFormula] is where a caller asks "is
 /// this valid" so it can tell an author BEFORE the formula ever reaches this
 /// fallback. Zero is not a failure: a frame is allowed to demote to nothing.
-Rational applyWeightFormula(Object? formula, Rational incoming) {
+Rational applyWeightFormula(
+  Object? formula,
+  Rational incoming, {
+  Map<String, Rational> environment = const {},
+}) => evaluateWeightFormula(formula, incoming, environment: environment) ?? incoming;
+
+/// The same evaluation, answering NULL where [applyWeightFormula] answers
+/// [incoming]: the formula would not read, or came to something that is not a
+/// weight.
+///
+/// ONE EVALUATOR (ISSUES 9.1). The two callers want the same arithmetic and
+/// differ only in what they do about a refusal -- a ring in the blessed chain
+/// passes the weight through untouched, while an OPTIONAL ring omits itself
+/// rather than reporting a step that did nothing. Written once so a knob cannot
+/// quietly acquire its own idea of what a weight formula is.
+Rational? evaluateWeightFormula(
+  Object? formula,
+  Rational incoming, {
+  Map<String, Rational> environment = const {},
+}) {
   try {
     final result = evaluateSource(
       normalizeWeightFormula(formula),
-      Env(values: {weightVariable: incoming}),
+      // The incoming weight wins any collision: `w` is this function's own
+      // contract and an environment cannot redefine it out from under a formula.
+      Env(values: {...environment, weightVariable: incoming}),
     );
-    if (result is! Rational || result.isNegative) return incoming;
-    return result;
+    return result is! Rational || result.isNegative ? null : result;
   } catch (_) {
-    return incoming;
+    return null;
   }
 }
 
@@ -104,7 +144,7 @@ Rational applyWeightFormula(Object? formula, Rational incoming) {
 Object? resolveAuthoredWeight(String? rawInput) {
   final input = (rawInput ?? '').trim();
   if (input.isEmpty || input == weightVariable) return null;
-  if (_plainNumber.hasMatch(input)) {
+  if (isPlainWeightNumber(input)) {
     final numeric = Rational.parse(input);
     if (numeric.isNegative) {
       throw const MathRefusal('Display weight must be zero or greater.');
@@ -188,11 +228,12 @@ WeightDerivation composeWeight({
   WeightRing? projector,
   Rational? falloffDistance,
   Rational? halfDistanceDays,
+  Map<String, Rational> environment = const {},
 }) {
   final rings = <WeightStep>[];
   var weight = base;
   void apply(String id, Object? formula) {
-    weight = applyWeightFormula(formula, weight);
+    weight = applyWeightFormula(formula, weight, environment: environment);
     rings.add((id: id, via: normalizeWeightFormula(formula), weight: weight));
   }
 

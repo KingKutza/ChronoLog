@@ -22,6 +22,7 @@ import 'package:chronolog/core/exact.dart';
 import 'package:chronolog/core/ics.dart';
 import 'package:chronolog/core/projection.dart';
 import 'package:chronolog/core/records.dart';
+import 'package:chronolog/core/staples.dart';
 import 'package:chronolog/core/rrule.dart' show compactIcsDay;
 import 'package:chronolog/core/validate.dart';
 import 'package:test/test.dart';
@@ -364,7 +365,7 @@ String exportOf(IcsImport result, {bool withEngine = true}) => exportIcs(
 /// happens, in a form no spelling difference can disguise.
 Map<String, String> placementDays(Document document) => {
   for (final relation in document.relations.values)
-    if (relation.type == 'attachment' && relation.coordinate != null)
+    if (isPlacement(relation))
       if (document.events[relation.event] case final Event event)
         '${event.payload?['uid']}': civilCoordinateToDays(Coordinate.fromJson(relation.coordinate))
             .toJson(),
@@ -651,7 +652,7 @@ void main() {
         // properties are data like any other X- property, and reading one mints
         // NO staple -- meaning is authored, never inferred.
         expect(
-          result.document.relations.values.where((relation) => relation.isStaple),
+          result.document.relations.values.where((relation) => relation.isStaple && !isPlacement(relation)),
           isEmpty,
           reason: 'round $i invented a connection',
         );
@@ -774,8 +775,8 @@ void main() {
         // Connections do not. "Rules or projections out": there is no carrier for
         // an anchor, a spread or a series identity, so a fresh import invents
         // none. Named, accepted, and pinned rather than left implicit.
-        expect(again.document.relations.values.where((r) => r.isStaple), isEmpty);
-        expect(first.document.relations.values.where((r) => r.isStaple), isEmpty);
+        expect(again.document.relations.values.where((r) => r.isStaple && !isPlacement(r)), isEmpty);
+        expect(first.document.relations.values.where((r) => r.isStaple && !isPlacement(r)), isEmpty);
       }
     });
 
@@ -975,7 +976,7 @@ void main() {
       // And a fresh import of it gets correct times and NO connection at all.
       final back = importIcs(exported, freshDocument(), label: 'Spec');
       expect(back.events.length, 2);
-      expect(back.document.relations.values.where((r) => r.isStaple), isEmpty);
+      expect(back.document.relations.values.where((r) => r.isStaple && !isPlacement(r)), isEmpty);
       expect(
         placementDays(back.document).values,
         contains(civilCoordinateToDays(following).toJson()),

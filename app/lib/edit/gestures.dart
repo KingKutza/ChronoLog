@@ -37,40 +37,92 @@ extension Gestures on Editor {
 
   /// An object placed on a frame at a day, the coordinate built under THAT
   /// frame's own law. Every placement any surface writes is built here.
+  ///
+  /// WRITTEN AS A STAPLE (Don, ruled 2026-09-01: break the compatibility). The
+  /// placement record is gone and the staple IS the placement: the object's
+  /// START identified with a point on the frame. It says `start` out loud,
+  /// because a silent object end now means the WHOLE of it -- a different claim
+  /// -- and it wears the registered `anchor` kind, which is what tells a
+  /// placement from an `end` staple carrying a completion instant on the same
+  /// sheet.
   Relation placement(String objectId, String frameId, Rational days, String role) => Relation(
     id: createId('relation'),
-    type: 'attachment',
+    type: 'staple',
     extra: {
-      'event': objectId,
-      'frame': frameId,
+      'kind': 'anchor',
       'role': role,
-      'coordinate': engine.daysCoordinate(frameId, days),
+      'ends': [
+        ObjectEnd(objectId, point: startPoint).toJson(),
+        FrameEnd(
+          frameId,
+          position: Position.coordinate(engine.daysCoordinate(frameId, days)),
+        ).toJson(),
+      ],
     },
   );
 
   /// An object in a group -- a state frame included, which is what makes state a
   /// frame rather than a property.
+  ///
+  /// WRITTEN AS A STAPLE (Don, ruled 2026-09-01: there is no membership, only
+  /// staples). The sentence is unchanged and so is every reader: a frame end
+  /// naming no point says "in this frame, nothing about where", which is the
+  /// whole of what the `membership` record said. Old records keep loading and
+  /// keep meaning exactly this -- `stapledMemberships` is the one reading both
+  /// spellings go through -- so nothing is migrated and no file changes shape.
   Relation membership(String objectId, String groupId) => Relation(
     id: createId('relation'),
-    type: 'membership',
-    extra: {'group': groupId, 'member': objectId},
+    type: 'staple',
+    extra: {
+      'ends': [ObjectEnd(objectId).toJson(), StapleEnd.frame(groupId).toJson()],
+    },
   );
 
   /// Drag-create: an object under THAT frame's law, its duration the drag's own
   /// span. A zero-duration kind takes none however far the drag went; a kind
   /// that carries duration and was given no span takes the shipped default.
-  String createAt(String frameId, Rational startDays, Rational? endDays, {String kind = 'event'}) {
+  ///
+  /// [stapledTo] is the OBJECT the create was said ON (ISSUES 9.1: right-click
+  /// an event, "New todo here", and here means THE EVENT). The new object's
+  /// start point is said to be the same point as that object's start, in the one
+  /// staple vocabulary and inside the same transaction -- one act, one undo
+  /// entry -- so the sentence records what the pointer was over rather than the
+  /// coordinate it happened to be at.
+  String createAt(
+    String frameId,
+    Rational startDays,
+    Rational? endDays, {
+    String kind = 'event',
+    String? stapledTo,
+  }) {
     final definition = objectKinds[normalizeObjectKind(kind)]!;
     final other = endDays ?? startDays;
     final from = startDays <= other ? startDays : other;
     var to = startDays <= other ? other : startDays;
     if (!definition.zeroDuration && to == from) to = from + setting('edit.newSpanDays');
     final event = newObject(kind, spanDays: to - from);
-    final relation = placement(event.id, frameId, from, definition.relationRole);
-    transaction(
-      'Create ${definition.label}',
-      (current) => current.put('events', event.id, event).put('relations', relation.id, relation),
-    );
+    transaction('Create ${definition.label}', (current) {
+      var next = current.put('events', event.id, event);
+      final rides = stapledTo != null && next.events.containsKey(stapledTo);
+      // NO COMPANION PLACEMENT (ISSUES 9.1). A staple saying this object's start
+      // IS that object's start has already said where this object is, and the
+      // substrate reads it there; writing a frame coordinate beside it would bake
+      // in a position that goes stale the moment the far end is re-said, while
+      // the staple rides. The frame placement is what an object said on EMPTY
+      // SPACE gets, because there the pointer's coordinate is the whole sentence.
+      if (!rides) {
+        final relation = placement(event.id, frameId, from, definition.relationRole);
+        return next.put('relations', relation.id, relation);
+      }
+      return putStaple(
+        next,
+        kind: 'anchor',
+        ends: [
+          ObjectEnd(event.id, point: 'start'),
+          ObjectEnd(stapledTo, point: 'start'),
+        ],
+      ).document;
+    });
     return event.id;
   }
 
@@ -114,7 +166,7 @@ extension Gestures on Editor {
       (current) => current.put(
         'relations',
         placement.id,
-        _timed(placement.withField('coordinate', engine.daysCoordinate(frame, toDays)), timed),
+        _timed(sayingInstant(placement, engine.daysCoordinate(frame, toDays)), timed),
       ),
     );
     return fact.event.id;
@@ -149,14 +201,10 @@ extension Gestures on Editor {
           'originalCoordinate': fact.relation.coordinate,
         });
     final placement = _timed(
-      fact.relation
-          .copyWith(id: createId('relation'))
-          .withField('event', eventId)
-          .withField(
-            'coordinate',
-            at == null ? fact.relation.coordinate : engine.daysCoordinate(frame, at),
-          )
-          .withField('provenance', {'kind': 'explicit', 'replaces': fact.virtualId}),
+      sayingInstant(
+        sayingObject(fact.relation.copyWith(id: createId('relation')), eventId),
+        at == null ? fact.relation.coordinate : engine.daysCoordinate(frame, at),
+      ).withField('provenance', {'kind': 'explicit', 'replaces': fact.virtualId}),
       timed,
     );
     var next = document.put('events', eventId, event).put('relations', placement.id, placement);
@@ -164,7 +212,7 @@ extension Gestures on Editor {
     for (final source
         in template == null ? const <Relation>[] : eventRelations(document, template)) {
       if (!(document.frames[source.frame]?.traits.contains('group') ?? false)) continue;
-      final copy = source.copyWith(id: createId('relation')).withField('event', eventId);
+      final copy = sayingObject(source.copyWith(id: createId('relation')), eventId);
       next = next.put('relations', copy.id, copy);
     }
     final override = Override(
@@ -267,20 +315,29 @@ extension Gestures on Editor {
   /// Containment, which passes no judgment: any object may contain any other,
   /// multi-parent and cyclic shapes included. Only a thing containing itself is
   /// refused, because that says nothing.
+  ///
+  /// WRITTEN AS A STAPLE (Don, ruled 2026-09-01). Both ends name objects and
+  /// both are SILENT -- "all of this is all of that" -- which is the affiliation
+  /// sentence with no group side and no arrow. The identification is symmetric
+  /// and reads the same from either end; what the tree reads as held-by is the
+  /// AUTHORED ORDER, which is the one ruled carrier of direction.
   Document withContains(Document current, String parentId, String childId, bool contained) {
     final existing = firstMatch(
       current.relations.values,
       (relation) =>
-          relation.type == 'contains' && relation.parent == parentId && relation.child == childId,
+          firstMatch(
+            stapledContainments(relation),
+            (edge) => edge.parent == parentId && edge.child == childId,
+          ) !=
+          null,
     );
     if (contained == (existing != null) || parentId == childId) return current;
-    if (existing != null) return current.remove('relations', existing.id);
-    final relation = Relation(
+    if (existing != null) return removeStaple(current, existing.id);
+    return putStaple(
+      current,
       id: createId('relation'),
-      type: 'contains',
-      extra: {'parent': parentId, 'child': childId},
-    );
-    return current.put('relations', relation.id, relation);
+      ends: [ObjectEnd(childId), ObjectEnd(parentId)],
+    ).document;
   }
 
   void setContains(String parentId, String childId, bool contained) => transaction(

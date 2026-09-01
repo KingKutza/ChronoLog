@@ -162,24 +162,38 @@ class ObjectFacts {
   final Map<String, ContainsSummary> _summaries = {};
   Set<String>? _done;
 
-  List<String> _related(String type, String from, String to, String id) {
+  /// The scan behind the containment seams (ruled 2026-09-01). Containment is a
+  /// staple whose ends are all silent objects, and authored ORDER is the one
+  /// carrier of held-by: reading it from one side gives what this holds, from
+  /// the other what holds it.
+  List<String> _held(String id, {required bool held}) {
     final found = <String>{};
     for (final relation in document.relations.values) {
-      if (relation.type != type || relation.extra[from] != id) continue;
-      final other = str(relation.extra[to]);
-      if (other != null) found.add(other);
+      for (final edge in stapledContainments(relation)) {
+        if (held && edge.parent == id) found.add(edge.child);
+        if (!held && edge.child == id) found.add(edge.parent);
+      }
     }
     return found.toList()..sort();
   }
 
-  List<String> children(String id) =>
-      indexedChildren?.call(id) ?? _related('contains', 'parent', 'child', id);
+  /// The scan behind the affiliation seam: a staple whose frame end names no
+  /// point. Which end is a FRAME is what makes the group side.
+  List<String> _affiliated(String id) {
+    final found = <String>{};
+    for (final relation in document.relations.values) {
+      for (final edge in stapledAffiliations(relation)) {
+        if (edge.object == id) found.add(edge.frame);
+      }
+    }
+    return found.toList()..sort();
+  }
 
-  List<String> parents(String id) =>
-      indexedParents?.call(id) ?? _related('contains', 'child', 'parent', id);
+  List<String> children(String id) => indexedChildren?.call(id) ?? _held(id, held: true);
 
-  List<String> groups(String id) =>
-      indexedGroups?.call(id) ?? _related('membership', 'member', 'group', id);
+  List<String> parents(String id) => indexedParents?.call(id) ?? _held(id, held: false);
+
+  List<String> groups(String id) => indexedGroups?.call(id) ?? _affiliated(id);
 
   List<Relation> staples(String id) => indexedStaples?.call(id) ?? staplesFor(document, object: id);
 
@@ -188,7 +202,8 @@ class ObjectFacts {
   /// children, and a per-child relation scan would be quadratic.
   Set<String> doneMembers() => _done ??= {
     for (final relation in document.relations.values)
-      if (relation.type == 'membership' && relation.group == doneStateFrameId) ?relation.member,
+      for (final edge in stapledAffiliations(relation))
+        if (edge.frame == doneStateFrameId) edge.object,
   };
 
   // --- The completion instant ------------------------------------------------
@@ -243,12 +258,21 @@ class ObjectFacts {
     final at = _instant(objectEndStaple(objectId), objectId);
     final entries = <StateAffiliation>[];
     for (final relation in document.relations.values) {
-      if (relation.type != 'membership') continue;
-      final group = relation.group;
-      final frame = document.frames[group];
-      if (relation.member != objectId || group == null) continue;
-      if (!isStateFrame(frame)) continue;
-      entries.add((frame: group, title: frame!.title ?? group, membership: relation, at: at));
+      // BOTH SPELLINGS OF ONE SENTENCE (ruled 2026-09-01). A `membership` record
+      // and a staple whose frame end names no point say the same thing, so the
+      // state grammar reads them the same way -- otherwise a Done written by
+      // this build and a Done written by an older one would be different facts.
+      final groups = relation.type == 'membership'
+          ? [if (relation.member == objectId) ?relation.group]
+          : [
+              for (final edge in stapledAffiliations(relation))
+                if (edge.object == objectId) edge.frame,
+            ];
+      for (final group in groups) {
+        final frame = document.frames[group];
+        if (!isStateFrame(frame)) continue;
+        entries.add((frame: group, title: frame!.title ?? group, membership: relation, at: at));
+      }
     }
     return entries..sort((left, right) => left.frame.compareTo(right.frame));
   }
@@ -324,12 +348,13 @@ class ObjectFacts {
     final instants = <String, (String, Coordinate)>{};
     for (final entry in document.relations.entries) {
       final relation = entry.value;
-      if (relation.type == 'membership' &&
-          relation.group == doneStateFrameId &&
-          relation.member != null) {
-        done.add(relation.member!);
-        continue;
+      var affiliated = false;
+      for (final edge in stapledAffiliations(relation)) {
+        if (edge.frame != doneStateFrameId) continue;
+        done.add(edge.object);
+        affiliated = true;
       }
+      if (affiliated) continue;
       if (relation.isStaple && relation.kind == 'end') {
         for (final end in relation.ends) {
           if (end is! ObjectEnd) continue;

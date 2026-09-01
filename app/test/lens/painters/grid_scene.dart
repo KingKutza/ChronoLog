@@ -88,6 +88,7 @@ TodoScene todoSceneOf(
   Map<String, Object?> view = const {},
   Rational? now,
   void Function(String)? onProject,
+  void Function(String, Object?)? onView,
 }) => TodoScene(
   lens: lens,
   editor: editor,
@@ -97,4 +98,5 @@ TodoScene todoSceneOf(
   tunable: allTunables,
   view: view,
   onProject: onProject,
+  onView: onView,
 );

@@ -255,7 +255,7 @@ void main() {
         const Document(),
         ends: [
           const StapleEnd.object('event:a', point: 'end'),
-          const StapleEnd.object('event:b'),
+          const StapleEnd.object('event:b', point: 'start'),
         ],
       ).staple;
       expect(forward.ends.map((end) => end.id).toList(), ['event:a', 'event:b']);
@@ -307,10 +307,16 @@ void main() {
           .put(
             'relations',
             'attachment:b',
-            const Relation(
+            Relation(
               id: 'attachment:b',
-              type: 'attachment',
-              extra: {'event': 'event:b', 'frame': 'frame:wall-time', 'role': 'observed'},
+              type: 'staple',
+              extra: {
+                'role': 'observed',
+                'ends': [
+                  ObjectEnd('event:b', point: 'start').toJson(),
+                  StapleEnd.frame('frame:wall-time').toJson(),
+                ],
+              },
             ),
           )
           .put(

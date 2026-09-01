@@ -112,7 +112,15 @@ void main() {
     document = document.put(
       'relations',
       'relation:1',
-      const Relation(id: 'relation:1', type: 'placement', extra: {'frame': source, 'event': 'e'}),
+      // A connection is a staple (ruled 2026-09-01), and what names the frame is
+      // its frame END -- which is what the duplicate has to re-point.
+      Relation(
+        id: 'relation:1',
+        type: 'staple',
+        extra: {
+          'ends': [const ObjectEnd('e').toJson(), StapleEnd.frame(source).toJson()],
+        },
+      ),
     );
     final next = duplicateFrame(document, source);
     final copy = next.frames.keys.firstWhere(

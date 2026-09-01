@@ -52,6 +52,12 @@ class ListLens extends StatelessWidget {
   );
 }
 
+/// A section head: THE COLUMN'S NAME, and beside it how many are in it.
+///
+/// Two widgets rather than one welded string (ISSUES 9.1): a column's name is a
+/// name, and a heading that reads "AI Tiger Team · 1" as one run of text is a
+/// name nothing on the surface -- a finder, a screen reader, a person scanning
+/// the row of heads -- can pick out.
 Widget sectionHeader(TodoScene scene, String title, int count) => Padding(
   padding: EdgeInsets.fromLTRB(
     scene.px('todo.pad'),
@@ -59,10 +65,48 @@ Widget sectionHeader(TodoScene scene, String title, int count) => Padding(
     scene.px('todo.pad'),
     scene.px('todo.gap'),
   ),
+  child: Row(
+    children: [
+      Flexible(
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: scene.theme.ui.copyWith(
+            fontSize: scene.px('todo.sectionSize'),
+            color: scene.theme.muted,
+          ),
+        ),
+      ),
+      SizedBox(width: scene.px('todo.gap')),
+      Text(
+        '· $count',
+        style: scene.theme.data.copyWith(
+          fontSize: scene.px('todo.sectionSize'),
+          color: scene.theme.muted,
+        ),
+      ),
+    ],
+  ),
+);
+
+/// What this surface's grouping READS, said in words above the columns. A
+/// grouping that quietly counts one kind of connection and not another is how
+/// "I see no power to pull up frames" happened (ISSUES 9.1); the sentence is
+/// the surface owning its own rule.
+Widget groupingNote(TodoScene scene) => Padding(
+  padding: EdgeInsets.fromLTRB(
+    scene.px('todo.pad'),
+    scene.px('todo.pad'),
+    scene.px('todo.pad'),
+    0,
+  ),
   child: Text(
-    '$title · $count',
+    groupingReads(scene.grouping),
+    maxLines: 2,
+    overflow: TextOverflow.ellipsis,
     style: scene.theme.ui.copyWith(
-      fontSize: scene.px('todo.sectionSize'),
+      fontSize: scene.px('todo.metaSize'),
       color: scene.theme.muted,
     ),
   ),

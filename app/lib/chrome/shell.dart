@@ -22,8 +22,11 @@ import '../lens/theme.dart';
 import '../lens/todo/row.dart';
 import '../lens/tree/tree_lens.dart';
 import '../lens/tunables.dart';
+import '../lens/minimap/minimap_tile.dart';
+import '../lens/view_tile.dart';
 import '../session/lens_catalog.dart';
 import '../session/settings.dart';
+import '../stage/content.dart';
 import '../stage/layout_tree.dart';
 import '../stage/stage_widget.dart';
 import '../stage/tile.dart';
@@ -64,22 +67,44 @@ const List<(String, String, String)> _bars = [
   ('bar:context', 'contextBar', 'Context'),
 ];
 
+/// One bar's spec, minted the same way wherever it is asked for.
+TileSpec _barSpec(String id, String klass, String title) => TileSpec(
+  id: id,
+  type: 'bar',
+  klass: klass,
+  title: title,
+  build: (context) => switch (klass) {
+    'documentBar' => const DocumentBar(),
+    'viewBar' => const ViewBar(),
+    _ => const ContextBar(),
+  },
+);
+
+/// THE SHIPPED REGISTRATION (the one ancestor, ruled 2026-09-01): every content
+/// the app can show — the three bars, every catalog lens, the minimap, every
+/// card class and every settings sub-card — lands in [tileContents] here, and
+/// the connectivity law is checked against exactly this registry. A content
+/// that ships without registering is invisible to the law, so nothing ships
+/// without registering.
+void registerShippedContents({required CardFactory factory, required Surface surface}) {
+  for (final (_, klass, title) in _bars) {
+    registerTileContent(DoorContent('bar:$klass', title, (id) => _barSpec(id, klass, title)));
+  }
+  for (final lensId in lensCatalog.keys) {
+    registerTileContent(LensContent(lensId, surface));
+  }
+  registerTileContent(MinimapContent(surface));
+  for (final content in factory.contents()) {
+    registerTileContent(content);
+  }
+}
+
 /// Registers the chrome tiles and lays the shipped preset out, saving it under
 /// `default` so a rearranged stage can come back to it.
 void installDefaultStage(Chrome chrome, {TileSpec Function(String id)? minimap}) {
   final stage = chrome.stage;
   for (final (id, klass, title) in _bars) {
-    stage.tiles[id] = TileSpec(
-      id: id,
-      type: 'bar',
-      klass: klass,
-      title: title,
-      build: (context) => switch (klass) {
-        'documentBar' => const DocumentBar(),
-        'viewBar' => const ViewBar(),
-        _ => const ContextBar(),
-      },
-    );
+    stage.tiles[id] = _barSpec(id, klass, title);
   }
   if (minimap != null) stage.tiles['minimap:main'] = minimap('minimap:main');
   if (chrome.viewTile != null) stage.tiles['view:1'] = chrome.viewTile!('view:1');

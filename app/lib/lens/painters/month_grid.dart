@@ -70,7 +70,23 @@ const Map<String, String> gridTunableDefaults = {
   // is the same claim twice, so it ships off (ruled 2026-08-28).
   'grid.washPast': '0',
   'grid.slashPast': '0.14',
-  'grid.washSpectrum': '0.1',
+  // THE TO-DO LINE (ruled 9.1). Not a wash any more: a wash per unresolved
+  // to-do stacks into mud at a dozen and is unreadable at a hundred, and lines
+  // stay legible when they cross. A sigil at the stapled point, a dotted line
+  // running forward or back UNTIL NOW, and a second sigil there -- which side of
+  // now the line leaves on IS overdue-or-upcoming, with no legend. These are how
+  // strongly it is drawn, how wide the dotted rule is, and how big the two
+  // sigils are.
+  'grid.washSpectrum': '0.55',
+  'grid.spectrumWidth': '1',
+  'grid.spectrumSigil': '6',
+  // WEIGHT ADMITS, THE CLOCK ORDERS (ISSUES 9.1). A cell ranks its facts by
+  // display weight to decide which chips survive the budget, and draws the
+  // survivors in TIME order -- the budget decides who fits, the clock decides
+  // where they stand. The direction is authored like every other lens number:
+  // a positive factor reads earliest-first, a negative one reads latest-first,
+  // and nothing here is a hardcoded comparator.
+  'grid.drawOrder': '1',
   // The weekend as AUTHORED cycle positions, never a hardcoded Saturday and
   // Sunday: a calendar whose rest days fall elsewhere says so here, and a count
   // of zero is a calendar with no weekend at all.
@@ -316,7 +332,9 @@ abstract class DayGridPainter extends LensPainter {
   late final ColorCascade cascade = ColorCascade(scene.engine, scene.projection, scene.theme);
 
   List<GridRow> rows = const [];
-  final Set<BigInt> _spectrum = {};
+
+  /// One unresolved to-do's reach: where it is stapled, and where now is.
+  final List<({BigInt day, BigInt now, Fact fact, DisplayWeight weight})> _spectrum = [];
   double _gutter = 0, _header = 0, _cellWidth = 0, _cellHeight = 0;
 
   double get cellWidth => _cellWidth;
@@ -327,6 +345,11 @@ abstract class DayGridPainter extends LensPainter {
 
   /// A cell prints the day's own number when there is room for one.
   bool get numbersDays => _cellWidth >= scene.px('grid.numberAt');
+
+  /// Which way the admitted chips run down a cell: the sign of the authored
+  /// `grid.drawOrder`. Zero would be a cell with no stated order at all, which
+  /// is what the report was about, so it reads as the shipped direction.
+  int get drawOrder => scene.setting('grid.drawOrder').isNegative ? -1 : 1;
 
   /// The headings above the columns, or empty for none.
   List<Heading> get headings => const [];
@@ -542,13 +565,25 @@ abstract class DayGridPainter extends LensPainter {
     final ranked = <({Fact fact, DisplayWeight weight})>[];
     for (final fact in found.facts) {
       final weight = factDisplayWeight(scene, fact, keyPrefix: lens);
-      if (_spectrums(fact, weight)) _reach(day, today);
+      if (_spectrums(fact, weight) && today != null) {
+        _spectrum.add((day: day, now: today, fact: fact, weight: weight));
+      }
       if (presentationOf(fact, weight) != showNone) ranked.add((fact: fact, weight: weight));
     }
     ranked.sort((a, b) => b.weight.weight.compareTo(a.weight.weight));
     final admitted = admit(ranked, capacity, queryTruncated: found.truncated);
+    // THE ADMITTED STAND IN TIME ORDER (ISSUES 9.1, Don: "on Tactical the
+    // meetings are out of order"). Weight was the right judge of which chips
+    // fit and the wrong judge of where they sit; re-sorting here is the whole
+    // fix, and it is one line in the SHARED cell so Tactical and the month
+    // sheets take it together. The tie-break is the fact's own identity, so two
+    // facts at one instant keep a stable order between paints.
+    final drawn = [...admitted.drawn]..sort((a, b) {
+      final byTime = a.fact.day.compareTo(b.fact.day) * drawOrder;
+      return byTime != 0 ? byTime : a.fact.identity.compareTo(b.fact.identity);
+    });
     final height = scene.px('grid.chipHeight');
-    for (final entry in admitted.drawn) {
+    for (final entry in drawn) {
       if (top + height > cell.bottom - pad) break;
       _paintMark(
         canvas,
@@ -559,7 +594,7 @@ abstract class DayGridPainter extends LensPainter {
       );
       top += height + pad;
     }
-    final hidden = found.minimum - admitted.drawn.length;
+    final hidden = found.minimum - drawn.length;
     if (hidden <= 0) return;
     _text(
       canvas,
@@ -585,18 +620,49 @@ abstract class DayGridPainter extends LensPainter {
       weight.state != 'done' &&
       weight.state != 'closed';
 
-  void _reach(BigInt day, BigInt? today) {
-    if (today == null) return;
-    for (var at = day < today ? day : today; at <= (day < today ? today : day); at += BigInt.one) {
-      _spectrum.add(at);
+  /// The cell one day is drawn in, or null where this sheet is not showing it.
+  Rect? cellOf(BigInt day) {
+    for (final (row, line) in rows.indexed) {
+      final column = line.days.indexOf(day);
+      if (column >= 0) return cellAt(row, column);
     }
+    return null;
   }
 
+  /// A SIGIL, A DOTTED LINE, A SECOND SIGIL (ruled 9.1). The line runs from where
+  /// the to-do is stapled to where now is; when now is off this sheet it runs to
+  /// the sheet's own edge in the direction now lies, which still says which side
+  /// of now the to-do is on. Drawn after the cells and before the now marker, so
+  /// it reads over the ground and under the moment.
   void _paintSpectrum(Canvas canvas) {
-    for (final (row, line) in rows.indexed) {
-      for (final (column, day) in line.days.indexed) {
-        if (day == null || !_spectrum.contains(day)) continue;
-        _wash(canvas, cellAt(row, column), scene.theme.secondary, 'grid.washSpectrum');
+    final size = scene.px('grid.spectrumSigil');
+    final alpha = scene.px('grid.washSpectrum');
+    final on = scene.px('mark.dotOn'), off = scene.px('mark.dotOff');
+    for (final reach in _spectrum) {
+      final from = cellOf(reach.day)?.center;
+      if (from == null) continue;
+      final color = cascade.colorOf(reach.fact).withValues(alpha: alpha);
+      final ahead = reach.now > reach.day;
+      final to =
+          cellOf(reach.now)?.center ??
+          Offset(ahead ? scene.size.width : _gutter, from.dy);
+      dashLine(
+        canvas,
+        from,
+        to,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = scene.px('grid.spectrumWidth')
+          ..strokeCap = StrokeCap.butt
+          ..color = color,
+        on,
+        off,
+      );
+      for (final at in [from, to]) {
+        canvas.drawPath(
+          sigilPath('point', Rect.fromCenter(center: at, width: size, height: size)),
+          Paint()..color = color,
+        );
       }
     }
   }

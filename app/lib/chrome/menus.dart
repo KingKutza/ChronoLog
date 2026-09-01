@@ -27,10 +27,23 @@ bool closeOpenMenu() {
 }
 
 class ChronoMenu extends StatefulWidget {
-  const ChronoMenu({super.key, required this.label, this.rows = const [], this.glyph, this.body});
+  const ChronoMenu({
+    super.key,
+    required this.label,
+    this.rows = const [],
+    this.glyph,
+    this.name,
+    this.body,
+  });
 
   final String label;
   final String? glyph;
+
+  /// The WORDS a drop wears beside its reading, for a control whose glyph is a
+  /// VALUE rather than a mark: the reading answers "what", the name answers "of
+  /// what". A drop whose glyph is already a mark needs no name beside it, and
+  /// says nothing here.
+  final String? name;
   final List<MenuRow> rows;
 
   /// A panel that is not a list of rows -- the projection control's frame rows,
@@ -70,7 +83,18 @@ class _ChronoMenuState extends State<ChronoMenu> {
           ),
         ),
       ],
-      child: namedAction(context, widget.label, glyph: widget.glyph, onTap: _toggle),
+      child: controlChip(
+        context,
+        label: widget.name ?? '',
+        hint: widget.label,
+        onTap: _toggle,
+        button: true,
+        semantics: widget.name == null ? widget.label : null,
+        child: Text(
+          widget.glyph ?? widget.label,
+          style: (widget.glyph == null ? bodyStyle : dataStyle)(context),
+        ),
+      ),
     );
   }
 }

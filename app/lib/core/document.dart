@@ -348,12 +348,11 @@ List<Relation> staplesFor(Document document, {String? series, String? object}) {
 /// longer exists; one dangling pointer takes the whole file offline at its next
 /// load, so the class is fixed here rather than the one instance.
 Relation? _remap(Relation relation, Set<String> merged, String canonicalId) {
+  // ONE SHAPE (ruled 2026-09-01): a connection names things at its ENDS, so the
+  // four fields this used to rewrite have nothing left to point at. A record
+  // still spelled with them is inert data and is not rewritten, because
+  // rewriting it would be assigning it meaning.
   var next = relation;
-  for (final field in const ['event', 'parent', 'child', 'member']) {
-    if (merged.contains(next.extra[field])) {
-      next = next.withField(field, canonicalId);
-    }
-  }
   final ends = next.extra['ends'];
   if (ends is List && ends.any((end) => merged.contains(_object(end)))) {
     next = next.withField('ends', [

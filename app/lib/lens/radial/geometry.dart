@@ -175,6 +175,18 @@ List<({String text, Offset at, bool rightAligned})> placeLabels(
   return placed;
 }
 
+/// The box one haloed label would occupy, drawn at [at]. Measured, not guessed:
+/// a label that collides is a label the surface must thin, and a collision test
+/// against an assumed width is a test of nothing (ISSUES 9.1, Tree overlap).
+Rect haloedLabelBox(String text, Offset at, {required ChronoTheme theme, Tunable? read}) {
+  final size = pixels(read, 'minimap.labelSize');
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: theme.data.copyWith(fontSize: size)),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  return Rect.fromLTWH(at.dx, at.dy - size / 2, painter.width, painter.height);
+}
+
 /// Draws one label twice -- a paper stroke, then the ink fill -- so it stays
 /// readable over whatever arc it crosses. Flutter has no paint-order property;
 /// the halo IS the second draw.
@@ -185,6 +197,7 @@ void paintHaloed(
   required ChronoTheme theme,
   required bool rightAligned,
   Tunable? read,
+  double opacity = 1,
 }) {
   final size = pixels(read, 'minimap.labelSize');
   final halo = pixels(read, 'radial.labelHalo');
@@ -192,8 +205,8 @@ void paintHaloed(
     Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = halo
-      ..color = theme.paper,
-    Paint()..color = theme.ink,
+      ..color = theme.paper.withValues(alpha: opacity),
+    Paint()..color = theme.ink.withValues(alpha: opacity),
   ]) {
     final painter = TextPainter(
       text: TextSpan(

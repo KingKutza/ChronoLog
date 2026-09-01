@@ -58,9 +58,11 @@ void main() {
   testWidgets('the shipped preset pins each bar to its edge at its own thickness', (tester) async {
     final chrome = await _pump(tester);
     // A bar arrives at its own content thickness -- its shipped share is under
-    // that, so the minimum is what it takes -- and keeps its grip beside it.
+    // that, so the minimum is what it takes -- and it spends nothing on chrome
+    // of its own: the grip that used to sit at its leading end is retired
+    // (ISSUES 9.1), so a bar is its tile's whole width less its own hairline.
     final height = chrome.px('chrome.barHeight');
-    final full = _surface.width - chrome.px('stage.grip') - tileChrome(chrome);
+    final full = _surface.width - tileChrome(chrome);
     for (final bar in [DocumentBar, ViewBar, ContextBar]) {
       expect(tester.getSize(find.byType(bar)).width, closeTo(full, 2), reason: '$bar');
       expect(tester.getSize(find.byType(bar)).height, closeTo(height, 1), reason: '$bar');
@@ -175,20 +177,22 @@ void main() {
     }
   });
 
-  testWidgets('every tile wears a visible handle whenever the stage holds more than one', (
-    tester,
-  ) async {
+  testWidgets('a stage of lone windows draws no chrome of its own at all', (tester) async {
     final chrome = await _pump(tester);
     expect(chrome.stage.leaves.length, greaterThan(1));
-    // Every tile names itself in its own chrome, which is the half of the handle
-    // that is a handle: you can see which tile you are about to grab.
-    expect(find.text('Minimap'), findsOneWidget);
-    expect(find.text('View'), findsWidgets);
-    // WHICH MARK a tile wears -- a tab strip with its own close, or the lone
-    // window's triple-dot -- is ruled by ISSUES (8.31, evening) "1 tab is not a
-    // tab it is just a window" and specified in test/chrome/tab_chrome_test.dart.
-    // The counts that used to sit here asserted the pre-ruling shape.
-    expect(find.text('⋮'), findsWidgets, reason: 'a bar wears its grip');
+    // ISSUES (9.1): "on a single tab the bar DISAPPEARS entirely". No name, no
+    // mark, no strip -- the tiles' bodies are the whole of what is drawn, and
+    // every pixel of every tile is its content. WHAT the pointer reveals in
+    // their place is specified in test/chrome/tab_chrome_test.dart.
+    expect(find.text('Minimap'), findsNothing);
+    expect(find.text('⋮'), findsNothing, reason: 'nothing rests');
+    // And the body proves it: the lens fills its tile with no strip taken off
+    // the top, which is the whole point of retiring the bar.
+    final tile = tester.getRect(find.byType(StageView));
+    final lens = tester.getRect(find.byKey(const ValueKey('body-view:1')));
+    final minimap = tester.getRect(find.byKey(const ValueKey('body-minimap:main')));
+    expect(lens.height, closeTo(minimap.height, 1), reason: 'neither wears a bar the other lacks');
+    expect(lens.height, lessThan(tile.height));
   });
 
   testWidgets('a divider drag resizes, with no ladder of stop points', (tester) async {

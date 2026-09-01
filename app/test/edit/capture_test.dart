@@ -82,12 +82,12 @@ void main() {
       expect(capture.ask, isNull);
       expect(capture.group, 'frame:home');
       final id = editor.confirmCapture(capture);
-      expect(
-        editor.document.relations.values.any(
-          (relation) => relation.type == 'membership' && relation.member == id,
-        ),
-        isTrue,
-      );
+      // THE SENTENCE, NOT THE SPELLING (Don, ruled 2026-09-01: there is no
+      // membership, only staples). The capture says it as a staple now, and the
+      // ONE membership reader answers the same as it did for the record --
+      // asserting the record type would be asserting the spelling this ruling
+      // retired.
+      expect(editor.engine.indexes.directGroupsOf(id), contains('frame:home'));
       expect(objectKindForEvent(editor.document.events[id]), 'todo');
       expect(validateDocument(editor.document).errors, isEmpty);
     });
@@ -104,10 +104,11 @@ void main() {
       expect(editor.canUndo, isFalse);
       final id = editor.confirmCapture(capture, groupId: capture.ask!.candidates.first.id);
       expect(
-        editor.document.relations.values.any(
-          (relation) => relation.type == 'membership' && relation.member == id,
-        ),
-        isTrue,
+        editor.engine.indexes.directGroupsOf(id),
+        contains(capture.ask!.candidates.first.id),
+        reason:
+            'ruled 2026-09-01: said as a staple, read by the one membership '
+            'reader, the same edge either way',
       );
     });
 

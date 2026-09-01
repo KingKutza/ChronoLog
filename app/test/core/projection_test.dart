@@ -116,8 +116,14 @@ class _World {
           id2,
           Relation(
             id: id2,
-            type: 'attachment',
-            extra: {'event': id, 'frame': anchored, 'role': 'placed'},
+            type: 'staple',
+            extra: {
+              'role': 'placed',
+              'ends': [
+                ObjectEnd(id, point: 'start').toJson(),
+                StapleEnd.frame(anchored).toJson(),
+              ],
+            },
           ),
         );
         scene.staple(
@@ -1162,8 +1168,10 @@ void main() {
       final document = world.scene.document;
       for (final frame in world.frames) {
         expect(engine.indexes.attachmentsOf(frame).map((relation) => relation.id).toSet(), {
+          // RESTATED under the ruling of 2026-09-01: a connection is a staple,
+          // and what puts it on a frame is a frame end.
           for (final relation in document.relations.values)
-            if (relation.type == 'attachment' && relation.frame == frame) relation.id,
+            if (relation.isStaple && relation.frame == frame) relation.id,
         });
       }
       for (final object in world.objects) {
@@ -1177,9 +1185,13 @@ void main() {
           engine.indexes.placementOf(object)?.id,
           firstMatch(document.relations.values, (relation) => isPlacement(relation, object))?.id,
         );
+        // PLACED, not merely connected (ruled 2026-09-01): an affiliation says
+        // the object is somewhere on a sheet without saying where, and reading
+        // that as a placement would make the object's own calendar position
+        // invisible to the frame it is affiliated with.
         expect(engine.indexes.framesOf(object).toSet(), {
           for (final relation in document.relations.values)
-            if (relation.type == 'attachment' && relation.event == object) ?relation.frame,
+            if (isPlacement(relation, object)) ?relation.frame,
         });
       }
       // Ends are parsed ONCE and answer the same list every time.
@@ -1198,9 +1210,12 @@ void main() {
       // Restated from the ruling: the closure is the transitive reachability of
       // the authored edges, computed here by plain repeated expansion.
       final direct = <String, Set<String>>{};
+      // AFFILIATION is the authored edge now (ruled 2026-09-01): a staple whose
+      // frame end names no point. Which end is a FRAME makes the group side.
       for (final relation in world.scene.document.relations.values) {
-        if (relation.type != 'membership') continue;
-        (direct[relation.group!] ??= <String>{}).add(relation.member!);
+        for (final edge in stapledAffiliations(relation)) {
+          (direct[edge.frame] ??= <String>{}).add(edge.object);
+        }
       }
       for (final frame in world.scene.document.frames.values) {
         for (final nested in (obj(frame.extra['query'])?['groups'] as List? ?? const [])) {
@@ -1243,6 +1258,11 @@ void main() {
           expect(distances[group], 1, reason: 'a membership is one hop');
         }
         for (final staple in engine.indexes.staplesOf(object)) {
+          // A PLACEMENT IS STILL ROUTE ONE'S BUSINESS (ruled 2026-09-01 makes it
+          // a staple; it does not make it an edge of this walk). "A staple" is
+          // no longer a way to say "not this object's own placement", so the
+          // exclusion is asked of the sentence instead.
+          if (isPlacement(staple, object)) continue;
           for (final end in engine.indexes.endsOf(staple)) {
             if (end is FrameEnd) expect(distances[end.frame], 1, reason: 'a staple is one hop');
           }

@@ -18,6 +18,7 @@ import 'package:chronolog/core/coordinate_entry.dart';
 import 'package:chronolog/core/coordinate_law.dart';
 import 'package:chronolog/core/document.dart';
 import 'package:chronolog/core/exact.dart';
+import 'package:chronolog/core/staples.dart';
 import 'package:chronolog/edit/editor.dart';
 import 'package:chronolog/lens/drag_ghost.dart';
 import 'package:chronolog/lens/gestures.dart';
@@ -31,6 +32,7 @@ import 'package:chronolog/session/view_state.dart';
 import 'package:chronolog/stage/tile.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../core/corpus.dart';
@@ -46,10 +48,10 @@ const String wallTime = 'frame:wall-time';
 /// real painter keeps.
 ///
 /// It keeps the other two contracts as well, because the specs below are about
-/// them: a mark records its BODY as the shape a click means and a narrow strip
-/// as the region a drag grabs, and the surface bleeds one day past its own edge
-/// so a pan of less than that is previewed by the transform instead of
-/// committed.
+/// them: a mark records its BODY as the shape a click means AND as the region a
+/// drag grabs -- one region, every verb (ISSUES 9.1) -- and the surface bleeds
+/// one day past its own edge so a pan of less than that is previewed by the
+/// transform instead of committed.
 class RailPainter extends LensPainter {
   RailPainter(super.scene);
 
@@ -60,6 +62,7 @@ class RailPainter extends LensPainter {
   PanLanding panLanding(Offset shift) => (
     days: days(surface.width / 2 - shift.dx) - days(surface.width / 2),
     shown: Offset(shift.dx, 0),
+    taken: shift,
   );
 
   Rational days(double dx) =>
@@ -86,12 +89,10 @@ class RailPainter extends LensPainter {
       final at = project(fact.day);
       if (at == null) continue;
       final bounds = Rect.fromCenter(center: at, width: dayPixels / 2, height: dayPixels / 2);
-      final grab = Path()
-        ..addRect(Rect.fromLTWH(bounds.left, bounds.top, dayPixels / 8, bounds.height));
       hits.add((
         bounds: bounds,
         shape: Path()..addRect(bounds),
-        grab: grab,
+        grab: null,
         fact: fact,
         identity: fact.identity,
       ));
@@ -134,6 +135,22 @@ Future<Bed> _layOut(String lens) async {
 /// without dragging the card layer into a pointer spec.
 final List<String> opened = [];
 
+/// Every settings area this surface was asked to open. The settings family is
+/// reached through one opener, so recording it proves the door without dragging
+/// the card layer in.
+final List<String?> settingsOpened = [];
+
+TileSpec _recordingSettings({String? area}) {
+  settingsOpened.add(area);
+  return TileSpec(
+    id: 'card:settings:${area ?? 'one'}',
+    type: 'card',
+    klass: 'settings',
+    title: 'Settings',
+    build: (_) => const SizedBox.shrink(),
+  );
+}
+
 TileSpec _recordingCard(String id) {
   opened.add(id);
   return TileSpec(
@@ -155,6 +172,7 @@ Future<void> pump(WidgetTester tester, Bed bed, {bool cards = false}) async {
       stage: bed.stage,
       objectCard: cards ? _recordingCard : null,
       frameCard: null,
+      settingsCard: cards ? _recordingSettings : null,
     ),
   );
   bed.stage.open(
@@ -206,7 +224,8 @@ Offset onScreen(WidgetTester tester, Offset local) =>
 /// already held.
 Rational placedDays(Editor editor, Set<String> before) {
   final relation = editor.document.relations.values.firstWhere(
-    (candidate) => candidate.type == 'attachment' && !before.contains(candidate.id),
+    // RULED 2026-09-01: a placement is a staple, told by the sentence it says.
+    (candidate) => isPlacement(candidate) && !before.contains(candidate.id),
   );
   return editor.engine.coordinateDays(wallTime, relation.coordinate);
 }
@@ -219,6 +238,24 @@ Future<void> clickAt(WidgetTester tester, Offset local, Duration when) async {
   await gesture.down(onScreen(tester, local), timeStamp: when);
   await gesture.up(timeStamp: when);
   await tester.pump();
+}
+
+double notchOf(Bed bed) => bed.settings.value('pointer.wheelNotch').toDouble();
+
+/// One wheel gesture at a point, with a modifier where the verb wants one. The
+/// wheel is a pointer SIGNAL, not a drag, so it goes to the binding directly.
+Future<void> scrollAt(
+  WidgetTester tester,
+  Offset local,
+  double dy, {
+  bool control = false,
+}) async {
+  if (control) await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  final pointer = TestPointer(1, PointerDeviceKind.mouse);
+  await tester.sendEventToBinding(pointer.hover(onScreen(tester, local)));
+  await tester.sendEventToBinding(pointer.scroll(Offset(0, dy)));
+  await tester.pump();
+  if (control) await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 }
 
 Future<void> markAt(Bed bed, WidgetTester tester) async {
@@ -471,22 +508,41 @@ void main() {
     expect(opened, [hit.fact.event.id]);
   });
 
-  testWidgets('a drag through the body of a mark still creates: the strip is what moves it', (
+  testWidgets('a drag from the body of a mark MOVES it, and alt creates through it', (
     tester,
   ) async {
+    // ISSUES 9.1, Don: "click on an event or todo and drag it, the event does
+    // not move -- it drags to create a new event." The common gesture gets the
+    // common verb; the rare one -- minting through an occupied span -- wears the
+    // modifier the one pointer table already carries.
     final bed = await layOut(tester, 'intimate');
     bed.views.of(tileId).write('grain', Rational.zero);
     await pump(tester, bed);
     await markAt(bed, tester);
     final hit = railOf(tester).hits.single;
-    final placements = bed.editor.document.relations.keys.toSet();
+    final was = bed.editor.document.relations.keys.toSet();
     final from = hit.bounds.center;
-    final gesture = await tester.startGesture(onScreen(tester, from));
-    await gesture.moveTo(onScreen(tester, from + const Offset(dayPixels * 2, 0)));
+    final to = from + const Offset(dayPixels * 2, 0);
+    final drag = await tester.startGesture(onScreen(tester, from));
+    await drag.moveTo(onScreen(tester, to));
     await tester.pump();
-    await gesture.up();
+    await drag.up();
     await tester.pump();
-    expect(placedDays(bed.editor, placements), railOf(tester).unproject(from));
+    // Nothing was minted, and the mark itself is where the drag left it.
+    expect(bed.editor.document.relations.keys.toSet(), was, reason: 'a body drag mints nothing');
+    expect(railOf(tester).hits.single.fact.day, railOf(tester).unproject(to));
+
+    // Alt, over the very same body, is what still creates through it.
+    final moved = railOf(tester).hits.single.bounds.center;
+    final placements = bed.editor.document.relations.keys.toSet();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    final mint = await tester.startGesture(onScreen(tester, moved));
+    await mint.moveTo(onScreen(tester, moved + const Offset(dayPixels * 2, 0)));
+    await tester.pump();
+    await mint.up();
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    expect(placedDays(bed.editor, placements), railOf(tester).unproject(moved));
   });
 
   testWidgets('release commits exactly where the drag left it: nothing snaps back', (tester) async {
@@ -529,5 +585,81 @@ void main() {
     final bed = await layOut(tester, 'intimate');
     await pump(tester, bed);
     expect(find.textContaining('No painter is registered'), findsOneWidget);
+  });
+
+  testWidgets('ctrl+wheel UP zooms in, and the direction is a setting', (tester) async {
+    // ISSUES 9.1: "scroll-wheel zoom is reversed: wheel up zooms out", against
+    // every map and browser the hand has learned (butter). The property is
+    // stated in the surface's own terms -- Intimate scales its hour rail, and
+    // zooming IN is a TALLER hour, which is less time on screen -- and the
+    // direction is `pointer.zoomDirection`, so authoring it negative gives the
+    // old way back rather than needing a different build.
+    for (final direction in [1, -1]) {
+      final bed = await layOut(tester, 'intimate');
+      bed.settings.set('pointer.zoomDirection', '$direction');
+      await pump(tester, bed);
+      final was = bed.views.of(tileId).number('hourPixels', bed.settings);
+      await scrollAt(tester, at(surface.width / 2), -notchOf(bed) * 3, control: true);
+      final now = bed.views.of(tileId).number('hourPixels', bed.settings);
+      expect(
+        direction > 0 ? now > was : now < was,
+        isTrue,
+        reason: 'at zoomDirection $direction a wheel-up notch took the hour rail '
+            'from $was to $now',
+      );
+    }
+  });
+
+  testWidgets('the lens menu opens this lens own settings card, and the main one', (
+    tester,
+  ) async {
+    // ISSUES 9.1, Don's settings ruling: "sub-cards are also launched from
+    // right-click context menus at the relevant parts of the app -- the lens's
+    // own menu opens that lens's settings card".
+    final bed = await layOut(tester, 'intimate');
+    await pump(tester, bed, cards: true);
+    settingsOpened.clear();
+    final gesture = await tester.startGesture(
+      onScreen(tester, at(120)),
+      buttons: kSecondaryMouseButton,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings for this lens\u2026'));
+    await tester.pumpAndSettle();
+    expect(settingsOpened, [bed.views.of(tileId).lensId]);
+  });
+
+  testWidgets('"New todo on this" staples the todo to the object under the pointer', (
+    tester,
+  ) async {
+    // ISSUES 9.1: right-clicking an event and choosing "New todo here" authored
+    // an anchor to Wall Time rather than to the event under the pointer. A menu
+    // that knows what is under the pointer owes that knowledge to every verb it
+    // offers, not just the readers.
+    final bed = await layOut(tester, 'intimate');
+    await pump(tester, bed, cards: true);
+    await markAt(bed, tester);
+    final event = railOf(tester).hits.single.fact.event.id;
+    final gesture = await tester.startGesture(
+      onScreen(tester, railOf(tester).hits.single.bounds.center),
+      buttons: kSecondaryMouseButton,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New todo on this'));
+    await tester.pumpAndSettle();
+    final staples = bed.editor.document.relations.values.where((row) => row.type == 'staple');
+    expect(staples, isNotEmpty, reason: 'the create said nothing about the object it was said on');
+    expect(
+      staples.any(
+        (staple) => bed.editor.engine.indexes
+            .endsOf(staple)
+            .any((end) => end.id == event),
+      ),
+      isTrue,
+      reason: 'ISSUES (9.1): "here" on an object means THE OBJECT -- the new '
+          'to-do must be stapled to $event, not to the frame coordinate.',
+    );
   });
 }

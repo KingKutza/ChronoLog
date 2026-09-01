@@ -91,13 +91,16 @@ class Scene {
     }
   }
 
+  /// AFFILIATION (ruled 2026-09-01): the object's whole identified with a sheet,
+  /// said as a staple whose frame end names no point. Which end is a FRAME is
+  /// what makes the group side; there is no arrow.
   String join(String group, String member) {
     final id = mint('relation');
-    document = document.put(
-      'relations',
-      id,
-      Relation(id: id, type: 'membership', extra: {'group': group, 'member': member}),
-    );
+    document = putStaple(
+      document,
+      id: id,
+      ends: [ObjectEnd(member), StapleEnd.frame(group)],
+    ).document;
     return id;
   }
 
@@ -121,15 +124,16 @@ class Scene {
   String place(String frameId, Json at, {String? event, String title = 'Object'}) {
     final objectId = event ?? object(title: title);
     final id = mint('relation');
-    document = document.put(
-      'relations',
-      id,
-      Relation(
-        id: id,
-        type: 'attachment',
-        extra: {'event': objectId, 'frame': frameId, 'role': 'placed', 'coordinate': at},
-      ),
-    );
+    document = putStaple(
+      document,
+      id: id,
+      kind: 'anchor',
+      ends: [
+        ObjectEnd(objectId, point: 'start'),
+        FrameEnd(frameId, position: Position.coordinate(at)),
+      ],
+      extra: const {'role': 'placed'},
+    ).document;
     return id;
   }
 
@@ -143,15 +147,16 @@ class Scene {
   }) {
     final templateEvent = object(title: 'Standing', duration: duration);
     final templateRelation = mint('relation');
-    document = document.put(
-      'relations',
-      templateRelation,
-      Relation(
-        id: templateRelation,
-        type: 'attachment',
-        extra: {'event': templateEvent, 'frame': frameId, 'role': 'template', 'coordinate': at},
-      ),
-    );
+    document = putStaple(
+      document,
+      id: templateRelation,
+      kind: 'anchor',
+      ends: [
+        ObjectEnd(templateEvent, point: 'start'),
+        FrameEnd(frameId, position: Position.coordinate(at)),
+      ],
+      extra: const {'role': 'template'},
+    ).document;
     final id = mint('pattern');
     document = document.put(
       'patterns',
@@ -162,7 +167,6 @@ class Scene {
         extra: {
           'kind': 'ics-rrule',
           'templateEvent': templateEvent,
-          'templateRelation': templateRelation,
           'rrule': rrule,
           'frame': frameId,
           'appliesTo': ?appliesTo,

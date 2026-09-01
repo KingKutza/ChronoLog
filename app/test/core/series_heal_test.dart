@@ -81,12 +81,14 @@ class Series {
       templateRelationId,
       Relation(
         id: templateRelationId,
-        type: 'attachment',
+        type: 'staple',
         extra: {
-          'event': templateId,
-          'frame': frameId,
+          'kind': 'anchor',
           'role': 'placed',
-          'coordinate': slots.first.coordinate,
+          'ends': [
+            ObjectEnd(templateId, point: 'start').toJson(),
+            FrameEnd(frameId, position: Position.coordinate(slots.first.coordinate)).toJson(),
+          ],
         },
       ),
     );
@@ -100,7 +102,6 @@ class Series {
           'kind': 'ics-rrule',
           'rrule': {'FREQ': 'WEEKLY'},
           'templateEvent': templateId,
-          'templateRelation': templateRelationId,
           'frame': frameId,
         },
       ),
@@ -109,10 +110,16 @@ class Series {
       next = next.put(
         'relations',
         'relation:template-group',
-        const Relation(
+        Relation(
           id: 'relation:template-group',
-          type: 'attachment',
-          extra: {'event': templateId, 'frame': groupFrameId, 'role': 'placed'},
+          type: 'staple',
+          extra: {
+            'role': 'placed',
+            'ends': [
+              ObjectEnd(templateId, point: 'start').toJson(),
+              StapleEnd.frame(groupFrameId).toJson(),
+            ],
+          },
         ),
       );
     }
@@ -163,8 +170,10 @@ class Series {
         id: 'projected-relation:${slot.key}',
         extra: {
           ...placement.extra,
-          'event': eventId,
-          'coordinate': slot.coordinate,
+          'ends': [
+            ObjectEnd(eventId, point: 'start').toJson(),
+            FrameEnd(frameId, position: Position.coordinate(slot.coordinate)).toJson(),
+          ],
           'provenance': {'kind': 'generated', 'replaces': window.virtualId},
         },
       ),
@@ -213,8 +222,13 @@ class Series {
         id: relationId,
         extra: {
           ...fact.relation.extra,
-          'event': eventId,
-          'coordinate': coordinate ?? slot.coordinate,
+          'ends': [
+            ObjectEnd(eventId, point: 'start').toJson(),
+            FrameEnd(
+              frameId,
+              position: Position.coordinate(coordinate ?? slot.coordinate),
+            ).toJson(),
+          ],
           'provenance': {'kind': 'explicit', 'replaces': virtualId},
         },
       ),
@@ -230,7 +244,18 @@ class Series {
       document = document.put(
         'relations',
         id,
-        relation.copyWith(id: id, extra: {...relation.extra, 'event': eventId}),
+        // The template's own group affiliation, copied onto the occurrence: the
+        // object end is re-said, every other term stands.
+        relation.copyWith(
+          id: id,
+          extra: {
+            ...relation.extra,
+            'ends': [
+              for (final end in relation.ends)
+                end is ObjectEnd ? ObjectEnd(eventId, point: end.point).toJson() : end.toJson(),
+            ],
+          },
+        ),
       );
       groups.add(id);
     }
@@ -274,9 +299,24 @@ typedef Deviation = ({
 Relation _placementOf(Series series, String eventId) =>
     firstMatch(series.document.relations.values, (relation) => isPlacement(relation, eventId))!;
 
+/// Re-say one term of a placement. The coordinate lives on the FRAME END now
+/// (ruled 2026-09-01), so writing a top-level `coordinate` would edit a field
+/// nothing reads and the deviation under test would never happen.
 void _editPlacement(Series series, String eventId, String key, Object? value) {
   final placement = _placementOf(series, eventId);
-  series.document = series.document.put('relations', placement.id, placement.withField(key, value));
+  final said = key == 'coordinate'
+      ? placement.withField('ends', [
+          for (final end in placement.ends)
+            end is FrameEnd
+                ? FrameEnd(
+                    end.frame,
+                    position: Position.coordinate(value! as Json),
+                    extra: end.extra,
+                  ).toJson()
+                : end.toJson(),
+        ])
+      : placement.withField(key, value);
+  series.document = series.document.put('relations', placement.id, said);
 }
 
 void _editEvent(Series series, String eventId, Event Function(Event) edit) {
@@ -395,8 +435,15 @@ final List<Deviation> deviations = [
             membershipId(id),
             Relation(
               id: membershipId(id),
-              type: 'membership',
-              extra: {'group': 'frame:state-done', 'member': id},
+              // AFFILIATION (ruled 2026-09-01): the object's whole on the state
+              // sheet, said as a staple whose frame end names no point.
+              type: 'staple',
+              extra: {
+                'ends': [
+                  ObjectEnd(id).toJson(),
+                  StapleEnd.frame('frame:state-done').toJson(),
+                ],
+              },
             ),
           );
     },

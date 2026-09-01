@@ -71,6 +71,7 @@ TodoScene todoSceneOfTile(BuildContext context, ViewTileController tile) => Todo
   // handler of its own (ruled 2026-08-31).
   gestures: (objectId, child) => MarkGestures(tile: tile, objectId: objectId, child: child),
   onProject: tile.project,
+  onView: tile.writeView,
 );
 
 /// Both roster lenses, into the ONE widget registry the view tile reads. A
@@ -96,6 +97,7 @@ class TodoScene {
     this.onOpen,
     this.gestures,
     this.onProject,
+    this.onView,
   });
 
   final String lens;
@@ -117,6 +119,11 @@ class TodoScene {
   /// such path, in which case a note says where an object went and stops there.
   final void Function(String frameId)? onProject;
 
+  /// Write one value onto this tile's own view state. Null where the surface has
+  /// no tile behind it, in which case a chooser says it cannot choose rather
+  /// than offering a choice that goes nowhere.
+  final void Function(String key, Object? value)? onView;
+
   ProjectionEngine get engine => editor.engine;
 
   String? get frameId => projection.primaryFrame;
@@ -126,6 +133,13 @@ class TodoScene {
   double px(String key) => setting(key).toDouble();
 
   String get grouping => normalizeGrouping(view['grouping']);
+
+  /// The columns this surface has been TOLD to stand, whatever is in them. The
+  /// key nothing used to write (ISSUES 9.1).
+  List<String> get chosenColumns => switch (view['columns']) {
+    final List<Object?> chosen => [for (final key in chosen) '$key'],
+    _ => const [],
+  };
 
   Rational get spanDays => setting('todo.spanDays');
 }
@@ -138,6 +152,7 @@ typedef TodoEntry = ({
   String? state,
   List<StateAffiliation> states,
   List<String> groups,
+  List<String> frames,
   List<String> parents,
   ContainsSummary contains,
   String promotion,
@@ -189,6 +204,14 @@ TodoEntry _entry(TodoScene scene, String id, Fact? fact) {
     for (final group in scene.engine.indexes.directGroupsOf(id))
       if (!isStateFrame(scene.engine.document.frames[group])) group,
   ];
+  // THERE IS NO MEMBERSHIP, ONLY STAPLES (Don, ruled 2026-09-01). `groups` is
+  // the narrow reading -- direct membership -- and it stays, because the sparse
+  // predicate and the row's own chips are about what was said ABOUT an object.
+  // Which frames an object BELONGS UNDER is the connection graph, read through
+  // the one accessor the projection algebra and the Tree already read: every
+  // frame at the far end of any staple, placement, containment or membership,
+  // however that staple was authored.
+  final frames = stapledFrames(scene, id);
   final weight = fact == null ? Rational.one : scene.engine.weightOf(fact, scene.projection).weight;
   final title = str(scene.engine.document.events[id]?.payload?['title']) ?? '';
   return (
@@ -198,12 +221,43 @@ TodoEntry _entry(TodoScene scene, String id, Fact? fact) {
     state: entryState(facts, id, stateFrames: [for (final s in states) s.frame], groups: groups),
     states: states,
     groups: groups,
+    frames: frames,
     parents: facts.parents(id),
     contains: facts.containsSummary(id),
     promotion: promotionOf(weight, scene.tunable, keyPrefix: 'todo.${scene.lens}'),
     weight: weight,
   );
 }
+
+/// EVERY FRAME AN OBJECT IS STAPLED TO, however the staple was said (ISSUES
+/// 9.1, ruled): membership, placement, containment and an anchor are not kinds
+/// of relationship, they are staples, and the grouping reads the graph. State
+/// frames are left out on purpose -- Done is a state frame, and the state
+/// grouping is where it columns; the surface says so in words rather than
+/// leaving the omission to be discovered.
+List<String> stapledFrames(TodoScene scene, String objectId) {
+  final engine = scene.engine;
+  final found = <String>{};
+  for (final edge in engine.connectionsOf(objectId)) {
+    final far = edge.from == objectId ? edge.to : edge.from;
+    if (far == objectId) continue;
+    final frame = engine.document.frames[far];
+    if (frame == null || isStateFrame(frame)) continue;
+    found.add(far);
+  }
+  return found.toList()..sort();
+}
+
+/// One sentence about what a grouping READS, so a column that never appears is
+/// explained where it fails to appear (ISSUES 9.1: "nothing on the surface says
+/// so"). Derived from the grouping, never a per-lens copy.
+String groupingReads(String grouping) => switch (grouping) {
+  'frame' => 'Columns are every frame a to-do is stapled to. State frames column '
+      'under Group by state.',
+  'container' => 'Columns are what holds a to-do.',
+  'importance' => 'Columns are the composed display weight, against this lens own thresholds.',
+  _ => 'Columns are the state frames this document holds, empty ones included.',
+};
 
 const Map<String, String> promotionTitles = {
   landmarkWeight: 'Landmark',
@@ -233,11 +287,11 @@ Iterable<Placement> placementsOf(TodoScene scene, TodoEntry entry) => switch (sc
               (key: parent, title: frameTitle(scene, parent), meta: parent),
           ],
   'frame' =>
-    entry.groups.isEmpty
+    entry.frames.isEmpty
         ? const [(key: null, title: 'No frame', meta: null)]
         : [
-            for (final group in entry.groups)
-              (key: group, title: frameTitle(scene, group), meta: group),
+            for (final frame in entry.frames)
+              (key: frame, title: frameTitle(scene, frame), meta: frame),
           ],
   _ =>
     entry.states.isEmpty

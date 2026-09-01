@@ -14,9 +14,11 @@ import '../chrome/controls.dart';
 import '../chrome/menus.dart';
 import '../core/exact.dart';
 import '../core/math.dart';
+import '../core/object_kinds.dart';
 import '../lens/theme.dart';
 import '../lens/tunables.dart';
 import '../session/settings.dart';
+import '../stage/tile.dart';
 import 'card_factory.dart';
 
 /// The card layer's numbers, as named settings whose defaults are expressions
@@ -39,6 +41,9 @@ const Map<String, String> frameCardTunableDefaults = {
   'card.listHeight': '340',
   'card.textLines': '4',
   'card.findRows': '200',
+  // How finely a settings number line lands. A rail is not a continuum: it
+  // offers this many exact places between the two ends a key states it rides.
+  'card.railSteps': '1000',
   'document.compactMinutes': '10',
   // The document bar's save control: the lamp's diameter and the gap between
   // the mark, the lamp and the word beside them.
@@ -349,6 +354,121 @@ class _CardFieldState extends State<CardField> {
   }
 }
 
+// --- The draft contract -----------------------------------------------------
+
+/// ONE CONTRACT FOR EVERY CARD THAT HOLDS A DRAFT (ISSUES 9.1).
+///
+/// Don named and coloured a frame and the journal held no `New frame`
+/// transaction: "the new-frame card can discard an authored draft with nothing
+/// said". The object card had already earned the contract -- a dirty mark, the
+/// three verbs once changes exist, and an X that does whatever `card.closeVerb`
+/// names -- and the frame card was carrying a bare close beside it. Two cards
+/// keeping two promises about the same act is how one of them breaks, so the
+/// promise lives here and both cards reference it.
+///
+/// A NAMED, TOUCHED DRAFT NEVER DIES SILENTLY, whatever door it leaves by: the
+/// X, the tab's ×, the tile going away underneath. [keep] is what happens when
+/// the setting names a verb no card offers -- the work is kept and the refusal
+/// is said, because a draft must not die to a typo in a settings file.
+class CardDraft {
+  const CardDraft({
+    required this.save,
+    required this.apply,
+    required this.discard,
+    required this.keep,
+  });
+
+  final VoidCallback save, apply, discard, keep;
+
+  Map<String, VoidCallback> get verbs => {'save': save, 'apply': apply, 'discard': discard};
+
+  /// What the X does, by NAME. The verbs are data and the setting picks one.
+  void closeAsNamed(Settings? settings) {
+    final named = (settings?.text('card.closeVerb') ?? '').trim().toLowerCase();
+    final verb = verbs[named];
+    if (verb == null) {
+      settings?.refusals.add(
+        'card.closeVerb: "$named" is not a verb this card offers'
+        ' (${verbs.keys.join(', ')}). The card closed and kept its work.',
+      );
+      return keep();
+    }
+    verb();
+  }
+}
+
+/// What each verb promises, in one wording every card says it in.
+const Map<String, String> draftVerbSays = {
+  'Save': 'Writes the document and closes this card.',
+  'Apply': 'Writes the document and leaves this card open.',
+  'Discard': 'Throws this edit session away as its own undo entry. Nothing asks twice.',
+};
+
+/// The three verbs, in the card footer. Shown once a draft has been touched --
+/// before that there is nothing to write, keep or throw away.
+List<Widget> draftActions(BuildContext context, CardDraft draft) => [
+  for (final (label, act) in [
+    ('Save', draft.save),
+    ('Apply', draft.apply),
+    ('Discard', draft.discard),
+  ])
+    namedAction(context, label, hint: draftVerbSays[label], onTap: act),
+];
+
+// --- Doors ------------------------------------------------------------------
+
+/// One door: what it is called, why you would take it, and the card it opens.
+typedef CardDoor = ({String label, String says, TileSpec Function(CardFactory) opens});
+
+CardDoor cardDoor(String label, String says, TileSpec Function(CardFactory) opens) =>
+    (label: label, says: says, opens: opens);
+
+/// THE WAYS ONWARD (ISSUES 9.1, Don's card-graph test and its dead-end band:
+/// "moving around the app must be seamless, so every card offers at least one
+/// way on"). A card states which doors it wears and nothing else -- where they
+/// are drawn, how they are spelled and what happens when there is no host to
+/// open anything into is settled once, here.
+///
+/// Outside a host there is nowhere to open a card TO, so the run draws nothing
+/// rather than throwing: an instrument pumped on its own is still an
+/// instrument.
+Widget cardDoors(BuildContext context, List<CardDoor> doors) {
+  final host = CardHost.maybeOf(context);
+  if (host == null || doors.isEmpty) return const SizedBox.shrink();
+  return cardWrap(context, [
+    for (final door in doors)
+      namedAction(
+        context,
+        door.label,
+        hint: door.says,
+        onTap: () => host.factory.open(door.opens(host.factory)),
+      ),
+  ]);
+}
+
+/// The doors every list of records owes: "every list of things offers to make
+/// the thing" (ISSUES 8.31, restated 9.1 for the frames drop). Authoring an
+/// object is a DOCUMENT act, not a lens act -- so a blank object card is
+/// reachable from the surfaces that hold objects, with its placement region
+/// empty and waiting to be said.
+List<CardDoor> mintingDoors() => [
+  for (final kind in objectKinds.entries)
+    cardDoor(
+      'New ${kind.value.label.toLowerCase()}',
+      'Opens a blank card with its placement region empty and waiting to be '
+          'said. Nothing places it until a staple sentence does.',
+      (factory) => factory.newObjectCard(kind.key),
+    ),
+];
+
+/// The one create-frame affordance, shared by every surface that lists frames.
+CardDoor newFrameDoor() => cardDoor(
+  'New frame',
+  'Mints a frame. What it is — structure, grouping, statehood — is authored on '
+      'the card that opens.',
+  (factory) => factory.newFrameCard(),
+);
+
 // --- Shared instruments (D2a addition) --------------------------------------
 
 /// A run of controls that wraps rather than clipping, vertically centred. The
@@ -377,24 +497,47 @@ Widget cardLink(BuildContext context, String label, VoidCallback? onTap) => InkW
 /// A choice, through the one menu class. [options] is label by value, so a site
 /// states its vocabulary and nothing else; a null [onPick] states the refusal
 /// in [hint] rather than greying out in silence.
+///
+/// A REFUSAL IS THE MENU'S ONE SENTENCE (ISSUES 9.1, Don's screenshot walk):
+/// "The menus do not render options or the sentence syntax." The hint was
+/// stamped onto EVERY row, so a disabled six-row menu read as the same sentence
+/// six times with the option labels drowned beside it -- and the sentence, set
+/// on one line in a fixed-width menu, overflowed into the striped banner. The
+/// menu refuses ONCE, under its rows, in a paragraph that wraps: the rows keep
+/// their own words, and the reason is said where a reason belongs.
 Widget cardMenu(
   BuildContext context,
   String active,
   Map<String, String> options,
   void Function(String)? onPick, {
   String? hint,
-}) => ChronoMenu(
-  label: options[active] ?? active,
-  rows: [
-    for (final entry in options.entries)
-      menuRow(
-        entry.value,
-        onPick == null ? null : () => onPick(entry.key),
-        active: entry.key == active,
-        hint: hint,
-      ),
-  ],
-);
+}) {
+  final refusal = onPick == null ? hint : null;
+  return ChronoMenu(
+    label: options[active] ?? active,
+    rows: [
+      for (final entry in options.entries)
+        menuRow(
+          entry.value,
+          onPick == null ? null : () => onPick(entry.key),
+          active: entry.key == active,
+        ),
+    ],
+    body: refusal == null
+        ? null
+        : (context, close) => Padding(
+            padding: EdgeInsets.all(cardPx(context, 'card.gap')),
+            // The paragraph WRAPS. A menu is a fixed width and a sentence is
+            // however long it needs to be; laying one along a row is what put
+            // the refusal off the edge of its own panel.
+            child: Text(
+              refusal,
+              softWrap: true,
+              style: labelStyle(context, color: ChronoTheme.of(context).primary),
+            ),
+          ),
+  );
+}
 
 /// A field paired with the verb that consumes it, clearing itself on use --
 /// minting a group, a state, a trait. One shape, so three sites are not three

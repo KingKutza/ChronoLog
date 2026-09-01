@@ -6,8 +6,12 @@
 
 import 'package:flutter/widgets.dart';
 
+import 'dart:convert';
+
 import '../core/exact.dart';
 import '../lens/tunables.dart';
+import '../session/lens_catalog.dart';
+import '../session/settings.dart';
 import 'layout_tree.dart';
 import 'placement_rules.dart';
 
@@ -25,14 +29,93 @@ class TileSpec {
   final String id, type, klass, title;
   final Widget Function(BuildContext) build;
   final VoidCallback? onClose;
+
+  /// THE SAME TILE, SAYING WHAT IT IS NOW (ISSUES 9.1). A title that claims
+  /// something which can change is a reading, not a fact minted once: the one
+  /// seam where the claim changes restates it through here rather than leaving
+  /// every strip and window drawing the name the tile was born with.
+  TileSpec named(String title) => TileSpec(
+    id: id,
+    type: type,
+    klass: klass,
+    title: title,
+    build: build,
+    onClose: onClose,
+  );
 }
 
 class Stage extends ChangeNotifier {
-  Stage({this.rules = defaultPlacementRules, this.tunable, this.onLens, this.root});
+  Stage({List<PlacementRule>? rules, this.tunable, this.settings, this.onLens, this.root})
+    : written = rules ?? defaultPlacementRules {
+    settings?.addListener(_placementSaid);
+  }
 
   LayoutNode? root;
-  List<PlacementRule> rules;
+
+  /// WHERE A TILE LANDS, AND WHERE THAT IS WRITTEN (ISSUES 9.1, Don's ruling on
+  /// placement home): "file wins; settings edits file. App hot loads file."
+  ///
+  /// THE LAYOUT FILE IS THE HOME. This list is that file's placement section,
+  /// read back by `applyJson` when the file is loaded or changes on disk, and
+  /// written out by `toJson` every time the stage moves. Nothing else is a
+  /// rival source: the `stage.placement` setting is a READ/WRITE VIEW of this
+  /// section -- writing the key edits the file, and a file that changes says so
+  /// through the key -- so the same rules can be authored by either road and
+  /// the two cannot disagree. The shipped value is the parsed authored source.
+  List<PlacementRule> written;
+
+  /// Where a tile lands, right now.
+  List<PlacementRule> get rules => written;
+
   final Tunable? tunable;
+
+  /// The settings store, for the one key that is a view of the layout file.
+  /// Absent, the stage still places by the file and simply has no second road
+  /// to it -- which is what every test that hands no settings is asking for.
+  final Settings? settings;
+
+  /// The file's placement section, as the text the setting shows: the CANONICAL
+  /// form, so a terse authored list read in comes back out saying every term it
+  /// actually placed by.
+  String get placementSource => jsonEncode([for (final rule in written) rule.toJson()]);
+
+  bool _syncing = false;
+
+  /// The setting was written -- by the settings card, or by hand in the settings
+  /// file. It is a view of the layout file's section, so writing it EDITS THAT
+  /// SECTION, and the stage notifies, which is what saves the layout.
+  void _placementSaid() {
+    final store = settings;
+    if (store == null || _syncing) return;
+    final said = store.text('stage.placement').trim();
+    if (said == placementSource) return;
+    final parsed = rulesFromSource(said);
+    _syncing = true;
+    // A list that will not read leaves the file standing and the key says what
+    // the file says: a half-read rule list would place tiles by a rule nobody
+    // wrote, and a key silently disagreeing with the file is the drift this
+    // whole arrangement exists to prevent.
+    if (parsed.isNotEmpty) written = parsed;
+    store.setText('stage.placement', placementSource);
+    _syncing = false;
+    if (parsed.isNotEmpty) notifyListeners();
+  }
+
+  /// The file spoke: the key says what the file says.
+  void _publishPlacement() {
+    final store = settings;
+    if (store == null || _syncing) return;
+    if (store.text('stage.placement').trim() == placementSource) return;
+    _syncing = true;
+    store.setText('stage.placement', placementSource);
+    _syncing = false;
+  }
+
+  @override
+  void dispose() {
+    settings?.removeListener(_placementSaid);
+    super.dispose();
+  }
 
   /// Told which view tile now shows which lens; the view book records it.
   final void Function(String viewTileId, String lensId)? onLens;
@@ -94,7 +177,7 @@ class Stage extends ChangeNotifier {
       },
     );
     if (placement == null) return insertSplit(root, leaf, target, 'row', half);
-    if (placement.action == 'tabWithNewest') return insertTab(root, leaf, placement.targetId!);
+    if (tabActions.contains(placement.action)) return insertTab(root, leaf, placement.targetId!);
     final into = placement.action == 'into'
         ? containerNamed(root, placement.container ?? '')
         : null;
@@ -234,9 +317,31 @@ class Stage extends ChangeNotifier {
     return true;
   }
 
+  /// A VIEW TILE'S NAME IS ITS CURRENT LENS (ISSUES 9.1, Don: "when it switches
+  /// lenses via the lens bar, the name of that window does not change"). The
+  /// swap is the one seam where that name changes, so the swap restates it --
+  /// what every strip and window draws is `tiles[id].title`, and a title left
+  /// at the value it was constructed with is a claim about a thing that moved.
   void swapLens(String viewTileId, String lensId) {
-    if (tiles[viewTileId]?.type != 'view') return;
+    final spec = tiles[viewTileId];
+    if (spec?.type != 'view') return;
+    final named = lensCatalog[lensId]?.title;
+    if (named != null && named != spec!.title) tiles[viewTileId] = spec.named(named);
     onLens?.call(viewTileId, lensId);
+    notifyListeners();
+  }
+
+  /// SEAMS THAT MOVE TOGETHER, BECAUSE SOMEONE SAID SO (ISSUES 9.1, Don's
+  /// ruling on dividers). A divider drags the two windows it sits between and
+  /// nothing else; a seam named here carries its whole collinear run, and the
+  /// only way into this set is the alignment chord, where the drag bars are
+  /// visible while you say it.
+  final Set<String> lockedSeams = {};
+
+  bool seamLocked(String seam) => lockedSeams.contains(seam);
+
+  void toggleSeamLock(String seam) {
+    lockedSeams.contains(seam) ? lockedSeams.remove(seam) : lockedSeams.add(seam);
     notifyListeners();
   }
 
@@ -329,7 +434,8 @@ class Stage extends ChangeNotifier {
   Map<String, Object?> toJson() => {
     if (root != null) 'root': root!.toJson(),
     if (zoomedId != null) 'zoomed': zoomedId,
-    'rules': [for (final rule in rules) rule.toJson()],
+    if (lockedSeams.isNotEmpty) 'seams': lockedSeams.toList()..sort(),
+    'rules': [for (final rule in written) rule.toJson()],
     'presets': {for (final entry in presets.entries) entry.key: entry.value.toJson()},
   };
 
@@ -345,7 +451,14 @@ class Stage extends ChangeNotifier {
     final read = source['rules'];
     if (read is List) {
       final parsed = [for (final entry in read) ?PlacementRule.fromJson(entry)];
-      if (parsed.isNotEmpty) rules = parsed;
+      if (parsed.isNotEmpty) written = parsed;
+    }
+    _publishPlacement();
+    final seams = source['seams'];
+    if (seams is List) {
+      lockedSeams
+        ..clear()
+        ..addAll([for (final seam in seams) '$seam']);
     }
     if (source['presets'] is Map) {
       presets.clear();

@@ -33,6 +33,20 @@ class _ProjectionControlState extends State<ProjectionControl> {
   @override
   Widget build(BuildContext context) {
     final chrome = ChromeScope.of(context);
+    // A CONTROL READING LIVE STATE OWNS ITS LISTENING (ISSUES 9.1: "the
+    // checkboxes ripple but never check"). The view bar hands this control the
+    // SAME widget instance on every rebuild, and Flutter skips a child it has
+    // already been given -- so the bar's own ListenableBuilder never reached in
+    // here, the lens behind the open drop moved, and the list went on saying
+    // what was true when it opened. Nothing upstream can be relied on to
+    // rebuild a const child; whoever reads live state subscribes to it.
+    return ListenableBuilder(
+      listenable: chrome.pulse,
+      builder: (context, _) => _reading(context, chrome),
+    );
+  }
+
+  Widget _reading(BuildContext context, Chrome chrome) {
     final view = chrome.focusedView;
     if (view == null) return const SizedBox.shrink();
     final frames = chrome.editor?.document.frames ?? const <String, Frame>{};
@@ -50,8 +64,13 @@ class _ProjectionControlState extends State<ProjectionControl> {
     ];
     final rows = chrome.settings.value('chrome.frameRows').round().toInt();
     final shown = matches.take(rows).toList();
+    final newFrame = chrome.cards['newFrame'];
     return ChronoMenu(
       label: 'Projection',
+      // The drop's glyph is a READING -- which frames this view looks through --
+      // so it wears its name beside it: what the value is of, in words, rather
+      // than a phrase on a bar you have to already know how to read.
+      name: 'Projection',
       glyph: reading.isEmpty ? 'Nothing projected' : reading,
       body: (context, close) => Column(
         mainAxisSize: MainAxisSize.min,
@@ -75,6 +94,21 @@ class _ProjectionControlState extends State<ProjectionControl> {
               frame: frame,
               onOpen: chrome.openFrame == null ? null : () => chrome.openFrame!(frame.id),
             ),
+          // EVERY LIST OF THINGS OFFERS TO MAKE THE THING (ISSUES 9.1): "the
+          // moment you discover the frame you want does not exist is exactly
+          // the moment you are looking at the list of frames". ONE create
+          // affordance, the frames browser's own door, called through the
+          // chrome's registered cards rather than spelled a second time here.
+          menuTile(
+            context,
+            menuRow(
+              newFrame == null
+                  ? 'New frame — no card is registered to author one'
+                  : 'New frame',
+              newFrame == null ? null : () => chrome.stage.open(newFrame()),
+            ),
+            close: close,
+          ),
           if (matches.length > shown.length)
             Padding(
               padding: EdgeInsets.all(chrome.px('chrome.pad')),

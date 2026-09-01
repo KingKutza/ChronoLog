@@ -32,7 +32,7 @@
 
 import 'coordinate_law.dart';
 import 'document.dart';
-import 'eras.dart' show asList, asMap, firstMatch;
+import 'eras.dart' show asList, asMap;
 import 'exact.dart';
 import 'ics_text.dart';
 import 'ics_values.dart';
@@ -40,7 +40,7 @@ import 'projection.dart' show ProjectionEngine;
 import 'records.dart';
 import 'recurrence_end.dart';
 import 'rrule.dart' show RRule, compactIcsDay;
-import 'staples.dart' show Segment, Staples;
+import 'staples.dart' show Segment, Staples, isPlacement, startPoint;
 
 export 'ics_text.dart';
 export 'ics_values.dart';
@@ -375,18 +375,26 @@ class _Importer {
     if (start == null) return;
     entry.relation = _put(
       'relations',
+      // THE IMPORT MINTS A STAPLE (ruled 2026-09-01). ICS stays the ruled lossy
+      // external dialect; what it lands IN is the one internal shape, so a
+      // calendar read off disk and one authored by hand are the same records.
       Relation(
         id: createId('relation'),
-        type: 'attachment',
+        type: 'staple',
         extra: {
-          'event': event.id,
-          'frame': entry.frameId,
+          'kind': 'anchor',
           'role': 'placed',
-          'coordinate': start.coordinate.toJson(),
           // TZID rides as an OPAQUE STRING. Nothing resolves an offset from it;
           // export echoes exactly this text back.
           'parameters': {'dateOnly': start.dateOnly, 'utc': start.utc, 'timeZone': start.timeZone},
           'provenance': {'kind': 'ics', 'source': entry.sourceId},
+          'ends': [
+            ObjectEnd(event.id, point: startPoint).toJson(),
+            FrameEnd(
+              entry.frameId,
+              position: Position.coordinate(start.coordinate.toJson()),
+            ).toJson(),
+          ],
         },
       ),
     );
@@ -417,7 +425,11 @@ class _Importer {
           'appliesTo': [entry.frameId],
           'frame': entry.frameId,
           'templateEvent': entry.event!.id,
-          'templateRelation': entry.relation?.id,
+          // NO templateRelation (Don, ruled 2026-09-01). The placement is
+          // derivable from the template event, and storing its id a second time
+          // is what made "minted without it" a reachable silent state at all.
+          // Records that already carry one keep loading byte for byte and are
+          // simply not believed: the derivation is the one truth.
           'rrule': parseRRule(entry.rrule!.value),
           'rawRule': entry.rrule!.value,
           'exdates': [for (final date in entry.exdates) _occurrenceKey(date, entry.start).toJson()],
@@ -569,7 +581,14 @@ class _Exporter {
       for (final pattern in document.patterns.values)
         if (pattern.kind == 'ics-rrule' && str(pattern.extra['frame']) == frame) pattern,
     ];
-    final templates = {for (final pattern in patterns) pattern.templateRelation};
+    // Which relation IS the template is DERIVED (ISSUES 9.1), not read off the
+    // pattern's stored id: a pattern minted without `templateRelation` used to
+    // export its template as an ordinary VEVENT with no rule attached, which is
+    // the same starvation the projector had, written to a file.
+    final templates = {
+      for (final pattern in patterns)
+        if (staples.templatePlacement(pattern) case final Relation relation) relation.id: pattern,
+    };
     // The window is read through THIS frame's own law, not the standard boundary:
     // an edited Wall Time must not have its own export window misread as standard
     // civil time. A series' template relation is always in, whatever the window,
@@ -578,8 +597,8 @@ class _Exporter {
     final from = start == null || law == null ? null : law.toDays(start);
     final to = end == null || law == null ? null : law.toDays(end);
     for (final relation in document.relations.values) {
-      if (relation.type != 'attachment' || relation.frame != frame) continue;
-      if (!templates.contains(relation.id) && from != null && to != null) {
+      if (!isPlacement(relation) || relation.frame != frame) continue;
+      if (!templates.containsKey(relation.id) && from != null && to != null) {
         // A placement with no coordinate at all makes no claim the window can
         // refuse, so it rides -- the same reading the JavaScript's truthiness had.
         final day = relation.coordinate == null
@@ -590,7 +609,7 @@ class _Exporter {
       final event = document.events[relation.event];
       if (event == null) continue;
       final component = _component(event, relation);
-      final pattern = firstMatch(patterns, (item) => item.templateRelation == relation.id);
+      final pattern = templates[relation.id];
       calendar.components.add(component);
       if (pattern != null) _series(calendar, pattern, component, relation);
     }
@@ -747,7 +766,10 @@ class _Exporter {
     final until = segment.untilDays;
     final frame = str(pattern.extra['frame']);
     if (engine == null || until == null || frame == null) return null;
-    final template = document.relations[pattern.templateRelation];
+    // DERIVED like every other read of it (ISSUES 9.1): the pattern no longer
+    // stores its template placement's id, and a reader that still expected one
+    // silently lost the window it counts occurrences in.
+    final template = staples.templatePlacement(pattern);
     final lower =
         segment.fromDays ??
         (template?.coordinate == null

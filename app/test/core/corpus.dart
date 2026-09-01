@@ -25,6 +25,14 @@ List<int> seeds(int count) => [for (var i = 0; i < count; i++) specSeed + i];
 /// invented on the spot. Every one of them must load, validate clean, and save
 /// back byte for byte -- an unknown type is data, never a refusal.
 const List<String> unknownRelationTypes = [
+  // THE FOUR RETIRED KINDS (ruled 2026-09-01). They are unknown types now, and
+  // that is not a demotion but the whole claim: a prior prebuild's records load,
+  // validate clean and round-trip byte for byte, and no reader assigns them
+  // meaning.
+  'attachment',
+  'membership',
+  'contains',
+  'composition',
   'shared-segment',
   'termination',
   'displacement',
@@ -209,34 +217,39 @@ class Corpus {
     return document;
   }
 
+  /// ONE SHAPE (Don, ruled 2026-09-01). Every connection the corpus draws is a
+  /// staple; the four retired record kinds are drawn too -- from
+  /// [unknownRelationTypes], where they now belong -- so the corpus keeps
+  /// proving the property that matters about them: they load, they validate
+  /// clean, and they save back byte for byte while nothing reads them.
   Relation _relation(int index) {
     final id = mint('relation');
     return switch (index % 6) {
+      // A PLACEMENT: an object's start identified with a point on a frame.
+      // Always retrospective, so a generated task placement on a calendar frame
+      // is valid whichever pair the draw produced.
       0 => Relation(
         id: id,
-        type: 'attachment',
+        type: 'staple',
         extra: {
-          'event': pick(eventIds),
-          'frame': pick(frameIds),
-          // Always retrospective, so a generated task attachment on a calendar
-          // frame is valid whichever pair the draw produced.
+          'kind': 'anchor',
           'role': 'observed',
-          'coordinate': _coordinate,
+          'ends': [
+            ObjectEnd(pick(eventIds), point: 'start').toJson(),
+            FrameEnd(pick(frameIds), position: Position.coordinate(_coordinate)).toJson(),
+          ],
           ...unknownFields(),
         },
       ),
-      1 => Relation(
-        id: id,
-        type: 'composition',
-        extra: {'parent': pick(frameIds), 'child': pick(frameIds)},
-      ),
+      // FRAME TO FRAME, no point on either: two sheets in one pile.
+      1 => _twoFrames(id),
+      // AFFILIATION: the whole of an object on a sheet, nothing about where.
       2 => Relation(
         id: id,
-        type: 'membership',
+        type: 'staple',
         extra: {
-          'group': pick(groupIds),
-          'member': pick([...eventIds, ...frameIds]),
           'role': 'member',
+          'ends': [ObjectEnd(pick(eventIds)).toJson(), StapleEnd.frame(pick(groupIds)).toJson()],
         },
       ),
       3 => _contains(id),
@@ -255,10 +268,33 @@ class Corpus {
     };
   }
 
+  /// Two DISTINCT sheets in one pile: neither end names a point, so nothing on
+  /// either projects onto the other. Distinct because a staple joining one point
+  /// to itself says nothing and is refused.
+  Relation _twoFrames(String id) {
+    final first = pick(frameIds);
+    final second = pick(frameIds.where((f) => f != first).toList());
+    return Relation(
+      id: id,
+      type: 'staple',
+      extra: {
+        'ends': [StapleEnd.frame(first).toJson(), StapleEnd.frame(second).toJson()],
+      },
+    );
+  }
+
+  /// CONTAINMENT: object ends alone, both silent -- "all of this is all of
+  /// that" -- with authored order the one carrier of held-by.
   Relation _contains(String id) {
     final parent = pick(eventIds);
     final child = pick(eventIds.where((e) => e != parent).toList());
-    return Relation(id: id, type: 'contains', extra: {'parent': parent, 'child': child});
+    return Relation(
+      id: id,
+      type: 'staple',
+      extra: {
+        'ends': [ObjectEnd(child).toJson(), ObjectEnd(parent).toJson()],
+      },
+    );
   }
 
   /// A staple whose two ends are distinct things, over the whole end and

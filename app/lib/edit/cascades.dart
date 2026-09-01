@@ -45,7 +45,11 @@ HealScope healScope(Document document, Touched touched, HealScope? also) {
       ...?touched.changed['patterns'],
       ...?also?.patternIds,
       for (final pattern in document.patterns.values)
-        if (events.contains(pattern.templateEvent) || relations.contains(pattern.templateRelation))
+        // DERIVED, and only derived (ruled 2026-09-01): an edit to a connection
+        // that places the template event moves the series, and the pattern
+        // record is not consulted about which connection that is.
+        if (events.contains(pattern.templateEvent) ||
+            relations.any((id) => document.relations[id]?.event == pattern.templateEvent))
           pattern.id,
     },
   );

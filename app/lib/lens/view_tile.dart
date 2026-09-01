@@ -24,6 +24,7 @@ import '../edit/editor.dart';
 import '../session/lens_catalog.dart';
 import '../session/settings.dart';
 import '../session/view_state.dart';
+import '../stage/content.dart';
 import '../stage/tile.dart';
 import 'context_menu.dart';
 import 'drag_ghost.dart';
@@ -46,10 +47,19 @@ typedef Surface = ({
   // `factory.objectCard` and `factory.frameCard` as tear-offs.
   CardOpener? objectCard,
   CardOpener? frameCard,
+  // The settings family, as one door (ISSUES 9.1, Don's ruling on the settings
+  // surface): "sub-cards are also launched from right-click context menus at
+  // the relevant parts of the app -- the lens's own menu opens that lens's
+  // settings card". A lens knows which area it is; it does not know what a
+  // settings card looks like, and this is all it needs.
+  SettingsOpener? settingsCard,
 });
 
 /// Opens the card for one record, by id.
 typedef CardOpener = TileSpec Function(String id);
+
+/// Opens the settings card for one area, or the main card for none.
+typedef SettingsOpener = TileSpec Function({String? area});
 
 /// A surface where ONE COORDINATE HAS MORE THAN ONE POSITION (Don, 2026-08-28:
 /// "if I have it zoomed and scrolled so the same time is visible in two spots,
@@ -84,6 +94,7 @@ abstract class ViewTileController {
   Stage get stage;
   CardOpener? get objectCard;
   CardOpener? get frameCard;
+  SettingsOpener? get settingsCard;
 
   /// The frame every write this surface makes is written ONTO.
   String? get primaryFrame;
@@ -118,6 +129,10 @@ abstract class ViewTileController {
   /// a state change carries an object out of the projected set.
   void project(String frameId);
 
+  /// Writes one value onto this tile's own view state, declared control or not.
+  /// A surface that offers a choice needs somewhere to put it.
+  void writeView(String key, Object? value);
+
   void pan(Rational days);
   void panPixels(Offset delta);
   void zoom(Rational factor);
@@ -137,7 +152,10 @@ abstract class ViewTileController {
   /// 2026-08-31) -- so there is one rule per gesture and no per-lens wiring.
   void openObject(String objectId);
   void deleteSelected();
-  void createHere(String kind, Rational days, {Rational? endDays});
+  /// [onObject] is what the pointer was over, where it was over anything: a
+  /// menu that knows what is under the pointer owes that knowledge to every verb
+  /// it offers, not just the readers (ISSUES 9.1).
+  void createHere(String kind, Rational days, {Rational? endDays, String? onObject});
 
   /// A declared control's action, by key: what a `ControlSpec('action', ...)`
   /// and the keyboard map both send.
@@ -253,6 +271,9 @@ class _ViewTileState extends State<ViewTile>
   @override
   CardOpener? get frameCard => widget.surface.frameCard;
 
+  @override
+  SettingsOpener? get settingsCard => widget.surface.settingsCard;
+
   Settings get _settings => widget.surface.settings;
 
   ViewBook get _views => widget.surface.views;
@@ -277,8 +298,15 @@ class _ViewTileState extends State<ViewTile>
   @override
   Set<String> get selection => {if (_selected != null) _selected!.identity};
 
+  /// EVERYTHING THIS TILE IS CARRYING, not only what its catalog declared. A
+  /// lens may hold a value no control names -- the Board's chosen columns are
+  /// exactly that (ISSUES 9.1: "a standing column comes from view['columns'] and
+  /// nothing writes it") -- and a view map built from the control list alone
+  /// could never hand one back. Declared controls answer last, because they know
+  /// their own default when nothing has been authored.
   @override
   Map<String, Object?> get view => {
+    ..._state.view,
     for (final control in _state.spec.controls) control.key: _state.read(control.key, _settings),
   };
 
@@ -290,6 +318,12 @@ class _ViewTileState extends State<ViewTile>
   void project(String frameId) {
     _state.selection.toggle(frameId);
     _state.source = '';
+    _views.touch();
+  }
+
+  @override
+  void writeView(String key, Object? value) {
+    _state.write(key, value);
     _views.touch();
   }
 
@@ -489,12 +523,20 @@ class _ViewTileState extends State<ViewTile>
   /// committed whatever the view window could hold of it -- so anything it could
   /// not hold snapped back, and anything past the painted edge arrived as a hole.
   ///
-  /// So the painter answers both halves at once: how far the window moves, and
-  /// how much of that the eye may be shown while the gesture is live. The
-  /// transform carries the shown part, which never exceeds the painter's own
-  /// bleed; the moment it would, the pan COMMITS, the scene is drawn again in
-  /// exactly the same place at full fidelity, and the gesture carries on from
-  /// there. Nothing is ever shown that mouse-up will not honour.
+  /// So the painter answers all three at once: how far the window moves, how
+  /// much of that the eye may be shown while the gesture is live, and which
+  /// pixels the movement ACCOUNTED FOR. The transform carries the shown part,
+  /// which never exceeds the painter's own bleed; the moment it would, the pan
+  /// COMMITS, the scene is drawn again in exactly the same place at full
+  /// fidelity, and the gesture carries on FROM WHAT THE COMMIT DID NOT TAKE.
+  ///
+  /// That last clause is the ratchet's cure (ISSUES 9.1). A surface that can
+  /// only commit in whole steps -- an Intimate column IS a day -- used to
+  /// truncate what it SHOWED to the same steps, so a sideways drag showed
+  /// nothing until a full column and then repainted on every one of them. Now
+  /// the slide is continuous inside the bleed, the commit takes the whole
+  /// columns, and the remainder is carried forward as travel rather than
+  /// dropped: nothing jumps, and nothing is shown that mouse-up will not honour.
   void _panMove(Offset at, Offset travel) {
     final painter = _painter;
     if (painter == null) return;
@@ -507,8 +549,9 @@ class _ViewTileState extends State<ViewTile>
     final unshowable = landing.shown == Offset.zero && !landing.days.isZero;
     if (beyond || unshowable) {
       pan(landing.days);
-      _downAt = at;
-      _panning.value = Offset.zero;
+      final rest = travel - landing.taken;
+      _downAt = at - rest;
+      _panning.value = painter.panLanding(rest).shown;
       return;
     }
     _panning.value = landing.shown;
@@ -553,7 +596,10 @@ class _ViewTileState extends State<ViewTile>
         ? event.scrollDelta.dy
         : event.scrollDelta.dx;
     if (keys.isControlPressed) {
-      final steps = _zoomWheel.take(-raw, notch);
+      // The direction is a setting, not a sign in the code (ISSUES 9.1). A
+      // factor ABOVE one widens the span, so a wheel-up notch -- a negative
+      // delta -- must come through as a negative step to zoom IN.
+      final steps = _zoomWheel.take(raw * _px('pointer.zoomDirection'), notch);
       return steps == 0 ? null : zoom(_tune('pointer.zoomStep').pow(steps));
     }
     final steps = _wheel.take(raw, notch);
@@ -707,10 +753,13 @@ class _ViewTileState extends State<ViewTile>
   }
 
   @override
-  void createHere(String kind, Rational days, {Rational? endDays}) {
+  void createHere(String kind, Rational days, {Rational? endDays, String? onObject}) {
     final frame = primaryFrame;
     if (frame == null) return;
-    final id = editor.createAt(frame, days, endDays, kind: kind);
+    // "HERE" ON AN OBJECT MEANS THE OBJECT (ISSUES 9.1). The frame coordinate is
+    // the fallback, and it is the right answer only where the pointer is over
+    // nothing.
+    final id = editor.createAt(frame, days, endDays, kind: kind, stapledTo: onObject);
     // The card opens on the new object and holds the draft: a create lands in an
     // editor with the title ready, not on a nameless block -- through the same
     // door every other path back to a card goes through.
@@ -760,3 +809,26 @@ TileSpec viewTileSpec(String id, Surface surface) => TileSpec(
   title: lensCatalog[surface.views.of(id).lensId]?.title ?? 'View',
   build: (_) => ViewTile(tileId: id, surface: surface),
 );
+
+/// A lens as a CONTENT (the one ancestor, ruled 2026-09-01): each catalog lens
+/// is one registered kind, so the connectivity universe holds every lens by
+/// derivation. Minting a spec commits the tile to this lens before the spec
+/// reads it, which is exactly what the view bar's open-with-lens path does.
+class LensContent extends TileContent {
+  const LensContent(this.lensId, this.surface);
+
+  final String lensId;
+  final Surface surface;
+
+  @override
+  String get kind => 'lens:$lensId';
+
+  @override
+  String get title => lensCatalog[lensId]?.title ?? lensId;
+
+  @override
+  TileSpec spec(String id) {
+    surface.views.of(id).lensId = lensId;
+    return viewTileSpec(id, surface);
+  }
+}

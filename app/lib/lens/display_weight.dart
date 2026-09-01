@@ -22,6 +22,7 @@ import '../core/math.dart';
 import '../core/object_kinds.dart';
 import '../core/projection.dart';
 import '../core/records.dart';
+import '../core/staples.dart';
 import '../core/weight.dart';
 import 'lens_painter.dart';
 import 'marks.dart';
@@ -55,7 +56,14 @@ String todoState(ProjectionEngine engine, Fact fact) {
   final described = '${obj(fact.event.payload)?['description'] ?? ''}'.trim();
   if (described.isNotEmpty) return 'open';
   if (engine.indexes.directGroupsOf(fact.event.id).isNotEmpty) return 'open';
-  return engine.indexes.staplesOf(fact.event.id).isEmpty ? 'sparse' : 'open';
+  // FLAGGED (core zone, ruled 2026-09-01): "nothing has been said about this
+  // beyond that it exists" used to be spelled "it has no staples". Every
+  // connection is a staple now -- its own placement included -- so the question
+  // has to be asked of the SENTENCES: is there anything beyond where it sits?
+  final said = engine.indexes
+      .staplesOf(fact.event.id)
+      .where((staple) => !isPlacement(staple, fact.event.id));
+  return said.isEmpty ? 'sparse' : 'open';
 }
 
 /// The composed weight of one mark in one projection.
@@ -74,13 +82,64 @@ DisplayWeight factDisplayWeight(LensScene scene, Fact fact, {String keyPrefix = 
     at: fades ? scene.nowDays : null,
     halfDistanceDays: half,
   );
+  final near = proximityStep(scene, fact, derivation.weight);
   return (
-    weight: derivation.weight,
-    rings: derivation.rings,
-    promotion: promotionOf(derivation.weight, scene.tunable, keyPrefix: keyPrefix),
+    weight: near?.weight ?? derivation.weight,
+    rings: [...derivation.rings, ?near],
+    promotion: promotionOf(near?.weight ?? derivation.weight, scene.tunable, keyPrefix: keyPrefix),
     state: state,
     bucket: fades ? falloffBucket(_ratio(derivation), scene.tunable) : null,
   );
+}
+
+/// The step id the proximity ring reports itself under, so the card's explainer
+/// names it the way it names every other ring.
+const String proximityWeightRing = 'proximity';
+
+/// What a plain number means when a frame authors `display.proximity: 4`.
+///
+/// The sugar rule again (`normalizeWeightFormula`), with the meaning this knob
+/// actually has: a number is HOW MANY DAYS OF FUTURE the boost is worth half of.
+/// At now the weight doubles; that many days out it is up by half; far out the
+/// boost lapses to nothing and the object weighs exactly what it always did.
+/// Behind now nothing happens at all -- Don asked for the NEAR FUTURE to weigh
+/// more, and quietly re-weighting the past would be a second claim nobody made.
+String proximitySugar(String number) =>
+    '$weightVariable * ($proximityVariable < 0 ? 1 : '
+    '1 + ($number) / (($number) + $proximityVariable))';
+
+/// THE NEAR FUTURE MAY WEIGH MORE, WHEN A FRAME SAYS SO (ISSUES 9.1, Don's
+/// optional frame rule).
+///
+/// Read exactly where `display.halfDistance` is read -- the object's own display
+/// property, then every frame bearing on it by graph distance -- so this is the
+/// same group display property the whole surface already goes through, offered
+/// to EVENTS and looking forward. Optional by construction: a frame that authors
+/// nothing returns null here and changes nothing at all.
+///
+/// A curve that will not read is a refusal, not a licence to invent one: the
+/// authored text is ignored and the weight passes through untouched, the same
+/// no-op an absent knob has always been.
+WeightStep? proximityStep(LensScene scene, Fact fact, Rational incoming) {
+  final authored = scene.engine.authoredHandling(handlingSubject(scene.engine, fact), 'proximity');
+  if (authored == null || !scene.law.mapsToClock()) return null;
+  final text = '$authored'.trim();
+  if (text.isEmpty) return null;
+  final formula = isPlainWeightNumber(text) ? proximitySugar(text) : text;
+  // ONE READER (ISSUES 9.1). The signed distance and the evaluation both come
+  // from core: `proximityDaysOf` is the one derivation of "how far from now",
+  // and `evaluateWeightFormula` is the one evaluator every weight formula goes
+  // through, with `days` bound the same way it is bound for every other ring.
+  // What stays here is the AUTHORED SURFACE -- which frame property is read, and
+  // what a bare number on it means.
+  final days = scene.engine.proximityDaysOf(fact, scene.nowDays);
+  if (days == null) return null;
+  final weight = evaluateWeightFormula(
+    formula,
+    incoming,
+    environment: {proximityVariable: days},
+  );
+  return weight == null ? null : (id: proximityWeightRing, via: formula, weight: weight);
 }
 
 /// How fast this object's apparent magnitude falls off, in days per halving.

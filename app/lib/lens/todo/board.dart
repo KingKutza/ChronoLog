@@ -36,10 +36,7 @@ class BoardLens extends StatelessWidget {
           for (final frame in scene.engine.document.frames.values)
             if (isStateFrame(frame)) frame.id,
         ]
-      : [
-          if (scene.view['columns'] case final List<Object?> chosen)
-            for (final key in chosen) '$key',
-        ];
+      : scene.chosenColumns;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -60,12 +57,16 @@ class BoardLens extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            groupingNote(scene),
             Expanded(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [for (final column in columns) _column(column)],
+                  children: [
+                    for (final column in columns) _column(column),
+                    _chooser(context),
+                  ],
                 ),
               ),
             ),
@@ -75,6 +76,58 @@ class BoardLens extends StatelessWidget {
       },
     ),
   );
+
+  /// PULL A FRAME UP AS A COLUMN (ISSUES 9.1: "I see no power to pull up
+  /// frames"). The empty-column machinery was built and its affordance never
+  /// was, so the key nothing wrote is written here: every frame the document
+  /// holds, checked where it already stands, toggled by the row. Under the state
+  /// grouping the columns ARE the state frames and there is nothing to choose,
+  /// so this says so rather than offering a choice it would ignore.
+  Widget _chooser(BuildContext context) {
+    final write = scene.onView;
+    final standingNow = scene.chosenColumns;
+    final frames = [
+      for (final frame in scene.engine.document.frames.values)
+        if (!isStateFrame(frame)) frame,
+    ]..sort((a, b) => (a.title ?? a.id).compareTo(b.title ?? b.id));
+    return SizedBox(
+      width: scene.px('todo.columnWidth'),
+      child: Padding(
+        padding: EdgeInsets.all(scene.px('todo.pad')),
+        child: scene.grouping == 'state' || write == null
+            ? Text(
+                scene.grouping == 'state'
+                    ? 'Columns here are the state frames themselves.'
+                    : 'No view behind this board to hold a chosen column.',
+                style: scene.theme.ui.copyWith(
+                  fontSize: scene.px('todo.metaSize'),
+                  color: scene.theme.muted,
+                ),
+              )
+            : MenuAnchor(
+                menuChildren: [
+                  for (final frame in frames)
+                    MenuItemButton(
+                      onPressed: () => write('columns', [
+                        for (final id in standingNow)
+                          if (id != frame.id) id,
+                        if (!standingNow.contains(frame.id)) frame.id,
+                      ]),
+                      leadingIcon: Text(
+                        standingNow.contains(frame.id) ? '\u2713' : '\u00b7',
+                        style: scene.theme.data,
+                      ),
+                      child: Text(frame.title ?? frame.id, style: scene.theme.ui),
+                    ),
+                ],
+                builder: (context, controller, _) => TextButton(
+                  onPressed: () => controller.isOpen ? controller.close() : controller.open(),
+                  child: Text('Stand a column\u2026', style: scene.theme.ui),
+                ),
+              ),
+      ),
+    );
+  }
 
   Widget _column(Section<TodoEntry> column) => SizedBox(
     width: scene.px('todo.columnWidth'),

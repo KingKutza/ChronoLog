@@ -35,6 +35,7 @@ List<MenuRow> viewMenuRows(
 }) {
   final frame = tile.primaryFrame, stage = tile.stage;
   final openObject = tile.objectCard, openFrame = tile.frameCard;
+  final openSettings = tile.settingsCard;
   final nothing = frame == null ? 'nothing projected' : null;
   final object = objectId ?? hit?.fact.event.id;
   return [
@@ -65,8 +66,12 @@ List<MenuRow> viewMenuRows(
     ],
     for (final entry in objectKinds.entries)
       menuRow(
-        'New ${entry.value.label.toLowerCase()} here',
-        at == null || frame == null ? null : () => tile.createHere(entry.key, at),
+        'New ${entry.value.label.toLowerCase()} ${object == null ? 'here' : 'on this'}',
+        at == null || frame == null
+            ? null
+            : () => tile.createHere(entry.key, at, onObject: object),
+        // "On this" is the whole hint: the row names the object the staple will
+        // be said against, so a second sentence beside it says nothing new.
         hint: nothing,
       ),
     menuRow('Paste', null, hint: 'nothing copied'),
@@ -74,6 +79,19 @@ List<MenuRow> viewMenuRows(
       'Frame\u2026',
       frame == null || openFrame == null ? null : () => stage.open(openFrame(frame)),
       hint: nothing,
+    ),
+    // THE LENS'S OWN SETTINGS, from where the hand already is (ISSUES 9.1,
+    // Don's settings ruling). The area a lens governs is the lens itself, so
+    // nothing here has to know which sub-cards exist.
+    menuRow(
+      'Settings for this lens\u2026',
+      openSettings == null ? null : () => stage.open(openSettings(area: tile.lensId)),
+      hint: openSettings == null ? 'no card surface' : null,
+    ),
+    menuRow(
+      'All settings\u2026',
+      openSettings == null ? null : () => stage.open(openSettings()),
+      hint: openSettings == null ? 'no card surface' : null,
     ),
     menuRow('Split right', () => stage.split(tile.tileId, 'row')),
     menuRow('Split down', () => stage.split(tile.tileId, 'column')),

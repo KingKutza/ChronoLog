@@ -94,9 +94,17 @@ class LensScene {
   );
 }
 
-/// How a pan lands: what the view window moves by, and what the eye is shown
-/// while the gesture is live. The two are the same motion.
-typedef PanLanding = ({Rational days, Offset shown});
+/// How a pan lands: what the view window moves by, what the eye is shown while
+/// the gesture is live, and how much of the gesture the movement ACCOUNTED FOR.
+///
+/// [taken] is the third field because a surface can be honest about a motion it
+/// can only commit in steps (ISSUES 9.1, Intimate's ratchet). Sideways, an
+/// Intimate column IS a whole day: a half-column slide is real to the eye and
+/// unrepresentable in the window, so the landing shows the whole slide, commits
+/// the whole columns, and says which pixels the commit answered for. What it did
+/// not take stays shown, and nothing is dropped. A surface whose window can hold
+/// the entire gesture answers `taken: shift` and behaves exactly as before.
+typedef PanLanding = ({Rational days, Offset shown, Offset taken});
 
 /// A bleeding lens, drawn into a canvas that begins at the bleed's own corner.
 ///
@@ -220,9 +228,9 @@ abstract class LensPainter extends CustomPainter {
     ]) {
       final here = unproject(probe), there = unproject(probe - shift);
       if (here == null || there == null) continue;
-      return (days: there - here, shown: Offset.zero);
+      return (days: there - here, shown: Offset.zero, taken: shift);
     }
-    return (days: Rational.zero, shown: Offset.zero);
+    return (days: Rational.zero, shown: Offset.zero, taken: Offset.zero);
   }
 
   /// The ink ring that marks selection. PURE INK, at two weights: the accent

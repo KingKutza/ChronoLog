@@ -31,6 +31,7 @@
 import 'document.dart';
 import 'event_cycle.dart';
 import 'records.dart';
+import 'staples.dart' show isPlacement;
 
 /// One reference: which pointer it is, which record maps a legal target may
 /// live in, and the ids the record claims. Yielding a list means a field, a pair
@@ -53,32 +54,23 @@ final Map<String, List<_Ref>> _refs = {
   'events': [('magnitude frame', _frames, (r) => (r as Event).magnitudes.values.map(_mf))],
   'patterns': [
     ('template event', _events, (r) => [_ics(r, (p) => p.templateEvent)]),
-    ('template relation', _relations, (r) => [_ics(r, (p) => p.templateRelation)]),
   ],
   'overrides': [
     ('virtual pattern', _patterns, (r) => [overridePatternId(r as Override)]),
     ('replacement event', _events, (r) => (r as Override).replacements),
   ],
-  'relations:attachment': [
-    ('event', _events, (r) => [(r as Relation).event]),
-    ('frame', _frames, (r) => [(r as Relation).frame]),
-  ],
-  'relations:composition': [
-    ('frame', _frames, (r) => [(r as Relation).parent, r.child]),
-  ],
-  'relations:membership': [
-    ('member', const ['events', 'frames'], (r) => [(r as Relation).member]),
-  ],
-  'relations:contains': [
-    ('parent', _events, (r) => [(r as Relation).parent]),
-    ('child', _events, (r) => [(r as Relation).child]),
-  ],
+  // NO ROW FOR A CONNECTION (ruled 2026-09-01). The four record kinds each had
+  // rows naming their own fields; a connection is a staple now and names what it
+  // names at its ENDS, which `_staple` already checks one end at a time and by
+  // position -- so a row here would report the same fault a second time. A
+  // record still spelled `attachment`, `membership` or `contains` matches
+  // nothing at all, which is exactly what an unknown type has always done and
+  // exactly what "nothing reads them" has to mean here too.
 };
 
 const List<String> _frames = ['frames'];
 const List<String> _events = ['events'];
 const List<String> _patterns = ['patterns'];
-const List<String> _relations = ['relations'];
 
 String? _mf(Magnitude magnitude) => magnitude.frame;
 
@@ -108,7 +100,7 @@ String? _lawPattern(Frame frame) => str(obj(frame.extra['law'])?['pattern']);
 String? _ics(Object record, String? Function(Pattern) field) =>
     (record as Pattern).kind == 'ics-rrule' ? field(record) : null;
 
-const Map<String, String> _relationLabels = {'contains': 'Containment'};
+const Map<String, String> _relationLabels = {};
 
 String _label(Object record) => switch (record) {
   Frame() => 'Frame',
@@ -192,39 +184,39 @@ void _invariants(Document document, Object record, String id, List<String> error
   }
 }
 
+/// ONE SHAPE, ONE SWITCH POINT (ruled 2026-09-01). A record spelled with one of
+/// the four retired kinds matches nothing here -- exactly as an unknown type
+/// always has -- so it loads, validates clean and saves back byte for byte,
+/// while nothing reads it. The invariants those kinds carried are stated of the
+/// SENTENCE now, inside the staple check, because that is where the sentence is.
 void _relation(Document document, Relation relation, String id, List<String> errors) {
-  switch (relation.type) {
-    case 'attachment':
-      // Completion is a state-frame membership plus an optional end staple, so
-      // a task on a calendar records what happened, never what is planned.
-      final event = document.events[relation.event];
-      final frame = document.frames[relation.frame];
-      final retrospective = relation.role == 'observed';
-      if (event != null &&
-          frame != null &&
-          event.traits.contains('task') &&
-          frame.traits.contains('calendar') &&
-          !retrospective) {
-        errors.add('Task attachment $id must be retrospective');
-      }
-    case 'membership':
-      final group = document.frames[relation.group];
-      if (!(group?.traits.contains('group') ?? false)) {
-        errors.add('Membership $id references a missing group');
-      }
-    case 'contains':
-      // Containment passes no judgment: multi-parent and any depth are legal,
-      // and a cycle is reported by the derivations that walk it, not refused
-      // here. Only the one claim a record cannot survive is checked.
-      if (relation.parent == relation.child) {
-        errors.add('Containment $id makes an object contain itself');
-      }
-    case 'staple':
-      _staple(document, relation, id, errors);
+  if (relation.isStaple) _staple(document, relation, id, errors);
+}
+
+/// The claims a connection cannot survive, whatever spelling reached it.
+void _connection(Document document, Relation relation, String id, List<String> errors) {
+  // Completion is a state-frame affiliation plus an optional end staple, so a
+  // task on a calendar records what happened, never what is planned.
+  final event = document.events[relation.event];
+  final frame = document.frames[relation.frame];
+  if (isPlacement(relation) &&
+      event != null &&
+      frame != null &&
+      event.traits.contains('task') &&
+      frame.traits.contains('calendar') &&
+      relation.role != 'observed') {
+    errors.add('Task placement $id must be retrospective');
   }
+  // Containment passes no judgment: multi-parent and any depth are legal, and a
+  // cycle is reported by the derivations that walk it, not refused here. The one
+  // claim it cannot survive -- a thing holding itself -- needs no check of its
+  // own now that containment IS a staple: "connects one object to itself" below
+  // is the general form of exactly that fault, and stating it twice would report
+  // one defect as two.
 }
 
 void _staple(Document document, Relation staple, String id, List<String> errors) {
+  _connection(document, staple, id, errors);
   // N POINTS ARE ONE POINT, n >= 0. Zero ends is a staple that pierces pages
   // without identifying any of their points, one is a pin that gives a point
   // identity for other math to reference, and three is the sticky note stapled
@@ -247,12 +239,13 @@ void _staple(Document document, Relation staple, String id, List<String> errors)
       errors.add('$label point must be a non-empty name');
     }
   }
-  if (staple.role != null) {
-    errors.add(
-      'Staple $id carries a top-level role; '
-      'a staple\'s touch point is its end\'s "point"',
-    );
-  }
+  // A TOP-LEVEL ROLE IS THE PLACEMENT'S OWN WORD (ruled 2026-09-01). It used to
+  // be refused here, because `role` on a staple could only have been a touch
+  // point written in the wrong place -- the touch point is an END's `point`, and
+  // it still is. But a placement is a staple now, and `role` is what it has
+  // always carried beside its coordinate (placed, observed, template), so the
+  // refusal was refusing the one shape there is.
+
   // A frame may be stapled to ITSELF at two different positions: that is a
   // nonlinear line crossing its own path, which correspondence exists to carry.
   // Two ends at the same position say nothing, and an object or series stapled

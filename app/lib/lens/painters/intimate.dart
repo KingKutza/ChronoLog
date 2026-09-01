@@ -30,9 +30,17 @@
 //
 // OVERLAP IS LOCAL (ROADMAP #7): a thirty-minute collision does not lane both
 // events full-height. Events stay rectangles; the CONTENDED INTERVAL is what
-// gets drawn. And a mark's grab shape is a strip at its leading edge, not its
-// whole body, so a drag inside an occupied span creates in place instead of
-// demanding the occupant be moved away and back.
+// gets drawn.
+//
+// THE WHOLE BLOCK GRABS (ISSUES 9.1, Don: "click on an event or todo and drag
+// it, the event does not move -- it drags to create a new event"). A block used
+// to record a nine-pixel leading strip as the only region a drag took hold of,
+// so a create-drag could pass through an occupied span. But the pointer table
+// already answers that -- ALT forces create even over a mark -- and serving it
+// twice, invisibly, stole the common gesture. The common gesture gets the common
+// verb: a drag that starts anywhere on a block moves it, and creating through an
+// occupied span is what wears the modifier. An affordance nine pixels wide,
+// unpainted and unhinted, is not an affordance.
 
 import 'package:flutter/widgets.dart';
 
@@ -46,6 +54,7 @@ import '../ladder.dart';
 import '../lanes.dart';
 import '../law_context.dart';
 import '../lens_painter.dart';
+import '../marks.dart';
 import '../now.dart';
 import '../view_tile.dart';
 import '../zones.dart';
@@ -61,7 +70,7 @@ const Map<String, String> intimateTunableDefaults = {
   // of THIS LAW's hour, so a hundred-minute hour subdivides too; the pairing and
   // the target spacings live in `rule.*` (lens/ladder.dart), because one ladder
   // serves every surface that rules time.
-  'intimate.ruleLadderCount': '15',
+  'intimate.ruleLadderCount': '13',
   // The authored increments, ascending, as fractions of THIS LAW's hour. Below a
   // minute they are the readings a clock face has (5s, 10s, 15s) rather than bare
   // halvings, so the ladder lands on units a person recognises at every zoom;
@@ -87,26 +96,46 @@ const Map<String, String> intimateTunableDefaults = {
   'intimate.ruleLadder.07': '1/12',
   'intimate.ruleLadder.08': '1/6',
   'intimate.ruleLadder.09': '1/4',
-  'intimate.ruleLadder.10': '1/2',
-  'intimate.ruleLadder.11': '1',
-  'intimate.ruleLadder.12': '2',
-  'intimate.ruleLadder.13': '3',
-  'intimate.ruleLadder.14': '6',
-  'intimate.ruleLadder.15': '12',
+  // NO HALF HOUR AND NO TWO HOURS (ISSUES 9.1). Don: "by the time it snaps to a
+  // new major that major should be a named rung like 10m or 6h -- never a 30m
+  // or 2h it holds no opinion about." A rung the lens holds no opinion about is
+  // a rung that does not belong on its ladder; with these two gone the pairs it
+  // yields to on either side of the hour are 15m/5m below and 3h/1h above, and
+  // every rung Don did name stays reachable.
+  'intimate.ruleLadder.10': '1',
+  'intimate.ruleLadder.11': '3',
+  'intimate.ruleLadder.12': '6',
+  'intimate.ruleLadder.13': '12',
+  // THE PAIR THIS LENS PREFERS, in the hours of the frame's own day: the hour
+  // and the quarter its settings have always named. `rule.preference` says how
+  // hard it clings to them before yielding to the ladder.
+  'intimate.preferMajor': '1',
+  'intimate.preferMinor': '1/4',
   // Marginalia: what one float lane wants, and the most of a day the whole of
   // it may claim however many lanes it packs into.
   'intimate.floatWidth': '132',
   'intimate.floatShare': '1/2',
-  // HOW FAR PAST THE VIEWPORT THE RAIL IS DRAWN. A pan transforms the painted
-  // scene, so what slides in at the edge has to have been painted: this is the
-  // depth of the drag preview, and past it the pan commits and repaints in
-  // place. Down the rail only -- sideways a column IS a day, so a sideways pan
-  // steps whole columns and has nothing to preview.
+  // HOW FAR PAST THE VIEWPORT THE SURFACE IS DRAWN. A pan transforms the
+  // painted scene, so what slides in at the edge has to have been painted: this
+  // is the depth of the drag preview, and past it the pan commits and repaints
+  // in place.
+  //
+  // BOTH WAYS (ISSUES 9.1). Sideways used to bleed nothing, on the grounds that
+  // a column IS a day and so a sideways pan steps whole columns -- and that is
+  // exactly what Don felt as a ratchet with no preview: honesty and smoothness
+  // are not a tradeoff, and a surface that cannot show a partial step owes a
+  // bleed that makes it showable. Across, the bleed is counted in COLUMNS, since
+  // a column is the step; a whole one past each edge is what lets a slide of up
+  // to one full day be previewed before it commits.
   'intimate.bleed': '160',
+  'intimate.bleedColumns': '1',
   'intimate.labelSize': '10',
   'intimate.titleSize': '11',
   'intimate.pad': '4',
   'intimate.markMinHeight': '13',
+  // The block's leading edge. It is no longer what a DRAG takes hold of -- the
+  // whole body moves, ruled 9.1 -- and stands as the width of the edge a resize
+  // will grab when this lens grows one.
   'intimate.grab': '9',
   'intimate.radius': '4',
   'intimate.fill': '0.12',
@@ -120,7 +149,13 @@ const Map<String, String> intimateTunableDefaults = {
   'intimate.midnightRule': '1.6',
   'intimate.hourRule': '1',
   'intimate.washOverlap': '0.14',
-  'intimate.washSpectrum': '0.12',
+  // THE TO-DO LINE (ruled 9.1), the same vocabulary the day sheets draw it in:
+  // a sigil at the stapled point, a dotted line running until now, a sigil
+  // there. Down a column the line runs down the float's own lane, so which way
+  // it leaves the sigil IS overdue-or-upcoming.
+  'intimate.washSpectrum': '0.55',
+  'intimate.spectrumWidth': '1',
+  'intimate.spectrumSigil': '6',
   'intimate.pip': '8',
 };
 
@@ -145,8 +180,42 @@ class IntimatePainter extends LensPainter implements ManyPositions {
   /// The top of the FIRST column. Every other column is this plus whole days.
   Rational _top = Rational.zero;
   Rational _visible = Rational.zero;
-  int _columns = 1;
-  double _railWidth = 0, _columnWidth = 0;
+
+  /// HOW THE SURFACE IS DIVIDED, derived from the scene rather than assigned
+  /// during a paint. The host reads [bleed] to size the box it paints INTO,
+  /// which happens before any paint has run, so a bleed measured in columns has
+  /// to be answerable from the scene alone.
+  late final ({int count, double width, double rail}) _plan = () {
+    final rail = scene.px('intimate.rail');
+    final area = scene.size.width - rail;
+    final least = scene.px('intimate.minColumnPixels');
+    final wanted =
+        viewCount(scene, 'back', 'intimate.back') +
+        viewCount(scene, 'forward', 'intimate.forward') +
+        1;
+    // WHAT FITS, NEVER FEWER THAN ONE: a window too narrow for the days asked
+    // for shows the days it can hold rather than squeezing them to nothing.
+    final holds = least <= 0 ? wanted : (area / least).floor();
+    final count = wanted < 1 ? 1 : (holds < wanted ? (holds < 1 ? 1 : holds) : wanted);
+    return (count: count, width: count <= 0 ? area : area / count, rail: rail);
+  }();
+
+  int get _columns => _plan.count;
+
+  double get _columnWidth => _plan.width;
+
+  double get _railWidth => _plan.rail;
+
+  /// How many whole columns are painted past each edge.
+  int get _bleedColumns {
+    final asked = scene.whole('intimate.bleedColumns');
+    return asked < 0 ? 0 : asked;
+  }
+
+  /// The first and last column index this surface PAINTS, the bleed included.
+  int get _firstPainted => -_bleedColumns;
+
+  int get _lastPainted => _columns - 1 + _bleedColumns;
 
   /// Pixels to days, EXACTLY: a pan commits what the eye was shown, and a
   /// rounded pixel is a lie of up to half a pixel per gesture.
@@ -154,18 +223,24 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       ? Rational.zero
       : Rational.parse(pixels.toDouble().toStringAsFixed(6)) / dayPixels * law.dayDays;
 
-  /// How far past the top and bottom of the viewport the rail is drawn, so a pan
-  /// down the rail slides painted content in rather than white space. Sideways a
-  /// column IS a day: there is nothing between two columns to preview.
+  /// How far past its own box this surface paints, per axis. Down the rail, a
+  /// depth in pixels; across it, whole COLUMNS -- because across, a column is
+  /// the step, and a partial step can only be shown where a whole one is drawn.
   @override
-  Offset get bleed => Offset(0, scene.px('intimate.bleed'));
+  Offset get bleed => Offset(_columnWidth * _bleedColumns, scene.px('intimate.bleed'));
 
   Rational get _bleedDays => _daysOfPixels(bleed.dy);
 
   /// THE PAN, as this surface can hold it. Down the rail the focus takes the
-  /// whole gesture exactly. Across it a column is a WHOLE DAY of this law, so a
-  /// sideways pan steps by columns -- and it is shown stepping, because a
-  /// half-column slide the window cannot hold is the snap-back Don reported.
+  /// whole gesture exactly. Across it a column is a WHOLE DAY of this law, so
+  /// the WINDOW can only move in whole columns -- but the EYE is shown the whole
+  /// slide, continuously, because a column past each edge is painted and a
+  /// transform can slide in pixels that exist (ISSUES 9.1).
+  ///
+  /// Three answers, one motion: `days` is what the window commits, `shown` is
+  /// the continuous slide, `taken` is the part of the slide `days` accounted
+  /// for. What was not taken is not lost -- the tile carries it forward as
+  /// travel -- which is why this no longer ratchets and no longer snaps.
   ///
   /// Absorbing one column is not a vertical jump: this surface repeats every
   /// (one column right, one day up), so stepping a column and moving the focus a
@@ -173,7 +248,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
   @override
   PanLanding panLanding(Offset shift) {
     if (dayPixels <= Rational.zero || _columnWidth <= 0) {
-      return (days: Rational.zero, shown: Offset.zero);
+      return (days: Rational.zero, shown: Offset.zero, taken: Offset.zero);
     }
     // TRUNCATED, not rounded: a drag shorter than one column has not asked for
     // the next day, and a step that over-delivers is the same lie in miniature.
@@ -181,7 +256,8 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     final steps = Rational.fromInt(columns);
     return (
       days: -(_daysOfPixels(shift.dy) + steps * law.dayDays),
-      shown: Offset(columns * _columnWidth, shift.dy),
+      shown: shift,
+      taken: Offset(columns * _columnWidth, shift.dy),
     );
   }
 
@@ -194,7 +270,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
   /// bleed counts: a mark one pixel above the viewport is painted, so it has a
   /// position, and a pan must be able to slide it in.
   List<int> _columnsAt(Rational days) => [
-    for (var column = 0; column < _columns; column++)
+    for (var column = _firstPainted; column <= _lastPainted; column++)
       if (days >= _columnTop(column) - _bleedDays &&
           days <= _columnTop(column) + _visible + _bleedDays)
         column,
@@ -208,27 +284,15 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       refusals.add((source: 'intimate', message: 'An hour of no height draws no day.'));
       return paintRefusals(canvas, size);
     }
-    _railWidth = scene.px('intimate.rail');
     _visible = _daysOfPixels(size.height);
-    final area = size.width - _railWidth;
-    final least = scene.px('intimate.minColumnPixels');
-    final wanted =
-        viewCount(scene, 'back', 'intimate.back') +
-        viewCount(scene, 'forward', 'intimate.forward') +
-        1;
-    // WHAT FITS, NEVER FEWER THAN ONE: a window too narrow for the days asked
-    // for shows the days it can hold rather than squeezing them to nothing.
-    final holds = least <= 0 ? wanted : (area / least).floor();
-    _columns = wanted < 1 ? 1 : (holds < wanted ? (holds < 1 ? 1 : holds) : wanted);
-    _columnWidth = area / _columns;
     final first =
         law.dayOf(scene.focusDays) - BigInt.from(viewCount(scene, 'back', 'intimate.back'));
     final into = scene.focusDays - Rational(law.dayOf(scene.focusDays)) * law.dayDays;
     _top = Rational(first) * law.dayDays + into - _visible / Rational.fromInt(2);
     final window = queryWindow(
       scene,
-      start: _top - law.dayDays - _bleedDays,
-      end: _columnTop(_columns - 1) + _visible + law.dayDays + _bleedDays,
+      start: _columnTop(_firstPainted) - law.dayDays - _bleedDays,
+      end: _columnTop(_lastPainted) + _visible + law.dayDays + _bleedDays,
       budget: capacityOf(size.width, size.height, scene.tunable).queryBudget,
       law: law,
     );
@@ -246,8 +310,9 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       }
     }
     _paintRail(canvas, size);
-    for (var column = 0; column < _columns; column++) {
-      final top = _columnTop(column) - _bleedDays, bottom = _columnTop(column) + _visible + _bleedDays;
+    for (var column = _firstPainted; column <= _lastPainted; column++) {
+      final top = _columnTop(column) - _bleedDays,
+          bottom = _columnTop(column) + _visible + _bleedDays;
       final blocks = <_Block>[], floats = <_Block>[];
       for (final block in all) {
         // INTERSECTION, not ownership: a fact belongs to every column showing
@@ -259,6 +324,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       _paintColumn(canvas, size, column, blocks, floats);
     }
     _paintColumnNames(canvas);
+    _paintGutter(canvas, size);
     final at = nowIn(law, scene.nowDays);
     for (final column in at == null ? const <int>[] : _columnsAt(at)) {
       final y = _y(column, at!);
@@ -294,6 +360,13 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     steps: ladderSteps(scene.setting, ruleLadder, 'intimate.ruleLadderCount'),
     extra: lawRungs,
     reach: ladderPixels(scene.tunable, 'rule.extension').round(),
+    // THE LENS HAS AN OPINION (ISSUES 9.1): it prefers its named pair hard, and
+    // yields only to a rung on its own ladder.
+    prefer: (
+      major: scene.setting('intimate.preferMajor'),
+      minor: scene.setting('intimate.preferMinor'),
+    ),
+    preference: ladderPixels(scene.tunable, 'rule.preference'),
   );
 
   /// The rungs ABOVE an hour that belong to the LAW rather than to settings: its
@@ -320,7 +393,27 @@ class IntimatePainter extends LensPainter implements ManyPositions {
 
   /// The rail, drawn ONCE at the left, on the ladder above. Every column shares
   /// these heights, because the columns differ by whole days.
+  /// The clock readings the rail collected this paint, drawn once the columns
+  /// are down. THE GUTTER IS ON TOP: the column painted past the LEFT edge (the
+  /// horizontal bleed, ISSUES 9.1) reaches to the rail's own right edge by
+  /// construction -- a column's left is `rail + index * width` and index -1 puts
+  /// it there -- so a rail drawn first is a rail with a day's blocks over its
+  /// labels. Drawing the gutter after the columns is what keeps the times
+  /// readable, and it costs nothing at rest, where nothing is under it.
+  final List<({String text, Offset at, Color color})> _gutter = [];
+
+  void _paintGutter(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Rect.fromLTRB(-bleed.dx, -bleed.dy, _railWidth, size.height + bleed.dy),
+      Paint()..color = scene.theme.paper,
+    );
+    for (final label in _gutter) {
+      _text(canvas, label.text, label.at, label.color, 'intimate.labelSize', data: true);
+    }
+  }
+
   void _paintRail(Canvas canvas, Size size) {
+    _gutter.clear();
     final hours = law.hoursPerDay.round().toInt();
     if (hours < 1) return;
     final ladder = railRung;
@@ -332,11 +425,11 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     // authored region does: as facts this lens paints as a band. A document that
     // authors no day object has no day zone, which is the honest first run.
     for (
-      var day = law.dayOf(_top - _bleedDays);
+      var day = law.dayOf(_top - _bleedDays) - BigInt.from(_bleedColumns);
       day <= law.dayOf(_top + _visible + _bleedDays);
       day += BigInt.one
     ) {
-      for (var column = 0; column < _columns; column++) {
+      for (var column = _firstPainted; column <= _lastPainted; column++) {
         _paintMidnight(canvas, size, column, day + BigInt.from(column));
       }
     }
@@ -363,17 +456,16 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       final step = major ? ladder.major : ladder.minor;
       if (step < minute) continue;
       if ((step / law.dayDays * dayPixels).toDouble() < room) continue;
-      _text(
-        canvas,
-        law.clockLabel(law.minuteOfDay(at)),
-        Offset(scene.px('intimate.pad'), y),
-        major ? tones.major : tones.minor,
-        'intimate.labelSize',
-        data: true,
-      );
+      _gutter.add((
+        text: law.clockLabel(law.minuteOfDay(at)),
+        at: Offset(scene.px('intimate.pad'), y),
+        color: major ? tones.major : tones.minor,
+      ));
     }
-    // The seam between one day and the next, drawn as the rule it is.
-    for (var column = 1; column < _columns; column++) {
+    // The seam between one day and the next, drawn as the rule it is. Over the
+    // PAINTED range, bleed columns included: a seam that stops at the viewport
+    // is a seam that slides in as a missing line.
+    for (var column = _firstPainted; column <= _lastPainted + 1; column++) {
       canvas.drawLine(
         Offset(crisp(_left(column)), 0),
         Offset(crisp(_left(column)), size.height),
@@ -389,7 +481,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
   /// day-long span used to cover the only thing naming the day it covers.
   void _paintColumnNames(Canvas canvas) {
     final pad = scene.px('intimate.pad');
-    for (var column = 0; column < _columns; column++) {
+    for (var column = _firstPainted; column <= _lastPainted; column++) {
       _text(
         canvas,
         dayLabel(scene.law, law.dayOf(_columnTop(column) + _visible / Rational.fromInt(2))),
@@ -517,8 +609,11 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     }
   }
 
-  /// The ToDo spectrum: an unresolved float tints its OWN lane from now to where
-  /// it is stapled -- never a second event, and never on a resolved object.
+  /// THE TO-DO LINE: an unresolved float says where it is stapled with a sigil,
+  /// and a dotted line runs down its OWN lane until now, ending in a second
+  /// sigil (ruled 9.1). It was a wash over the interval; a wash per to-do stacks
+  /// into mud at a dozen and is unreadable at a hundred, and overscale is the
+  /// stated reason. Never a second event, and never on a resolved object.
   void _paintSpectrum(
     Canvas canvas,
     int column,
@@ -536,22 +631,33 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       minimum: width,
     );
     final alpha = scene.px('intimate.washSpectrum');
+    final size = scene.px('intimate.spectrumSigil');
+    final on = scene.px('mark.dotOn'), off = scene.px('mark.dotOff');
     for (final (index, block) in floats.indexed) {
       if (block.weight.state == 'done' || block.weight.state == 'closed') continue;
       final band = bands[packing.lanes[index]];
-      final top = at < block.start ? at : block.end;
-      final low = at < block.start ? block.start : at;
-      paintWash(
+      final x = left + band.offset + band.size / 2;
+      final anchor = Offset(x, _y(column, at < block.start ? block.start : block.end));
+      final now = Offset(x, _y(column, at));
+      final color = cascade.colorOf(block.segment.fact).withValues(alpha: alpha);
+      dashLine(
         canvas,
-        Rect.fromLTRB(
-          left + band.offset,
-          _y(column, top),
-          left + band.offset + band.size,
-          _y(column, low),
-        ),
-        scene.theme.secondary,
-        alpha,
+        anchor,
+        now,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = scene.px('intimate.spectrumWidth')
+          ..strokeCap = StrokeCap.butt
+          ..color = color,
+        on,
+        off,
       );
+      for (final point in [anchor, now]) {
+        canvas.drawPath(
+          sigilPath('point', Rect.fromCenter(center: point, width: size, height: size)),
+          Paint()..color = color,
+        );
+      }
     }
   }
 
@@ -668,16 +774,14 @@ class IntimatePainter extends LensPainter implements ManyPositions {
         data: true,
       );
     }
-    // THE GRAB STRIP: the block's leading edge is what a drag moves. Its body is
-    // empty to the pointer, which is what lets a create-drag pass through an
-    // occupied span (ROADMAP #7).
-    final grab = Path()
-      ..addRect(Rect.fromLTWH(box.left, box.top, scene.px('intimate.grab'), box.height));
     final body = Path()..addRect(box);
     if (scene.isSelected(fact)) paintSelection(canvas, Path()..addRect(box));
-    // TWO REGIONS: the body is what a click, a menu and the cursor mean, the
-    // strip is what a drag takes hold of (ISSUES 8.31).
-    hits.add((bounds: box, shape: body, grab: grab, fact: fact, identity: fact.identity));
+    // ONE REGION, EVERY VERB (ISSUES 9.1). The body is what a click, a menu, the
+    // cursor AND a drag all mean; a null grab says "grabbed wherever it is hit",
+    // which is the default every other surface already had. Alt remains the
+    // stated way to create THROUGH an occupied span (ROADMAP #7) -- the rare
+    // verb wears the modifier, and the common one is just there.
+    hits.add((bounds: box, shape: body, grab: null, fact: fact, identity: fact.identity));
   }
 
   void _text(
@@ -715,9 +819,16 @@ class IntimatePainter extends LensPainter implements ManyPositions {
 
   @override
   Rational? unproject(Offset at) {
-    if (at.dx < _railWidth || _columnWidth <= 0) return null;
+    if (_columnWidth <= 0) return null;
+    // THE GUTTER HAS NO TIME UNDER IT, and that stays true: a drop on the rail
+    // is a drop on nothing. Past the LEFT edge of the viewport is different --
+    // that is the horizontal bleed, painted and real (ISSUES 9.1) -- so a point
+    // there names the column that was drawn there.
+    if (at.dx >= 0 && at.dx < _railWidth) return null;
     final raw = ((at.dx - _railWidth) / _columnWidth).floor();
-    final column = raw < 0 ? 0 : (raw >= _columns ? _columns - 1 : raw);
+    final column = raw < _firstPainted
+        ? _firstPainted
+        : (raw > _lastPainted ? _lastPainted : raw);
     return _columnTop(column) + _daysOfPixels(at.dy);
   }
 }

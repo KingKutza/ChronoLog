@@ -61,30 +61,39 @@ class WeightRings extends StatelessWidget {
         : explanation.weight >= chrome.settings.value('weight.importantAt')
         ? 'important'
         : 'standard';
-    Widget line(String left, String right, {bool strong = false}) => Row(
-      children: [
-        Expanded(child: Text(left, style: bodyStyle(context))),
-        Text(right, style: dataStyle(context, color: strong ? theme.primary : theme.ink)),
-      ],
+    // A READING SURFACE NOBODY CAN READ IS NOT READING OUT (ISSUES 9.1): the
+    // rows said "1 → 1" and the verdict said "1 · standard", which are true and
+    // say nothing. Every line is a sentence now, and the numbers are in it.
+    Widget said(String sentence, {bool strong = false}) => Text(
+      sentence,
+      style: strong
+          ? bodyStyle(context, color: theme.primary)
+          : bodyStyle(context, color: theme.ink),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        line('Base', explanation.base.toDecimal(3)),
+        said('This object starts out weighing ${explanation.base.toDecimal(3)}.'),
         for (final ring in explanation.rows)
-          line(
-            '${ring.title} — ${ring.formula}',
-            '${ring.from.toDecimal(3)} → ${ring.to.toDecimal(3)}',
+          said(
+            ring.from == ring.to
+                ? '${ring.title} says "${ring.formula}", which leaves it at '
+                      '${ring.to.toDecimal(3)}.'
+                : '${ring.title} says "${ring.formula}", which takes it from '
+                      '${ring.from.toDecimal(3)} to ${ring.to.toDecimal(3)}.',
           ),
-        line(
-          'Weight, and its verdict',
-          '${explanation.weight.toDecimal(3)} · $verdict',
+        said(
+          'So it weighs ${explanation.weight.toDecimal(3)}, and reads as $verdict: '
+          'important starts at ${chrome.settings.value('weight.importantAt').toDecimal(2)}, '
+          'a landmark at ${chrome.settings.value('weight.landmarkAt').toDecimal(2)}.',
           strong: true,
         ),
         cardNote(
           context,
-          'Read through ${projection.frames.length} projected frame(s). A NOT term gates '
-          'visibility and never modifies weight.',
+          'Weight is read through what you are looking through — '
+          '${projection.frames.length} projected frame(s) here — so it is a reading '
+          'rather than one true number. A "not" term decides whether something is '
+          'drawn at all and never changes what it weighs.',
         ),
       ],
     );

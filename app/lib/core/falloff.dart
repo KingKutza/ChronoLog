@@ -55,6 +55,22 @@ Rational? distanceFromHome(DayExtent? home, Rational days) {
   return Rational.zero;
 }
 
+/// The same gap, SIGNED: positive when the home lies ahead of the instant,
+/// negative when it lies behind, zero anywhere inside it.
+///
+/// [distanceFromHome] answers "how far", which is all apparent magnitude needs
+/// -- a gap is not a direction. Proximity math wants the direction too, because
+/// "next Tuesday" and "last Tuesday" are not the same claim about attention, and
+/// a formula that cannot tell them apart has to be written twice. Same edges,
+/// same zero-inside rule, one sign added, so the two can never disagree about
+/// where home is.
+Rational? signedDistanceFromHome(DayExtent? home, Rational days) {
+  if (home == null) return null;
+  if (days < home.start) return home.start - days;
+  if (days > home.end) return home.end - days;
+  return Rational.zero;
+}
+
 /// The one falloff parameter: this many days from home, apparent magnitude is
 /// half the base. Seven days is a default, not a law -- a projector may name
 /// its own.

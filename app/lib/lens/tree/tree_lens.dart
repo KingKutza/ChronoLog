@@ -11,6 +11,8 @@
 // nothing. Apparent magnitude falls off by GRAPH DISTANCE from the selection --
 // the same falloff, a different metric -- which is the overscale mechanism.
 
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../core/exact.dart';
@@ -20,6 +22,7 @@ import '../../edit/gestures.dart';
 import '../capacity.dart';
 import '../color.dart';
 import '../context_menu.dart';
+import '../gestures.dart';
 import '../marks.dart';
 import '../painters/radial.dart';
 import '../radial/geometry.dart';
@@ -39,6 +42,23 @@ const Map<String, String> treeTunableDefaults = {
   'tree.edgeWidth': '1.4',
   'tree.labelGap': '14',
   'tree.hitPad': '10',
+  // A RING EARNS RADIUS FROM ITS OCCUPANCY (ISSUES 9.1): the narrowest two
+  // ring-mates may sit, as a share of one ring step. Raise it and a crowded
+  // ring pushes further out; drop it to zero and the ring is the old fixed
+  // `distance * step` again.
+  'tree.ringSpacing': '3/4',
+  // LABELS ARE MEASURED MARKS. One thins when its own presence falls below this
+  // -- far labels drop first, by the same graph-distance falloff that thins the
+  // nodes -- or when its measured box, padded by this much, lands on a label
+  // already placed. What the pass cuts is a COUNT, never a silence.
+  'tree.labelFloor': '0.34',
+  'tree.labelPad': '3',
+  // The pointer vocabulary, on a lens whose content exceeds its viewport
+  // (ISSUES 9.1, "Tree has no way to pan around"). A wheel notch pans this
+  // many pixels; ctrl+wheel scales the ring step between these bounds.
+  'tree.wheelPan': '90',
+  'tree.zoomMin': '1/8',
+  'tree.zoomMax': '8',
 };
 
 Rational treeSetting(Tunable? read, String key) {
@@ -70,10 +90,15 @@ class TreePainter extends CustomPainter {
     this.selected,
     this.dragFrom,
     this.dragAt,
+    this.origin = Offset.zero,
   });
 
   final Graph graph;
   final Map<String, Offset> places;
+
+  /// Where the graph's own coordinates sit on this canvas: the view pan. The
+  /// places are the LAYOUT's and never move; the surface does.
+  final Offset origin;
   final ChronoTheme theme;
   final ProjectionEngine engine;
   final Tunable? read;
@@ -104,8 +129,19 @@ class TreePainter extends CustomPainter {
     return authoredColorOf(extra) ?? theme.neutral;
   }
 
+  /// How many labels the last paint could not resolve. Read by nothing but the
+  /// paint that produced it; kept so the count can be stated on the surface.
+  int thinnedLabels = 0;
+
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(origin.dx, origin.dy);
+    _paintGraph(canvas, size);
+    canvas.restore();
+  }
+
+  void _paintGraph(Canvas canvas, Size size) {
     final width = treePixels(read, 'tree.edgeWidth');
     final node = treePixels(read, 'tree.nodeSize');
     final distances = {for (final entry in graph.nodes) entry.id: entry.distance};
@@ -164,23 +200,61 @@ class TreePainter extends CustomPainter {
             ..color = theme.ink.withValues(alpha: pixels(read, 'selection.ringOpacity')),
         );
       }
+    }
+    _paintLabels(canvas);
+    final unsaid = graph.hidden + thinnedLabels;
+    if (unsaid > 0) {
+      // ONE COUNT FOR EVERYTHING THIS SURFACE COULD NOT SAY: what the budget cut
+      // from the graph and what the label pass thinned are both "there is more
+      // here", and a cut label is a count rather than a silence (ISSUES 9.1).
       paintHaloed(
         canvas,
-        entry.label,
-        at + Offset(0, treePixels(read, 'tree.labelGap')),
+        '$unsaid+',
+        Offset(pixels(read, 'lane.gap') - origin.dx, pixels(read, 'lane.gap') - origin.dy),
         theme: theme,
         rightAligned: false,
         read: read,
       );
     }
-    if (graph.hidden > 0) {
+  }
+
+  /// LABELS ARE MARKS WITH MEASURED BOXES (ISSUES 9.1). They resolve nearest
+  /// first -- the same graph-distance falloff that thins the nodes -- and one
+  /// that will not fit, or has faded past the floor, is THINNED and counted. Far
+  /// labels drop first by construction, because the pass runs in distance order.
+  void _paintLabels(Canvas canvas) {
+    final gap = treePixels(read, 'tree.labelGap');
+    final pad = treePixels(read, 'tree.labelPad');
+    final floor = treePixels(read, 'tree.labelFloor');
+    final ordered = [...graph.nodes]
+      ..sort((a, b) => a.distance != b.distance
+          ? a.distance.compareTo(b.distance)
+          : a.id.compareTo(b.id));
+    final placed = <Rect>[];
+    thinnedLabels = 0;
+    for (final entry in ordered) {
+      final at = places[entry.id];
+      if (at == null || entry.label.isEmpty) continue;
+      final alpha = presence(entry.distance);
+      if (alpha < floor) {
+        thinnedLabels += 1;
+        continue;
+      }
+      final box = haloedLabelBox(entry.label, at + Offset(0, gap), theme: theme, read: read);
+      final claim = box.inflate(pad);
+      if (placed.any(claim.overlaps)) {
+        thinnedLabels += 1;
+        continue;
+      }
+      placed.add(claim);
       paintHaloed(
         canvas,
-        '${graph.hidden}+',
-        Offset(pixels(read, 'lane.gap'), pixels(read, 'lane.gap')),
+        entry.label,
+        at + Offset(0, gap),
         theme: theme,
         rightAligned: false,
         read: read,
+        opacity: alpha,
       );
     }
   }
@@ -190,6 +264,7 @@ class TreePainter extends CustomPainter {
       old.graph != graph ||
       old.selected != selected ||
       old.dragAt != dragAt ||
+      old.origin != origin ||
       old.places.length != places.length;
 }
 
@@ -214,7 +289,26 @@ class _TreeLensState extends State<TreeLens> {
   Graph _graph = (nodes: const [], edges: const [], hidden: 0);
   Map<String, Offset> _places = const {};
 
+  /// THE VIEW, MOVED (ISSUES 9.1, "Tree has no way to pan around"). The ruled
+  /// pointer vocabulary belongs to any lens whose content can exceed its
+  /// viewport -- the roster carve-out was about MINTING, never about motion --
+  /// so this surface answers the verbs the time lenses do: middle-drag and
+  /// shift-drag pan, the wheel pans, ctrl+wheel zooms. Transform-only: the pan
+  /// is an origin the painter translates by, and the layout never hears of it.
+  Offset _view = Offset.zero;
+  Offset? _panFrom;
+  Offset _panWas = Offset.zero;
+  double _zoom = 1;
+  final Notches _wheel = Notches(), _zoomWheel = Notches();
+
   Tunable? get _read => widget.tile.tunable;
+
+  /// A point on the canvas, in the graph's own coordinates. Every hit test and
+  /// every authored drag asks through here, so the pan cannot make the pointer
+  /// and the picture disagree.
+  Offset _inGraph(Offset at) => at - _view;
+
+  double _tile(String key) => widget.tile.settings.value(key).toDouble();
 
   /// The selection is the centre: falloff by graph distance measures from what
   /// the eye is on. Failing a selection, the graph is rooted on EVERY frame the
@@ -250,6 +344,62 @@ class _TreeLensState extends State<TreeLens> {
     _ => treeSetting(_read, 'tree.reach').round().toInt(),
   };
 
+  /// THE ONE POINTER TABLE, asked here too. A graph is not a time surface, so
+  /// it never mints -- the table already says that, `timeSurface: false`
+  /// answering `select` -- but pan is pan on every surface holding more content
+  /// than window.
+  void _down(PointerDownEvent event) {
+    _pointer = _inGraph(event.localPosition);
+    final keys = HardwareKeyboard.instance;
+    final verb = pointerVerb(
+      buttons: event.buttons,
+      shift: keys.isShiftPressed,
+      alt: keys.isAltPressed,
+      onMark: false,
+      timeSurface: false,
+    );
+    if (verb != 'pan') return;
+    _panFrom = event.localPosition;
+    _panWas = _view;
+  }
+
+  void _drag(PointerMoveEvent event) {
+    final from = _panFrom;
+    if (from == null) return;
+    setState(() => _view = _panWas + (event.localPosition - from));
+  }
+
+  /// The wheel, in the same vocabulary as every other surface: ctrl zooms, a
+  /// plain notch pans down the surface, shift pans across it.
+  void _signal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    final keys = HardwareKeyboard.instance;
+    final notch = _tile('pointer.wheelNotch');
+    final sideways =
+        keys.isShiftPressed || event.scrollDelta.dx.abs() > event.scrollDelta.dy.abs();
+    final raw = keys.isShiftPressed || event.scrollDelta.dx == 0
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    if (keys.isControlPressed) {
+      final steps = _zoomWheel.take(raw * _tile('pointer.zoomDirection'), notch);
+      if (steps == 0) return;
+      // Wheel-up zooms IN, which on a graph is a WIDER ring step: the sign
+      // convention is the pointer table's, read from the same setting the time
+      // surfaces read (ISSUES 9.1, reversed zoom).
+      final factor = _tile('pointer.zoomStep');
+      var next = _zoom;
+      for (var step = 0; step < steps.abs(); step += 1) {
+        next = steps < 0 ? next * factor : next / factor;
+      }
+      final least = treePixels(_read, 'tree.zoomMin'), most = treePixels(_read, 'tree.zoomMax');
+      return setState(() => _zoom = next < least ? least : (next > most ? most : next));
+    }
+    final steps = _wheel.take(raw, notch);
+    if (steps == 0) return;
+    final by = treePixels(_read, 'tree.wheelPan') * steps;
+    setState(() => _view += sideways ? Offset(-by, 0) : Offset(0, -by));
+  }
+
   void _drop() {
     final source = _dragFrom, target = _dragAt == null ? null : _nodeAt(_dragAt!);
     if (source != null && target != null && target != source) {
@@ -277,8 +427,9 @@ class _TreeLensState extends State<TreeLens> {
         _places = radialLayout(
           _graph,
           size.center(Offset.zero),
-          step: treePixels(_read, 'tree.ringStep'),
+          step: treePixels(_read, 'tree.ringStep') * _zoom,
           turn: treePixels(_read, 'tree.ringTurn'),
+          spacing: treePixels(_read, 'tree.ringSpacing'),
         );
         if (_graph.nodes.isEmpty) {
           return statedRefusal(
@@ -291,7 +442,11 @@ class _TreeLensState extends State<TreeLens> {
         // only after the slop, by which point the pointer has left the node it
         // started on and a drag would author from nothing.
         return Listener(
-          onPointerDown: (event) => _pointer = event.localPosition,
+          onPointerDown: _down,
+          onPointerMove: _drag,
+          onPointerUp: (_) => _panFrom = null,
+          onPointerCancel: (_) => _panFrom = null,
+          onPointerSignal: _signal,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => setState(() {
@@ -305,7 +460,7 @@ class _TreeLensState extends State<TreeLens> {
             // The menu is raised ON THE NODE under the pointer, so Open is
             // offered here exactly as it is on a painted mark (ruled 8.31).
             onSecondaryTapUp: (details) {
-              final id = _nodeAt(_pointer ?? details.localPosition);
+              final id = _nodeAt(_pointer ?? _inGraph(details.localPosition));
               final node = id == null
                   ? null
                   : _graph.nodes.where((entry) => entry.id == id).firstOrNull;
@@ -318,10 +473,13 @@ class _TreeLensState extends State<TreeLens> {
               );
             },
             onPanStart: (details) => setState(() {
-              _dragFrom = _nodeAt(_pointer ?? details.localPosition);
-              _dragAt = details.localPosition;
+              if (_panFrom != null) return;
+              _dragFrom = _nodeAt(_pointer ?? _inGraph(details.localPosition));
+              _dragAt = _inGraph(details.localPosition);
             }),
-            onPanUpdate: (details) => setState(() => _dragAt = details.localPosition),
+            onPanUpdate: (details) => setState(
+              () => _dragAt = _panFrom != null ? null : _inGraph(details.localPosition),
+            ),
             onPanEnd: (_) => _drop(),
             onPanCancel: _drop,
             child: ColoredBox(
@@ -337,6 +495,7 @@ class _TreeLensState extends State<TreeLens> {
                   selected: _selected,
                   dragFrom: _dragFrom,
                   dragAt: _dragAt,
+                  origin: _view,
                 ),
               ),
             ),

@@ -25,12 +25,14 @@ import '../session/settings.dart';
 import '../store/document_store.dart';
 import 'cascades.dart';
 import 'drafts.dart';
+import 'resay.dart';
 
 export 'capture.dart';
 export 'cascades.dart';
 export 'drafts.dart';
 export 'gestures.dart';
 export 'reach.dart';
+export 'resay.dart';
 export 'weight_explain.dart';
 
 /// This area's tunables, as shipped defaults in the one math. Squad C's settings
@@ -188,6 +190,40 @@ class Editor extends ChangeNotifier with FrameSafeNotifier {
   /// unmounts) announces after the frame instead of marking an ancestor dirty
   /// inside it. The document is already changed either way; only the repaint
   /// waits.
+
+  /// RE-SAY ONE END OF A CONNECTION, keeping every other term.
+  ///
+  /// The verb behind "move this event to another frame" and "attach this note to
+  /// that frame instead" -- one transaction, because they are one sentence being
+  /// re-said and not two features. [slot] is the end's own word for itself, from
+  /// [connectionEnds]; the coordinate is translated through the two frames' laws
+  /// and the authored correspondence, or nothing is written and the refusal is
+  /// in [refusals] for the surface to say where the edit was made.
+  ///
+  /// Returns whether it landed, so a card can keep the row open on a refusal.
+  bool resay(String relationId, {required String slot, required String becomes}) {
+    final relation = document.relations[relationId];
+    if (relation == null) {
+      refusals = ['That connection is no longer in the document.'];
+      notifyListeners();
+      return false;
+    }
+    final said = resaidConnection(
+      staples,
+      engine.correspondences,
+      relation,
+      slot: slot,
+      becomes: becomes,
+    );
+    final landed = said.resolved;
+    if (landed == null) {
+      refusals = [said.refusal!];
+      notifyListeners();
+      return false;
+    }
+    transaction('Re-say connection', (current) => current.put('relations', relationId, landed));
+    return refusals.isEmpty;
+  }
 
   /// Delete an object. Its placements, memberships, containment edges, staples
   /// and the overrides that named it travel with it, inside this one entry.

@@ -38,7 +38,37 @@ const Map<String, String> chromeKeyDefaults = {
   'keys.delete': 'delete',
   'keys.escape': 'escape',
   'keys.lensDigits': '123456789',
+  // MODIFIERS ONLY, because it is a state the hand HOLDS rather than a key it
+  // strikes: while it is down every drag bar on the stage is visible, a drag
+  // carries its whole collinear run, and a click locks or unlocks that run
+  // (ISSUES 9.1, Don's ruling on dividers).
+  'keys.alignSeams': 'ctrl',
 };
+
+/// Is a modifiers-only chord held right now? A chord naming no modifier is
+/// never held -- an empty setting turns the mode off rather than leaving it
+/// always on.
+bool chordHeld(String binding) {
+  final parts = binding.toLowerCase().split('+').where((part) => part.isNotEmpty).toSet();
+  if (parts.isEmpty) return false;
+  final keys = HardwareKeyboard.instance;
+  const held = {
+    'ctrl': _isControl,
+    'shift': _isShift,
+    'alt': _isAlt,
+    'meta': _isMeta,
+  };
+  for (final part in parts) {
+    final reads = held[part];
+    if (reads == null || !reads(keys)) return false;
+  }
+  return true;
+}
+
+bool _isControl(HardwareKeyboard keys) => keys.isControlPressed;
+bool _isShift(HardwareKeyboard keys) => keys.isShiftPressed;
+bool _isAlt(HardwareKeyboard keys) => keys.isAltPressed;
+bool _isMeta(HardwareKeyboard keys) => keys.isMetaPressed;
 
 const Map<String, LogicalKeyboardKey> _named = {
   'arrowleft': LogicalKeyboardKey.arrowLeft,

@@ -71,6 +71,12 @@ class ViewBar extends StatelessWidget {
               onTap: () => openViewTile(chrome, lensId: current),
             ),
           ],
+          // Const, and it makes no difference now: the control OWNS ITS OWN
+          // LISTENING (ISSUES 9.1). Handing an identical widget instance to
+          // this ListenableBuilder every build is what froze the open drop --
+          // Flutter skips a child it has already been given -- so the fix is
+          // that no control reading live state may depend on a parent to
+          // rebuild it.
           trailing: [barItem('Projection', const ProjectionControl())],
         );
       },
@@ -81,6 +87,12 @@ class ViewBar extends StatelessWidget {
 /// A lens, in both forms: its name while the bar has room for ten of them, its
 /// initial when it has not. The narrow form is the same control, not a
 /// different one.
+///
+/// HIDING IS A VERB ON THE CHIP (ISSUES 9.1, Don: "I can't find the setting to
+/// hide some of them behind a button" / "no way to hide lenses behind the
+/// button"). The Hidden-lenses drop was only ever the way BACK -- `setHidden(id,
+/// true)` had no call site anywhere -- so the verb goes where the hand already
+/// is, on the lens itself.
 BarItem _lens(BuildContext c, String lensId, bool active, String? tile) {
   final chrome = ChromeScope.of(c);
   final theme = ChronoTheme.of(c);
@@ -89,11 +101,39 @@ BarItem _lens(BuildContext c, String lensId, bool active, String? tile) {
     c,
     active: active,
     hint: spec.description,
+    semantics: spec.title,
     // Shift is the "and keep the one I have" modifier, everywhere.
     onTap: () => HardwareKeyboard.instance.isShiftPressed || tile == null
         ? openViewTile(chrome, lensId: lensId)
         : chrome.stage.swapLens(tile, lensId),
+    onMenu: (at) => showChronoMenu(c, at, lensChipMenu(c, lensId)),
     child: Text(text, style: bodyStyle(c, color: active ? theme.ink : theme.strong)),
   );
   return (label: spec.title, full: chip(spec.title), compact: chip(spec.title.substring(0, 1)));
+}
+
+/// A lens chip's own verbs. Hiding the LAST visible lens is refused in words:
+/// a bar with no lens on it has no way back to one, and the drop that restores
+/// hangs off the bar.
+List<MenuRow> lensChipMenu(BuildContext c, String lensId) {
+  final chrome = ChromeScope.of(c);
+  final spec = lensCatalog[lensId]!;
+  final visible = chrome.views.visibleLenses;
+  final tile = chrome.stage.focusedViewTile;
+  return [
+    menuRow(
+      visible.length > 1
+          ? 'Hide ${spec.title}'
+          : 'Hide ${spec.title} — it is the last lens on the bar, so nothing would bring it back',
+      visible.length > 1 ? () => chrome.views.setHidden(lensId, true) : null,
+      hint: visible.length > 1 ? 'Hidden lenses' : null,
+    ),
+    menuRow(
+      'Open ${spec.title} in a new view',
+      chrome.viewTile == null ? null : () => openViewTile(chrome, lensId: lensId),
+    ),
+    if (tile != null)
+      menuRow('Show ${spec.title} here', () => chrome.stage.swapLens(tile, lensId)),
+    ...settingsRows(c, lensId, spec.title),
+  ];
 }

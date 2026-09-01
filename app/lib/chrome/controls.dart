@@ -72,6 +72,7 @@ class Chrome {
     this.cards = const {},
     this.viewTile,
     this.openFrame,
+    this.openSettings,
     this.onAction,
   });
 
@@ -91,6 +92,13 @@ class Chrome {
   /// Opens a frame's own card. Absent, a frame's name in a bar is a label
   /// rather than a link -- stated, never a dead click.
   final void Function(String frameId)? openFrame;
+
+  /// Opens the settings card that governs one surface -- `stage`, `chrome`, a
+  /// lens id -- so the settings sub-card is reachable from the surface it acts
+  /// on (ISSUES 9.1, Don's ruling on the settings surface). A factory with no
+  /// sub-card for that area opens the main settings card; absent entirely, the
+  /// menu row SAYS SO rather than sitting there doing nothing.
+  final void Function(String area)? openSettings;
 
   /// A lens's declared action, dispatched by key. Absent, the control says so
   /// rather than pretending to work.
@@ -150,9 +158,12 @@ Widget controlChip(
   String label = '',
   required Widget child,
   VoidCallback? onTap,
+  void Function(Offset at)? onMenu,
   bool active = false,
   bool inert = false,
+  bool button = false,
   String? hint,
+  String? semantics,
 }) {
   final chrome = ChromeScope.of(c);
   final theme = ChronoTheme.of(c);
@@ -160,6 +171,9 @@ Widget controlChip(
   final body = _Chip(
     active: active,
     onTap: onTap,
+    onMenu: onMenu,
+    button: button,
+    semantics: semantics,
     // A chip is a tile's content and a tile is any width, so the chip NARROWS
     // rather than overflowing: the name ellipsizes and the control scrolls
     // inside its own body. Nothing is clipped away silently -- what does not fit
@@ -184,17 +198,45 @@ Widget controlChip(
       ],
     ),
   );
-  return hint == null ? body : Tooltip(message: hint, child: body);
+  // A HINT IS FOR A POINTER. Tooltip arms a long-press of its own by default,
+  // which on a touch surface would take the press the tile needs for its handle
+  // (ruled 9.1: long-press anywhere in the tile reveals it). Manual leaves the
+  // hover trigger exactly as it was and gives the press back to the tile.
+  return hint == null
+      ? body
+      : Tooltip(message: hint, triggerMode: TooltipTriggerMode.manual, child: body);
 }
 
 /// The chip's body and its three states. Hover IS a state, so it is a widget
 /// with one; and nothing here snaps between states -- every change of ground
 /// arrives on the ratified curve (ruled 2026-08-28).
 class _Chip extends StatefulWidget {
-  const _Chip({required this.active, required this.onTap, required this.child});
+  const _Chip({
+    required this.active,
+    required this.onTap,
+    this.onMenu,
+    this.button = false,
+    this.semantics,
+    required this.child,
+  });
 
   final bool active;
+
+  /// A control that IS a button says so even when it cannot be pressed right
+  /// now: a disabled Undo is still an Undo, and a reader told nothing about it
+  /// is told the bar is shorter than it is.
+  final bool button;
+
   final VoidCallback? onTap;
+
+  /// The words for a chip whose visible mark is a GLYPH. A reader is told the
+  /// verb; the eye gets the mark. Absent, the chip's own text is the words.
+  final String? semantics;
+
+  /// The chip's own right-click, at the point it was pressed. A chip that
+  /// offers verbs offers them where the hand already is.
+  final void Function(Offset at)? onMenu;
+
   final Widget child;
 
   @override
@@ -229,13 +271,45 @@ class _ChipState extends State<_Chip> {
       ),
       child: widget.child,
     );
-    if (widget.onTap == null) return body;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _over = true),
-      onExit: (_) => setState(() => _over = false),
-      child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: widget.onTap, child: body),
-    );
+    final live = widget.onTap != null || widget.onMenu != null;
+    if (!live && !widget.button) return body;
+    // A CHIP IS A BUTTON AND SAYS SO (ISSUES 9.1, found writing the stage
+    // lights). Every chip in the chrome tapped through a bare GestureDetector:
+    // invisible to assistive tech and to anything looking for a button. The
+    // merge makes the chip ONE node carrying its own words, so what a reader is
+    // told and what the eye reads are the same thing -- and the look is
+    // untouched, because semantics paint nothing.
+    final gestures = !live
+        ? body
+        : MouseRegion(
+            cursor: SystemMouseCursors.click,
+            onEnter: (_) => setState(() => _over = true),
+            onExit: (_) => setState(() => _over = false),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onTap,
+              onSecondaryTapUp: widget.onMenu == null
+                  ? null
+                  : (details) => widget.onMenu!(details.globalPosition),
+              child: body,
+            ),
+          );
+    final said = widget.semantics;
+    return said == null
+        // The chip's own words ARE its name: one node, carrying the text it
+        // draws and the flag that says it can be pressed.
+        ? MergeSemantics(
+            child: Semantics(button: true, enabled: widget.onTap != null, child: gestures),
+          )
+        // A glyph is not a word. The node says the verb instead of spelling the
+        // mark, so a reader is told what the button does.
+        : Semantics(
+            button: true,
+            enabled: widget.onTap != null,
+            label: said,
+            excludeSemantics: true,
+            child: gestures,
+          );
   }
 }
 
@@ -365,24 +439,23 @@ Widget namedAction(
   String label, {
   String? glyph,
   VoidCallback? onTap,
+  void Function(Offset at)? onMenu,
   String? hint,
-}) => Semantics(
-  label: label,
+}) => controlChip(
+  c,
+  hint: hint ?? label,
+  onTap: onTap,
+  onMenu: onMenu,
   button: true,
-  enabled: onTap != null,
-  child: controlChip(
-    c,
-    hint: hint ?? label,
-    onTap: onTap,
-    child: Text(
-      glyph ?? label,
-      // A WORD IS PROSE; a glyph is a mark. The data face carries coordinates,
-      // counts and times, and nothing else -- a button that wore it because it
-      // was one call away is why the whole chrome came up in a typewriter.
-      style: (glyph == null ? bodyStyle : dataStyle)(
-        c,
-        color: onTap == null ? ChronoTheme.of(c).hair : ChronoTheme.of(c).ink,
-      ),
+  semantics: glyph == null ? null : label,
+  child: Text(
+    glyph ?? label,
+    // A WORD IS PROSE; a glyph is a mark. The data face carries coordinates,
+    // counts and times, and nothing else -- a button that wore it because it
+    // was one call away is why the whole chrome came up in a typewriter.
+    style: (glyph == null ? bodyStyle : dataStyle)(
+      c,
+      color: onTap == null ? ChronoTheme.of(c).hair : ChronoTheme.of(c).ink,
     ),
   ),
 );
@@ -451,6 +524,9 @@ class _BarRunState extends State<BarRun> {
   /// What the full-label run measured last time it was laid out. Going back to
   /// full labels waits for that much room, so a bar cannot oscillate across the
   /// width where the two forms disagree.
+  ///
+  /// Zero means UNMEASURED, which is not the same as "needs nothing": the run
+  /// goes back to full labels to take the measurement again.
   double _wide = 0;
 
   @override
@@ -459,10 +535,32 @@ class _BarRunState extends State<BarRun> {
     super.dispose();
   }
 
+  /// A HYSTERESIS THRESHOLD IS A MEASUREMENT OF SOMETHING (ISSUES 9.1: "the
+  /// lens/selector bar went to first letters with plenty of room, and only
+  /// expanding and recontracting the tile fixed it"). `_wide` is the width the
+  /// FULL run needed, and the full run is never laid out while compact -- so a
+  /// bar that measured wide once carried that threshold forever, refusing to
+  /// come back for room enough for today's controls but not for a ghost's.
+  /// When the thing measured changes, the measurement is void: it is dropped
+  /// here and retaken on the next frame, which is the expand-and-recontract
+  /// dance done by the bar instead of by the hand.
+  @override
+  void didUpdateWidget(BarRun old) {
+    super.didUpdateWidget(old);
+    if (_signature(old) != _signature(widget)) _wide = 0;
+  }
+
+  /// What the run IS, as far as its width is concerned: which controls, in what
+  /// order, and where the trailing group starts.
+  static String _signature(BarRun run) =>
+      '${run.pinned} ${[for (final item in run.items) item.label].join(' ')}';
+
   /// Reported from layout, applied after the frame: a notifier or a setState
   /// during layout would rebuild the very children being laid out.
   void _report(RunFit fit, double available) {
-    final compact = _compact ? _wide > available : fit.required > available;
+    // Compact and unmeasured: go back to full and find out, rather than trust a
+    // threshold taken of a run that no longer exists.
+    final compact = _compact && _wide > 0 ? _wide > available : fit.required > available;
     if (!_compact) _wide = fit.required;
     if (_scheduled || (compact == _compact && _same(fit.folded, _folded.value))) return;
     _scheduled = true;
@@ -620,7 +718,14 @@ Widget barShell(BuildContext c, List<BarItem> leading, {List<BarItem> trailing =
   // No fixed height: the bar takes the thickness its tile was given and the
   // run reflows into it. It fills or it shrinks; it never paints a wide empty
   // field with three glyphs in the corner (ruled 2026-08-28).
-  return Container(
+  // THE BAR'S OWN RIGHT-CLICK OPENS THE BAR'S OWN SETTINGS (ISSUES 9.1, Don's
+  // ruling on the settings surface): a chip in the run answers first, so this
+  // is the surface between and around them.
+  return GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onSecondaryTapUp: (details) =>
+        showChronoMenu(c, details.globalPosition, settingsRows(c, 'chrome', 'The bars')),
+    child: Container(
     constraints: BoxConstraints(minHeight: chrome.px('chrome.barHeight')),
     padding: EdgeInsets.symmetric(horizontal: chrome.px('chrome.pad')),
     decoration: BoxDecoration(
@@ -629,8 +734,28 @@ Widget barShell(BuildContext c, List<BarItem> leading, {List<BarItem> trailing =
         bottom: BorderSide(color: theme.hair, width: chrome.px('chrome.hair')),
       ),
     ),
-    child: BarRun(items: [...leading, ...trailing], pinned: leading.length),
+      child: BarRun(items: [...leading, ...trailing], pinned: leading.length),
+    ),
   );
+}
+
+/// THE SETTINGS DOOR, ON THE SURFACE IT GOVERNS (ISSUES 9.1, Don's ruling on
+/// the settings surface): "sub-cards are also launched from right-click context
+/// menus at the relevant parts of the app -- the lens's own menu opens that
+/// lens's settings card, the stage's opens the stage's". [area] names the
+/// surface and [said] is what it is called in words. With no door registered
+/// the rows STATE that rather than sitting there dead.
+List<MenuRow> settingsRows(BuildContext c, String area, String said) {
+  final open = ChromeScope.of(c).openSettings;
+  if (open == null) {
+    return [menuRow('$said: no settings card is registered to open.', null)];
+  }
+  return [
+    menuRow('$said — settings', () => open(area)),
+    // Every sub-card carries a way back to the main card; so does every door
+    // into one, or the family is a set of cul-de-sacs.
+    menuRow('All settings', () => open('')),
+  ];
 }
 
 /// A formula, with live evaluation and the refusal in the law's own words.

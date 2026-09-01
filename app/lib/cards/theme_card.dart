@@ -130,6 +130,23 @@ class _ThemeCardState extends State<ThemeCard> {
             colorField(context, hexOf(draft.palette[field]!), (hex) => _write(field, hex)),
           ),
         if (_note != null) cardNote(context, _note!),
+        cardRule(context),
+        // Every card offers at least one way on (ISSUES 9.1): a palette is a
+        // setting like any other, and the settings family is where the rest of
+        // them are.
+        cardDoors(context, [
+          cardDoor(
+            'Settings',
+            'Every tunable in the program, in words, cut by the surface it '
+                'governs.',
+            (factory) => factory.settingsCard(),
+          ),
+          cardDoor(
+            'The document',
+            'What this document is called, and where it saves.',
+            (factory) => factory.documentCard(),
+          ),
+        ]),
       ],
       fold: [
         cardNote(

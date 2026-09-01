@@ -136,7 +136,11 @@ class Workspace {
     final load = await store.load();
     final editor = Editor(store, settings: settings.tunable);
     final views = ViewBook()..defaultFrames = defaultFramesOf(editor.document);
-    final stage = Stage(tunable: settings.tunable, onLens: views.setLens);
+    // WHERE A NEW TILE LANDS IS AUTHORED (ISSUES 9.1): the layout FILE carries
+    // the rule list -- `bindSession` below reads it and hot-loads it when it
+    // changes on disk -- and the `stage.placement` setting is a read/write view
+    // of that section, so it can be edited from either road.
+    final stage = Stage(tunable: settings.tunable, settings: settings, onLens: views.setLens);
     final theme = ValueNotifier(shipped['paper']!);
 
     final factory = CardFactory(
@@ -156,6 +160,7 @@ class Workspace {
       stage: stage,
       objectCard: factory.objectCard,
       frameCard: factory.frameCard,
+      settingsCard: factory.settingsCard,
     );
     final chrome = Chrome(
       settings: settings,
@@ -165,15 +170,27 @@ class Workspace {
       cards: {
         'document': factory.documentCard,
         'frames': factory.framesBrowser,
+        // EVERY LIST OF THINGS OFFERS TO MAKE THE THING (ISSUES 9.1): the one
+        // create door, reachable from the frames drop and the document menu
+        // alike rather than minted a second time in either.
+        'newFrame': factory.newFrameCard,
         'settings': factory.settingsCard,
         'themes': factory.themesCard,
       },
       viewTile: (id) => viewTileSpec(id, surface),
       openFrame: (id) => stage.open(factory.frameCard(id)),
+      // THE SETTINGS DOOR ON EVERY SURFACE (ISSUES 9.1). The family answers per
+      // area: a surface's own menu opens the card that governs it, and an area
+      // no card governs opens the main card and says so.
+      openSettings: (area) => stage.open(factory.settingsCard(area: area)),
       // ONE dispatch: a declared action, a keyboard chord and a menu row all
       // land on the focused view tile's own verb.
       onAction: (tile, action) => viewTileControllers[tile]?.runAction(action),
     );
+    // EVERY CONTENT REGISTERS (the one ancestor, ruled 2026-09-01): the
+    // connectivity law reads this registry, so registration is part of boot,
+    // not a test convenience.
+    registerShippedContents(factory: factory, surface: surface);
     installDefaultStage(chrome, minimap: (id) => minimapTileSpec(id, surface));
     await bindSession(session, settings, views, stage);
     rehost(stage, surface);
