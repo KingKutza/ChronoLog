@@ -130,14 +130,32 @@ the archive.
    case (month depends on observation, year's month-count depends on the
    moon) is a fixed point rather than a stack and is the hard edge to
    design against, not to discover later.
-6. **Pattern authoring beyond the RRULE dropdown** — the repeat control
+6. **Super-strategic band** (naming candidate: the epoch view) — the lens
+   beyond Strategic: decades to centuries to millennia or longer. PROMOTED
+   2026-09-02 on Don's field report — he zoomed Strategic out, felt it chug,
+   checked the minimap and found he was asking it for one or two CENTURIES:
+   "we need super strat, and more butter." That is not a Strategic
+   optimisation, it is Strategic running out. Strategic is one row per month
+   and one column per day of that month, so a century is about 1,200 rows of
+   31 cells and the honest answer at that span is a different lens, not a
+   faster one. What it needs is already being ruled elsewhere: the query
+   coarsens with the cell (facts while a cell can draw them, density below
+   that — `core/strategic_density.dart` is the reading), one windowed
+   bucketed query rather than one per day, and a span said as a unit and a
+   number so a century is typed rather than reached by holding an arrow. AND
+   MORE BUTTER — motion at this scale is where jank shows worst, so the band
+   is transform-only, glides on the existing curve settings, and never
+   commits inside a pointer handler. Pairs with #7's epochs and ages, and
+   with #5: a band over centuries wants cycle-native coordinates more than
+   any other surface, because nothing below the year is legible there.
+7. **Pattern authoring beyond the RRULE dropdown** — the repeat control
    is a rigid list of common Gregorian periods. "Every odd day of every
    even month of every odd year, except where any of those numbers is
    prime" is a repeat pattern with no entry path — and the dropdown
    plays worse still with non-Gregorian calendars. The formula language
    exists for exactly this; the authoring surface doesn't. Needs design
    alongside #4.
-7. **Custom calendars are first-class** — the prerequisite stage has
+8. **Custom calendars are first-class** — the prerequisite stage has
    shipped: the frame's coordinate declaration is the executed law. One
    coordinate-arithmetic engine (`src/coordinate-law.js`, and AGENTS.md's
    "Coordinate law") reads the levels / radix / transition ladder, the
@@ -177,30 +195,26 @@ the archive.
    computed sibling: a cycle derived from formula or ephemeris — the moon
    by Newton, not by a list of observations — with observation as the
    override, not the definition.
-8. **Intimate overlap and create-in-place** — overlap is indicated
+9. **Intimate overlap and create-in-place** — overlap is indicated
    locally, not globally: a 30-minute collision must not lane both
    events full-height. Events stay rectangles — no key-shaped blocks.
    The overlap itself gets drawn (a zone marking the contended interval)
    rather than deforming the participants. Placing an event inside an
    occupied span must not require dragging the occupant away and back —
    create-in-place works through an existing block.
-9. **Two-way calendar sync, Outlook first** — pushed down for difficulty,
+10. **Two-way calendar sync, Outlook first** — pushed down for difficulty,
    not priority of desire. Through ICS import/export semantics, never a
    provider API. The journal's per-op conflict foundation exists;
    provider-side conflict semantics for recurring/edited events still
    need design.
-10. **Control-bar aesthetics.**
-11. **New logo** — plain text until a better mark earns the spot.
-12. **More calendar subscriptions** — Google Calendar and other providers,
+11. **Control-bar aesthetics.**
+12. **New logo** — plain text until a better mark earns the spot.
+13. **More calendar subscriptions** — Google Calendar and other providers,
     each through its published ICS URL.
-13. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
+14. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
     web, built on the journal's per-op foundation.
-14. **Mobile version** — Android first. The dock becomes a full-screen
+15. **Mobile version** — Android first. The dock becomes a full-screen
     sheet under a width breakpoint; card paging becomes swipe gestures.
-15. **Super-strategic band** (naming candidate: the epoch view) — the
-    lens beyond Strategic, which caps at 18 months where this band would
-    take over: decades to centuries to millennia or longer. Needs design;
-    pairs with #6's epochs/ages.
 16. **Field-level merge** — real merging on top of per-op sequencing. Needs
     design.
 17. **Compiled native binaries** — the distribution end-state; the portable
