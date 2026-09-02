@@ -12,6 +12,7 @@
 import 'package:flutter/material.dart';
 
 import '../chrome/controls.dart';
+import '../core/indexes.dart';
 import '../core/records.dart';
 import 'card_chrome.dart';
 
@@ -21,16 +22,20 @@ typedef Connectable = ({String id, String label, String kind});
 /// What one search came to. [more] is a LOWER BOUND on what was left unlisted.
 typedef ConnectableHits = ({List<Connectable> hits, int more, bool scanned});
 
-String _titleOf(Object record) => switch (record) {
-  Frame(:final title, :final id) => (title ?? '').trim().isEmpty ? id : title!.trim(),
-  Event(:final payload, :final id) =>
-    (str(payload?['title']) ?? '').trim().isEmpty ? id : str(payload!['title'])!.trim(),
-  _ => '',
-};
-
-/// A windowed find over the document: never a full enumeration, and never a
-/// sort of everything. The first [window] title matches in map order, plus how
-/// many more the bounded scan saw.
+/// A WINDOWED, RANKED FIND OVER THE WHOLE DOCUMENT.
+///
+/// ISSUES 9.2 (Don, on 50 frames and 3,200 objects): this swept the record maps
+/// linearly and stopped at [scan] RECORDS, so the tail of the document could not
+/// be found by any query and the twelve rows shown were the first twelve
+/// substring matches in map order rather than the best. A budget must bound
+/// WORK, never DATA -- so the titles are indexed ([TitleIndex], built once per
+/// document generation beside every other index) and the index is consulted in
+/// full. Every title is findable by its own words at any document size.
+///
+/// [window] is how many rows a surface will draw and [more] is an honest lower
+/// bound on the rest. [scan] survives as what it should always have been: a cap
+/// on the ORDERING work, and because candidates arrive best-tier first it can
+/// only cost order among equals -- never findability.
 ConnectableHits searchConnectables(
   Document document,
   String query, {
@@ -40,23 +45,38 @@ ConnectableHits searchConnectables(
   bool frames = true,
   bool objects = true,
 }) {
-  final needle = query.trim().toLowerCase();
-  if (needle.isEmpty) return (hits: const [], more: 0, scanned: false);
-  final hits = <Connectable>[];
-  var more = 0, seen = 0;
-  void sweep(Iterable<DocumentRecord> records, String kind) {
-    for (final record in records) {
-      if (seen++ >= scan) return;
-      if (record.id == exclude) continue;
-      final label = _titleOf(record);
-      if (!label.toLowerCase().contains(needle)) continue;
-      hits.length < window ? hits.add((id: record.id, label: label, kind: kind)) : more += 1;
+  if (query.trim().isEmpty) return (hits: const [], more: 0, scanned: false);
+  final index = titleIndexOf(document);
+  final matches = index.matching(query);
+  final candidates = <({String id, int tier})>[];
+  var more = 0;
+  for (final entry in matches.entries) {
+    if (entry.key == exclude) continue;
+    final kind = index.kindOf(entry.key);
+    if (kind == 'frame' && !frames) continue;
+    if (kind == 'object' && !objects) continue;
+    if (candidates.length >= scan) {
+      more += 1;
+      continue;
     }
+    candidates.add((id: entry.key, tier: entry.value));
   }
-
-  if (frames) sweep(document.frames.values, 'frame');
-  if (objects) sweep(document.events.values, 'object');
-  return (hits: hits, more: more, scanned: true);
+  // AMONG EQUALS, THE MOST CONNECTED FIRST. The pile is a graph, so project the
+  // graph: a thing already stapled to six others is what a person reaching for a
+  // name is reaching for. Label and id follow only as a total, deterministic
+  // tie-break, so two windows looking at one document show the same rows.
+  candidates.sort((left, right) {
+    if (left.tier != right.tier) return left.tier - right.tier;
+    final byDegree = index.degreeOf(right.id) - index.degreeOf(left.id);
+    if (byDegree != 0) return byDegree;
+    final byLabel = index.labelOf(left.id).compareTo(index.labelOf(right.id));
+    return byLabel != 0 ? byLabel : left.id.compareTo(right.id);
+  });
+  final hits = [
+    for (final candidate in candidates.take(window))
+      (id: candidate.id, label: index.labelOf(candidate.id), kind: index.kindOf(candidate.id)),
+  ];
+  return (hits: hits, more: more + (candidates.length - hits.length), scanned: true);
 }
 
 /// A find box whose hits are the only list it ever draws.

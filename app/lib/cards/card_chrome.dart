@@ -9,6 +9,7 @@
 // actions. There is no confirmation dialog: every action is undoable instead.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../chrome/controls.dart';
 import '../chrome/menus.dart';
@@ -252,20 +253,163 @@ Widget cardRule(BuildContext context) => Container(
 
 /// Guidance, or a refusal in the law's own words. A card that cannot do
 /// something says so here rather than failing quietly.
-Widget cardNote(BuildContext context, String text, {bool refusal = false}) {
+///
+/// A REFUSAL IS A THING YOU CAN TOUCH (ISSUES 9.2, Don: "double-clicking an
+/// error message should copy it to the clipboard; right now I have no way to
+/// interact with them"). Every refusal in every card came through this one call
+/// already, so this is where the verbs go and there is no second copy of them.
+/// [source] is what the refusal is ABOUT in the person's own vocabulary -- the
+/// frame, the pattern, the file, the key -- and it rides with the text onto the
+/// clipboard, because a message on its own does not say what it was said of.
+/// [others] is what else this surface is refusing right now, so Copy all copies
+/// a wall of import warnings in one act instead of forty double-clicks.
+Widget cardNote(
+  BuildContext context,
+  String text, {
+  bool refusal = false,
+  String? source,
+  List<String> others = const [],
+}) {
+  if (refusal) return Refusal(text: text, source: source, others: others);
   final theme = ChronoTheme.of(context);
-  final tone = refusal ? theme.primary : theme.accent;
   return Container(
     width: double.infinity,
     padding: EdgeInsets.all(cardPx(context, 'card.gap')),
     decoration: BoxDecoration(
       color: theme.paper,
       border: Border(
-        left: BorderSide(color: tone, width: ChromeScope.of(context).px('chrome.focusRing')),
+        left: BorderSide(color: theme.accent, width: ChromeScope.of(context).px('chrome.focusRing')),
       ),
     ),
-    child: Text(text, style: bodyStyle(context, color: refusal ? tone : theme.strong)),
+    child: Text(text, style: bodyStyle(context, color: theme.strong)),
   );
+}
+
+/// The refusal text and what it was said of, as ONE piece of writing -- which is
+/// what lands on the clipboard, because "DTSTART and DTEND use different time
+/// forms" pasted into a message to somebody says nothing about which calendar.
+String refusalOnClipboard(String text, String? source) =>
+    (source ?? '').trim().isEmpty ? text : '$text\n(about ${source!.trim()})';
+
+/// THE ONE REFUSAL, EVERYWHERE (ISSUES 9.2).
+///
+/// Refusals were inert on every surface: painted text on a lens with no hit
+/// region, a bare `Text` on a card. They are things now, and they wear the same
+/// verbs the rest of the surface wears, so nothing about them has to be learned
+/// twice:
+///
+///   * a click SELECTS it -- the ink ring every other selection wears;
+///   * a double-click COPIES it, with what it is about;
+///   * a right-click offers Copy, Copy all, and Dismiss for this session;
+///   * hovering shows the whole of it when the line was truncated.
+///
+/// Dismissal is FOR THIS SESSION and for this widget only: a refusal is a fact
+/// about the document, and a fact does not stop being true because somebody put
+/// it away. It comes back the moment the surface says it again.
+class Refusal extends StatefulWidget {
+  const Refusal({super.key, required this.text, this.source, this.others = const []});
+
+  final String text;
+
+  /// What this refusal is about, in words a person reads -- a frame's title, a
+  /// file name, a settings key. Null when the sentence already names it.
+  final String? source;
+
+  /// Everything else being refused on this surface right now, for Copy all.
+  final List<String> others;
+
+  @override
+  State<Refusal> createState() => _RefusalState();
+}
+
+class _RefusalState extends State<Refusal> {
+  bool _selected = false, _dismissed = false;
+
+  /// A DISMISSAL BELONGS TO THE SENTENCE, NOT TO THE SLOT IT SAT IN. These are
+  /// built in a list -- fourteen import warnings, one per row -- and Flutter
+  /// reuses the state at each index when the list is replaced. Without this, a
+  /// second import would arrive with warnings already put away that nobody had
+  /// ever read, and "it comes back the moment the surface says it again" would
+  /// be a comment rather than a fact.
+  @override
+  void didUpdateWidget(Refusal old) {
+    super.didUpdateWidget(old);
+    if (widget.text == old.text && widget.source == old.source) return;
+    setState(() {
+      _dismissed = false;
+      _selected = false;
+    });
+  }
+
+  String get _mine => refusalOnClipboard(widget.text, widget.source);
+
+  void _copy(String written) {
+    Clipboard.setData(ClipboardData(text: written));
+    setState(() => _selected = true);
+  }
+
+  List<MenuRow> _rows() => [
+    menuRow('Copy', () => _copy(_mine), hint: 'This refusal and what it is about'),
+    menuRow(
+      widget.others.isEmpty ? 'Copy all' : 'Copy all — ${widget.others.length + 1}',
+      widget.others.isEmpty ? null : () => _copy([_mine, ...widget.others].join('\n\n')),
+      hint: 'Every refusal this surface is showing',
+    ),
+    menuRow(
+      'Dismiss for this session',
+      () => setState(() => _dismissed = true),
+      hint: 'It comes back the moment the surface says it again',
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (_dismissed) return const SizedBox.shrink();
+    final chrome = ChromeScope.of(context);
+    final theme = ChronoTheme.of(context);
+    final tone = theme.primary;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _selected = !_selected),
+        onDoubleTap: () => _copy(_mine),
+        onSecondaryTapUp: (details) => showChronoMenu(context, details.globalPosition, _rows()),
+        // THE WHOLE TEXT ON HOVER, for the surfaces that truncate: a banner
+        // showing three words of a sentence is a refusal you cannot read.
+        child: Tooltip(
+          message: _mine,
+          triggerMode: TooltipTriggerMode.manual,
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(cardPx(context, 'card.gap')),
+            decoration: BoxDecoration(
+              color: theme.paper,
+              border: Border(
+                left: BorderSide(color: tone, width: chrome.px('chrome.focusRing')),
+                top: _ring(theme, chrome),
+                right: _ring(theme, chrome),
+                bottom: _ring(theme, chrome),
+              ),
+            ),
+            child: Semantics(
+              label: 'Refusal: $_mine',
+              child: Text(widget.text, style: bodyStyle(context, color: tone)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The selection ring, in the palette and the width every other selection on
+  /// the surface uses -- and nothing at all when this one is not selected.
+  BorderSide _ring(ChronoTheme theme, Chrome chrome) => _selected
+      ? BorderSide(
+          color: theme.ink.withValues(alpha: chrome.px('selection.ringOpacity')),
+          width: chrome.px('selection.ring'),
+        )
+      : BorderSide.none;
 }
 
 /// A read-only run of authored words -- traits, group names -- as chips. Never
@@ -328,12 +472,6 @@ class _CardFieldState extends State<CardField> {
 
   @override
   Widget build(BuildContext context) {
-    final chrome = ChromeScope.of(context);
-    final theme = ChronoTheme.of(context);
-    final border = OutlineInputBorder(
-      borderSide: BorderSide(color: theme.hair, width: chrome.px('chrome.hair')),
-      borderRadius: BorderRadius.circular(chrome.px('chrome.corner')),
-    );
     return SizedBox(
       width: widget.width ?? cardPx(context, 'card.fieldWidth'),
       child: TextField(
@@ -341,13 +479,12 @@ class _CardFieldState extends State<CardField> {
         maxLines: widget.lines,
         onChanged: widget.onChanged,
         style: widget.mono ? dataStyle(context) : bodyStyle(context),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: widget.hint,
-          hintStyle: labelStyle(context, color: theme.hair),
-          contentPadding: EdgeInsets.all(cardPx(context, 'card.gap') / 2),
-          border: border,
-          enabledBorder: border,
+        // ONE FIELD CHROME (ISSUES 9.2). This class drew the hairline itself and
+        // the one-math box drew nothing; both go through `fieldChrome` now.
+        decoration: fieldChrome(
+          context,
+          hint: widget.hint,
+          padding: cardPx(context, 'card.gap') / 2,
         ),
       ),
     );

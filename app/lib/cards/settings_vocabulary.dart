@@ -390,6 +390,13 @@ const Map<String, SettingSaid> settingVocabulary = {
     'The folder this chronolog is written to. Empty means beside the app, which '
         'is the portable default; writing a path here moves the document.',
   ),
+  'document.deleteWord': SettingSaid(
+    'Word that arms deleting everything',
+    'Type this word on the document card to arm the delete-all door. Until it '
+        'is typed exactly, that door does nothing. Deleting everything is the '
+        'one act here with no undo, which is why it asks you to say a word '
+        'rather than click a box.',
+  ),
   'document.saveGap': SettingSaid(
     'Space around the save lamp',
     'The gap between the save mark, its lamp and the word beside them, in '
@@ -508,6 +515,14 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '2',
     high: '20',
   ),
+  'grid.pipStep': SettingSaid(
+    'Space between day pips',
+    'How far apart pips are set as they fill a day cell, in pixels. Pips with '
+        'no name to carry flow across the cell and wrap, so this is how tightly '
+        'a busy day packs.',
+    low: '2',
+    high: '30',
+  ),
   'grid.rule': SettingSaid(
     'Thickness of the grid lines',
     'How thick the lines between day cells are drawn, in pixels.',
@@ -573,22 +588,14 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '0',
     high: '10',
   ),
-  'intimate.bleed': SettingSaid(
-    'How far past the edge it paints',
-    'The strip painted beyond the window on every side, in pixels. A drag can '
-        'be shown live only as far as something has actually been painted, so '
-        'this is what buys smooth motion.',
+  'intimate.bleedViewports': SettingSaid(
+    'Windows painted past each edge',
+    'How much surface is drawn beyond the window on every side, counted in '
+        'windows. A drag can be shown live only as far as something has already '
+        'been painted, so one window means an ordinary drag never runs out of '
+        'painted day. More is smoother and costs more to draw.',
     low: '0',
-    high: '600',
-  ),
-  'intimate.bleedColumns': SettingSaid(
-    'Columns painted past each edge',
-    'How many whole columns are drawn off the side of the window. A sideways '
-        'drag can be shown live only as far as something is already painted, so '
-        'one whole column is what lets a full day of slide preview before it '
-        'commits.',
-    low: '0',
-    high: '4',
+    high: '3',
   ),
   'intimate.edge': SettingSaid(
     'Strength of a block\'s edge',
@@ -903,6 +910,14 @@ const Map<String, SettingSaid> settingVocabulary = {
     'How much time the Lines lens holds at once, in days.',
     low: '1',
     high: '3650',
+  ),
+  'lines.minDays': SettingSaid(
+    'Closest the lens winds in',
+    'The least time the Lines lens will hold, in days. The window number is the '
+        'zoom, so this is how far in you can go — a fraction of a day is a few '
+        'hours across the surface.',
+    low: '1/100',
+    high: '7',
   ),
   'lines.dotRadius': SettingSaid(
     'Size of a point',
@@ -1353,6 +1368,16 @@ const Map<String, SettingSaid> settingVocabulary = {
     high: '1000',
   ),
 
+  // --- The calendar boundary -------------------------------------------------
+  'ics.completedFrame': SettingSaid(
+    'Frame a finished ToDo lands in',
+    'A calendar file that says a to-do is completed has to say it about some '
+        'frame of yours. This names that frame — the one place in the program '
+        'where a frame is named by default, because the outside world already '
+        'said something and it has to land somewhere. Nothing inside treats it '
+        'as different from any other frame you make.',
+  ),
+
   // --- The now line ---------------------------------------------------------
   'now.halo': SettingSaid(
     'Glow around now',
@@ -1368,6 +1393,37 @@ const Map<String, SettingSaid> settingVocabulary = {
   ),
 
   // --- The mouse and the wheel ----------------------------------------------
+  // THE POINTER CHORDS (ISSUES 9.2, the keybindings page). Said in the same
+  // words the keyboard chords are said in, because they belong on the same page
+  // and answer the same question: what does this press mean?
+  'pointer.pan': SettingSaid(
+    'Drag to move the view',
+    'The press that slides the view under the pointer instead of touching what '
+        'is on it. Write modifiers and a button joined by +, and | between ways '
+        'of doing it: middle | shift+left is the middle button or shift and the '
+        'left one.',
+  ),
+  'pointer.menu': SettingSaid(
+    'Open the menu here',
+    'The press that opens the menu this program draws, over whatever is under '
+        'the pointer. A lens never shows the menu the platform would draw.',
+  ),
+  'pointer.create': SettingSaid(
+    'Drag to make something',
+    'The press that mints an object across the span it is dragged over, even '
+        'where something already sits — which is how you make a thing through an '
+        'existing block instead of moving the block out of the way.',
+  ),
+  'pointer.marquee': SettingSaid(
+    'Drag a box around several',
+    'The press that pulls a box and selects everything inside it. A drag term '
+        'says the binding wants motion rather than a press held still.',
+  ),
+  'pointer.toggleSelect': SettingSaid(
+    'Add one to the selection',
+    'The press that adds what is under the pointer to what is already selected, '
+        'or takes it back out, without letting go of the rest.',
+  ),
   'pointer.zoomDirection': SettingSaid(
     'Which way the wheel zooms',
     'Positive is wheel-up-zooms-in, the way every map and browser reads. Write '

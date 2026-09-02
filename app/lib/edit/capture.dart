@@ -121,7 +121,20 @@ extension Capturing on Editor {
     final definition = objectKinds['todo']!;
     final event = newObject('todo', title: capture.line.title, note: capture.line.note);
     final frame = capture.frame;
-    final placed = frame == null
+    // BORN IN A COLUMN, STAPLED TO THE GROUP, PLACED ON NOTHING (Don, ISSUES
+    // 9.2): "If I have a non-time frame as a column and I author a bunch of
+    // todos stapled to it, they would only be on that frame. I could leave them
+    // there, using the frame as a todo list, or then staple them one by one...
+    // to a point or, better, to an event."
+    //
+    // This wrote TWO connections per capture -- the group staple AND a placement
+    // on the board's projected calendar at NOW -- which is how every
+    // column-born todo turned up under Wall Time as well, and why a second
+    // column appeared to move when it gained its first member. A time SAID is
+    // still honoured: the capture line's own date word is an authored position
+    // and places the object wherever it lands. Silence is not now.
+    final saidWhen = capture.at != null;
+    final placed = frame == null || (held != null && !saidWhen)
         ? null
         : placement(event.id, frame, capture.at ?? nowDays(), definition.relationRole);
     final joined = held == null ? null : membership(event.id, held);

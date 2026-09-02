@@ -355,8 +355,10 @@ class _TreeLensState extends State<TreeLens> {
       buttons: event.buttons,
       shift: keys.isShiftPressed,
       alt: keys.isAltPressed,
+      control: keys.isControlPressed,
       onMark: false,
       timeSurface: false,
+      bindings: widget.tile.settings.binding,
     );
     if (verb != 'pan') return;
     _panFrom = event.localPosition;

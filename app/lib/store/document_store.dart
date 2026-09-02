@@ -254,6 +254,68 @@ class DocumentStore {
     return null;
   }
 
+  /// A FRESH CHRONOLOG AT A NEW LOCATION -- Don's default New (ISSUES 9.2):
+  /// "a fresh document at a new location, the old files left in place."
+  ///
+  /// The document being left keeps its edits (a forced save first, to the place
+  /// it still lives), and the new location is refused if a chronolog already
+  /// occupies it, for the same reason [relocate] refuses: there is no dialog to
+  /// ask with and no undo for a replaced file. Then this is a first run -- the
+  /// load establishes an empty document exactly as an empty data root always
+  /// has, so nothing here invents what "empty" means.
+  ///
+  /// Answers null when the new chronolog stands, or the words why it does not.
+  Future<String?> establishAt(String root) async {
+    if (root.trim().isEmpty) return 'A new chronolog needs a path.';
+    final next = JournalStore(dataRoot: root, files: _files, scheduler: _scheduler);
+    if (await next.occupied()) {
+      return 'A chronolog already lives at $root; open it, or choose somewhere else.';
+    }
+    await save(force: true);
+    _cancel();
+    _log.clear();
+    _journal = next;
+    await load();
+    return null;
+  }
+
+  /// ANOTHER CHRONOLOG, OPENED -- Don's second reason the door matters (ISSUES
+  /// 9.2): "sometimes it might make sense to have two chronologs, instead of
+  /// just two frames." Multiple documents are a legitimate shape, so reaching
+  /// one is a door and not a migration.
+  ///
+  /// The document being left keeps its edits, then this is a boot: the same
+  /// load path, the same repairs, the same torn-tail report. A location holding
+  /// nothing establishes an empty document rather than refusing -- naming a
+  /// place and finding it empty is how a new chronolog begins there too.
+  Future<JournalLoad?> openAt(String root) async {
+    if (root.trim().isEmpty || root == _journal.dataRoot) return null;
+    await save(force: true);
+    _cancel();
+    _log.clear();
+    _journal = JournalStore(dataRoot: root, files: _files, scheduler: _scheduler);
+    return load();
+  }
+
+  /// EVERYTHING, DELETED, AND THE APP LEFT STANDING ON AN EMPTY DOCUMENT.
+  ///
+  /// Don, ISSUES 9.2: "No clear mechanism to delete all the old data and start a
+  /// new chronolog -- I had to follow the path and delete the directory." This
+  /// is that act, made a door. It is the one thing here with no undo, which is
+  /// why the surface gates it behind a typed word; the gate is the card's and
+  /// the deletion is this method's, so neither can be half of the other.
+  ///
+  /// Pending ops are DROPPED before the files go: they describe a document that
+  /// is about to stop existing, and writing them on the way out would recreate
+  /// the journal this just deleted.
+  Future<void> deleteEverything() async {
+    _cancel();
+    _log.clear();
+    _deferred = 0;
+    await _journal.erase();
+    await load();
+  }
+
   /// The owner deliberately replacing the document. Pending ops are DROPPED
   /// because they describe a document that no longer exists.
   Future<void> replaceDocument(Document next) async {

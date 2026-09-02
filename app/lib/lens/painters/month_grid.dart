@@ -34,7 +34,6 @@ import '../law_context.dart';
 import '../lens_painter.dart';
 import '../marks.dart';
 import '../now.dart';
-import '../theme.dart';
 import '../view_tile.dart';
 import '../zones.dart';
 import 'intimate.dart';
@@ -64,6 +63,12 @@ const Map<String, String> gridTunableDefaults = {
   'grid.numberAt': '22',
   'grid.overflowSize': '9',
   'grid.pipSize': '7',
+  // THE PITCH A NAMELESS PIP FLOWS AT (ISSUES 9.2). A pip that shows no name
+  // takes no row: it packs across the cell and wraps, so the step from one to
+  // the next -- both ways -- is what says how tightly a busy day reads. It is
+  // its own number and not the glyph's: how big a mark is drawn and how closely
+  // marks are set are two things an author may want to say separately.
+  'grid.pipStep': '10',
   'grid.washWeekend': '0.07',
   'grid.washToday': '0.1',
   // The record slash already says "this is behind us"; a wash saying it again
@@ -243,36 +248,6 @@ List<Heading> weekdayHeadings(List<String> names, int first, {bool initials = fa
     ),
 ];
 
-/// The one label call every lens draws through, clipped to its own box.
-///
-/// TWO FACES, ONE RULE (ruled 2026-08-28): [data] is the monospace role and is
-/// for COORDINATES, COUNTS AND TIMES -- a clock reading, a day number, an "N+"
-/// lower bound. Everything a person reads as prose -- a title, a weekday name, a
-/// month -- is the humanist face and is the default, because a surface that
-/// drew every string as data came up in a typewriter from end to end.
-void paintLabel(
-  Canvas canvas,
-  ChronoTheme theme,
-  String text,
-  Rect box,
-  Color color,
-  double size, {
-  bool center = false,
-  bool data = false,
-}) {
-  if (text.isEmpty || box.width <= 0) return;
-  final painter = TextPainter(
-    text: TextSpan(
-      text: text,
-      style: (data ? theme.data : theme.ui).copyWith(color: color, fontSize: size),
-    ),
-    textDirection: TextDirection.ltr,
-    maxLines: 1,
-    ellipsis: '…',
-  )..layout(maxWidth: box.width);
-  painter.paint(canvas, Offset(box.left + (center ? (box.width - painter.width) / 2 : 0), box.top));
-}
-
 /// A rule laid on the half-pixel, so a one-device-pixel line lands on one pixel
 /// instead of being resolved as two grey ones. Every hairline in every lens goes
 /// through this: the blur is a large part of what read as coarse.
@@ -359,6 +334,40 @@ abstract class DayGridPainter extends LensPainter {
   String presentationOf(Fact fact, DisplayWeight weight) =>
       _cellWidth >= scene.px('grid.nameAt') ? showName : showPip;
 
+  /// WHAT THE CELL CAN DRAW, AT EACH FOOTPRINT IT DRAWS AT (ISSUES 9.2). Don:
+  /// "all the sigils stack on the left edge -- why not fill the space." A cell
+  /// had ONE budget, in the footprint of a NAMED chip: a full-width row apiece.
+  /// So a cell with room for hundreds of pips admitted forty, drew nineteen, and
+  /// spent the rest of its area saying "N+" -- the surface was measuring the
+  /// wrong mark. A pip that shows no name is not a row, so its own footprint is
+  /// its own budget, and the cell holds both.
+  ///
+  /// The query has to see whichever is larger, because the presentation is not
+  /// known until the fact is weighed.
+  ({Capacity named, Capacity pips, int queryBudget}) get _budget {
+    final named = capacityOf(
+      _cellWidth,
+      _cellHeight,
+      scene.tunable,
+      widthKey: 'grid.chipWidth',
+      heightKey: 'grid.chipHeight',
+      depthKey: 'grid.chipDepth',
+    );
+    final pips = capacityOf(
+      _cellWidth,
+      _cellHeight,
+      scene.tunable,
+      widthKey: 'grid.pipStep',
+      heightKey: 'grid.pipStep',
+      depthKey: 'grid.chipDepth',
+    );
+    return (
+      named: named,
+      pips: pips,
+      queryBudget: named.queryBudget > pips.queryBudget ? named.queryBudget : pips.queryBudget,
+    );
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     hits.clear();
@@ -378,14 +387,7 @@ abstract class DayGridPainter extends LensPainter {
     _cellWidth = (size.width - _gutter) / (columns < 1 ? 1 : columns);
     _cellHeight = (size.height - _header) / rows.length;
     _paintHeadings(canvas, columns);
-    final capacity = capacityOf(
-      _cellWidth,
-      _cellHeight,
-      scene.tunable,
-      widthKey: 'grid.chipWidth',
-      heightKey: 'grid.chipHeight',
-      depthKey: 'grid.chipDepth',
-    );
+    final capacity = _budget;
     final density = aggregateDensity<Fact>(
       start: Rational(days.reduce((a, b) => a < b ? a : b)),
       end: Rational(days.reduce((a, b) => a > b ? a : b) + BigInt.one),
@@ -518,7 +520,7 @@ abstract class DayGridPainter extends LensPainter {
     Rect cell,
     BigInt day,
     DensityDay<Fact>? found,
-    Capacity capacity,
+    ({Capacity named, Capacity pips, int queryBudget}) capacity,
   ) {
     final pad = scene.px('grid.pad');
     final start = Rational(day) * law.dayDays;
@@ -571,19 +573,33 @@ abstract class DayGridPainter extends LensPainter {
       if (presentationOf(fact, weight) != showNone) ranked.add((fact: fact, weight: weight));
     }
     ranked.sort((a, b) => b.weight.weight.compareTo(a.weight.weight));
-    final admitted = admit(ranked, capacity, queryTruncated: found.truncated);
+    // TWO FOOTPRINTS, TWO BUDGETS (ISSUES 9.2). A named chip claims a full-width
+    // row; a nameless pip claims a pip's worth of area and flows. Weight admits
+    // in each, separately, because they are not competing for the same pixels.
+    final named = <({Fact fact, DisplayWeight weight})>[];
+    final pips = <({Fact fact, DisplayWeight weight})>[];
+    for (final entry in ranked) {
+      (presentationOf(entry.fact, entry.weight) == showName ? named : pips).add(entry);
+    }
+    final admittedNames = admit(named, capacity.named, queryTruncated: found.truncated);
+    final admittedPips = admit(pips, capacity.pips, queryTruncated: found.truncated);
     // THE ADMITTED STAND IN TIME ORDER (ISSUES 9.1, Don: "on Tactical the
     // meetings are out of order"). Weight was the right judge of which chips
     // fit and the wrong judge of where they sit; re-sorting here is the whole
     // fix, and it is one line in the SHARED cell so Tactical and the month
     // sheets take it together. The tie-break is the fact's own identity, so two
-    // facts at one instant keep a stable order between paints.
-    final drawn = [...admitted.drawn]..sort((a, b) {
+    // facts at one instant keep a stable order between paints. A flowed pip
+    // reads in the same order, wrapping, so the clock runs left to right and
+    // down the cell.
+    List<({Fact fact, DisplayWeight weight})> inClockOrder(
+      List<({Fact fact, DisplayWeight weight})> entries,
+    ) => [...entries]..sort((a, b) {
       final byTime = a.fact.day.compareTo(b.fact.day) * drawOrder;
       return byTime != 0 ? byTime : a.fact.identity.compareTo(b.fact.identity);
     });
+    var painted = 0;
     final height = scene.px('grid.chipHeight');
-    for (final entry in drawn) {
+    for (final entry in inClockOrder(admittedNames.drawn)) {
       if (top + height > cell.bottom - pad) break;
       _paintMark(
         canvas,
@@ -593,8 +609,27 @@ abstract class DayGridPainter extends LensPainter {
         start,
       );
       top += height + pad;
+      painted += 1;
     }
-    final hidden = found.minimum - drawn.length;
+    // THE PIPS FLOW (ISSUES 9.2). Across the cell at the authored pitch, wrapping
+    // at its right edge, filling the area the named rows left. The mark's own
+    // footprint is what it registers as a hit, so a pointer finds the pip it is
+    // over and not the row it used to sit in.
+    final step = scene.px('grid.pipStep'), pip = scene.px('grid.pipSize');
+    if (step > 0) {
+      var x = cell.left + pad, y = top;
+      for (final entry in inClockOrder(admittedPips.drawn)) {
+        if (x + pip > cell.right - pad) {
+          x = cell.left + pad;
+          y += step;
+        }
+        if (y + pip > cell.bottom - pad) break;
+        _paintMark(canvas, Rect.fromLTWH(x, y, pip, pip), entry.fact, entry.weight, start);
+        x += step;
+        painted += 1;
+      }
+    }
+    final hidden = found.minimum - painted;
     if (hidden <= 0) return;
     _text(
       canvas,

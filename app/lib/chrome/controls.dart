@@ -758,6 +758,53 @@ List<MenuRow> settingsRows(BuildContext c, String area, String said) {
   ];
 }
 
+/// ONE FIELD CHROME (ISSUES 9.2, Don, on the weight formula box: "It is a
+/// blank text box with a background the same as the window and no border, that
+/// is why I did not see it").
+///
+/// A FIELD LOOKS LIKE A FIELD EVERYWHERE. Three classes drew their own
+/// decoration and a fourth drew none, so the one-math entry box was invisible
+/// on six surfaces while the card fields beside it wore a hairline. This is the
+/// one decoration every text entry in the program goes through -- hairline
+/// boundary at rest, the corner radius the rest of the chrome uses, the hint in
+/// hair, and the primary's own colour on the border when what is written will
+/// not read. A new field class cannot be born borderless, because there is
+/// nowhere left to spell a border by hand.
+///
+/// [padding] is the only thing a site may say for itself: density is what
+/// separates a card's field from a bar's, and it is a setting at every caller.
+InputDecoration fieldChrome(
+  BuildContext c, {
+  String hint = '',
+  bool refused = false,
+  double? padding,
+}) {
+  final chrome = ChromeScope.of(c);
+  final theme = ChronoTheme.of(c);
+  final border = OutlineInputBorder(
+    borderSide: BorderSide(
+      color: refused ? theme.primary : theme.hair,
+      width: chrome.px('chrome.hair'),
+    ),
+    borderRadius: BorderRadius.circular(chrome.px('chrome.corner')),
+  );
+  return InputDecoration(
+    isDense: true,
+    hintText: hint,
+    hintStyle: labelStyle(c, color: theme.hair),
+    contentPadding: EdgeInsets.all(padding ?? chrome.px('chrome.pad') / 2),
+    border: border,
+    enabledBorder: border,
+    // THE FOCUSED FIELD SAYS SO IN THE PALETTE'S OWN VOICE. Material's default
+    // focus ring is the framework's blue, which is exactly the seam the theme
+    // pass closed everywhere else.
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: theme.primary, width: chrome.px('chrome.focusRing')),
+      borderRadius: BorderRadius.circular(chrome.px('chrome.corner')),
+    ),
+  );
+}
+
 /// A formula, with live evaluation and the refusal in the law's own words.
 class ExpressionField extends StatefulWidget {
   const ExpressionField({
@@ -821,7 +868,11 @@ class _ExpressionFieldState extends State<ExpressionField> {
               controller: _controller,
               onChanged: _read,
               style: dataStyle(context),
-              decoration: const InputDecoration(border: InputBorder.none, isDense: true),
+              decoration: fieldChrome(
+                context,
+                hint: 'An expression in the one math',
+                refused: _refusal != null,
+              ),
             ),
           ),
         ),

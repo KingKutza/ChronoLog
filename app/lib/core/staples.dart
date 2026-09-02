@@ -647,19 +647,50 @@ Relation sayingInstant(Relation relation, Json? coordinate) => relation.withFiel
         : end.toJson(),
 ]);
 
-/// A PLACEMENT IS A STAPLE THAT ANCHORS AND NAMES AN INSTANT.
+/// WHICH POINT OF AN OBJECT A PLACEMENT LANDS ON THE SHEET.
 ///
-/// Three structural facts, no record kind (ruled 2026-09-01): it ANCHORS a point
-/// of an object's extent, which is what tells it apart from an `end` staple
-/// carrying a completion instant on the same sheet; its frame end NAMES A
-/// COORDINATE, which is what tells it apart from an affiliation; and it names
-/// this object. The anchoring trait comes from the one kind registry that
-/// already answered this question -- nothing new decides it here.
-bool isPlacement(Relation relation, [String? objectId]) =>
-    relation.isStaple &&
-    (stapleKind(relation.kind)?.anchors ?? false) &&
-    (objectId == null || relation.event == objectId) &&
-    relation.coordinate != null;
+/// Don, ISSUES 9.2: "Whole to point PLACES the object at that point... the whole
+/// sits at the instant, the object's own placement point (start by shipped
+/// convention) being what lands there." So the object's beginning said outright,
+/// and the whole of it -- the two silences that mean "this object is here" --
+/// are the placement points. Every other point of the extent (`end`, the
+/// midpoint, a point the author named) is an ANCHOR: it says where that point
+/// sits and lets the derivation compose the extent around it, and it is not a
+/// second statement of where the object is drawn.
+bool isPlacementPoint(String point) => point == startPoint || point == wholePoint;
+
+/// A PLACEMENT IS A STAPLE THAT ANCHORS AN OBJECT'S PLACEMENT POINT AT AN
+/// INSTANT.
+///
+/// Four structural facts, no record kind (ruled 2026-09-01, the fourth added
+/// 9.2): it ANCHORS a point of an object's extent, which is what tells it apart
+/// from an `end` staple carrying a completion instant on the same sheet; its
+/// frame end NAMES A COORDINATE, which is what tells it apart from an
+/// affiliation; it names this object; and the point it names on this object is
+/// the object's own PLACEMENT POINT.
+///
+/// The fourth is Don's double render (ISSUES 9.2): an end anchor -- object end
+/// `point: end`, far end a Wall Time coordinate -- read as a second placement
+/// beside the start, so the same event drew twice on every lens projecting Wall
+/// Time. An anchor on any other point positions the EXTENT and is never a second
+/// mark. The anchoring trait comes from the one kind registry that already
+/// answered that question -- nothing new decides it here.
+bool isPlacement(Relation relation, [String? objectId]) {
+  if (!relation.isStaple) return false;
+  if (!(stapleKind(relation.kind)?.anchors ?? false)) return false;
+  if (relation.coordinate == null) return false;
+  final named = [
+    for (final end in relation.readEnds)
+      if (end is ObjectEnd)
+        if (objectId == null || end.object == objectId) end,
+  ];
+  // Asked about no object in particular, the record is about the one its own
+  // accessors report -- `relation.event`, the FIRST object end -- so that is the
+  // end whose point decides. Asked about an object, every end naming it counts:
+  // a staple may pierce one object at more than one of its own points, and if
+  // any of them is the placement point, this connection places it.
+  return (objectId == null ? named.take(1) : named).any((end) => isPlacementPoint(endPoint(end)));
+}
 
 // --- What is identified with what -------------------------------------------
 
@@ -1240,7 +1271,16 @@ class Staples {
       }
       final days = extent.startDays, frame = extent.frame;
       if (days == null || frame == null) {
-        refusals[objectId] = _unpositioned(objectId, extent);
+        // A REFUSAL IS OWED ONLY WHERE A POINT WAS NAMED (ISSUES 9.2, the email
+        // note). "An object whose connections are ALL affiliations is not
+        // 'positioned only by connections that fail' -- it is unpositioned by
+        // design, and the correct surface for that is silence on the lens."
+        // Something has to have gone wrong for there to be anything to say, so
+        // the failed claim itself is the gate: an unresolved point-naming
+        // anchor, or a loop.
+        if (extent.unresolved.isNotEmpty || extent.cyclic) {
+          refusals[objectId] = _unpositioned(objectId, extent);
+        }
         continue;
       }
       final coordinate = lawOf(frame)?.fromDays(days).toJson();
@@ -1367,19 +1407,16 @@ class Staples {
         // AN ANCHOR CANNOT NAME THE WHOLE (ruled 2026-09-01). A point of size
         // `all` is the entire extent, and an anchor asks where ONE point sits --
         // so a staple that anchors this object by its whole is saying something
-        // no position can be derived from, and it says so instead of quietly
-        // picking an edge.
-        if (role == wholePoint) {
-          unresolved.add(
-            _contest(
-              role,
-              'this connection names the whole of this object rather than a point'
-              ' of it, so it says what it is affiliated with and not where it sits',
-              staple: staple,
-            ),
-          );
-          continue;
-        }
+        // no position can be derived from.
+        //
+        // AND IT IS NOT A CONTEST (Don, ISSUES 9.2): "Whole to whole says THIS
+        // IS CONNECTED TO THAT." An affiliation is not a claim on a point, so it
+        // cannot FAIL to resolve one -- reporting it as unresolved is what wrote
+        // the ultra-long extent note and the lens-top banner about the email
+        // note. The derivation passes over it in SILENCE: the object is
+        // unpositioned by design, which is a fact its card states in one line
+        // and no surface refuses over.
+        if (role == wholePoint) continue;
         final fars = staple.othersThan(index);
         if (fars.isEmpty) {
           unresolved.add(
@@ -1430,17 +1467,10 @@ class Staples {
             if (upstream.cyclic) cyclic = true;
             final point = endPoint(far);
             days = extentPointDays(upstream, point, offsetDays: magnitudeDays(far.offset));
-            if (point == wholePoint) {
-              unresolved.add(
-                _contest(
-                  role,
-                  "this connection's other end names the whole of that object"
-                  ' rather than a point of it, and a whole is not an instant',
-                  staple: staple,
-                ),
-              );
-              continue;
-            }
+            // THE FAR SIDE OF AN AFFILIATION, silent for the same reason as the
+            // near side (ISSUES 9.2): a whole is not an instant, so nothing is
+            // derived -- and nothing was claimed, so nothing is contested.
+            if (point == wholePoint) continue;
             if (days != null) {
               spread = spread + upstream.spread;
               frame = upstream.frame;

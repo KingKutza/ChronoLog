@@ -334,6 +334,30 @@ class _SettingsCardState extends State<SettingsCard> {
     );
   }
 
+  /// The page's own Reset all: how many overrides this card's areas hold, and
+  /// the one act that puts them all back. Nothing is offered when nothing is
+  /// authored -- a reset over a page of shipped defaults would do nothing and
+  /// say it did something.
+  Widget _resetPage(BuildContext context, Settings settings, List<String> areas) {
+    final prefixes = [for (final area in areas) '$area.'];
+    final authored = [
+      for (final key in settings.toJson().keys)
+        if (prefixes.any(key.startsWith)) key,
+    ];
+    if (authored.isEmpty) {
+      return cardNote(context, 'Nothing on this card is written differently from how it ships.');
+    }
+    return cardWrap(context, [
+      namedAction(
+        context,
+        'Reset all — ${authored.length} written differently',
+        glyph: '↺',
+        hint: 'Every setting on this card back to the shipped default',
+        onTap: () => setState(() => settings.resetUnder(prefixes)),
+      ),
+    ]);
+  }
+
   /// Every composed key, and no second list: the shell composes every area's
   /// defaults, so restating one area's here could only ever go stale.
   List<String> _keys(Settings settings) => [
@@ -440,6 +464,15 @@ class _SettingsCardState extends State<SettingsCard> {
             ),
           ]),
           cardRule(context),
+          // RESET ALL, FOR THE PAGE (ISSUES 9.2, Don on the keybindings page:
+          // it "must allow resetting"). Per-key reset was already on every
+          // row; what was missing was the whole page at once, which is the act
+          // a person actually wants after an afternoon of moving chords around.
+          // It is offered on EVERY sub-card, not just the keyboard's, because a
+          // page of settings is a page of settings -- and it says how many
+          // overrides it found rather than sitting there as a live button over
+          // nothing.
+          _resetPage(context, settings, mine),
           for (final key in _keys(settings))
             if (mine.contains(key.split('.').first)) _row(context, key),
         ],

@@ -13,6 +13,7 @@ import '../cards/card_chrome.dart';
 import '../cards/card_factory.dart';
 import '../cards/document_card.dart';
 import '../core/exact.dart';
+import '../core/ics.dart' show icsTextDefaults;
 import '../edit/editor.dart';
 import '../lens/gestures.dart';
 import '../lens/painters/intimate.dart';
@@ -58,7 +59,26 @@ Settings chronologSettings() => Settings(
     cardTunableDefaults,
     frameCardTunableDefaults,
   ],
-  texts: const [chromeKeyDefaults, chromeTextDefaults, stageTextDefaults, frameCardTextDefaults],
+  texts: const [
+    chromeKeyDefaults,
+    chromeTextDefaults,
+    stageTextDefaults,
+    frameCardTextDefaults,
+    // THE POINTER CHORDS SIT BESIDE THE KEYBOARD'S (ISSUES 9.2, the keybindings
+    // page): pan, menu, create, the marquee and the toggle are text settings,
+    // because a chord is not arithmetic.
+    pointerBindingDefaults,
+    // The ICS boundary's completed-frame: the one legitimate named frame in the
+    // program, and it is authored rather than compiled.
+    icsTextDefaults,
+  ],
+  // TWO FAMILIES ARE EXCLUSIVE: no two keyboard chords may name one chord, and
+  // no two pointer bindings one press. Which families those are is the SHELL's
+  // statement, not the settings layer's -- `Settings` knows nothing about what
+  // a key means, and a page of exclusive settings is a shape, not a special
+  // case for keys (ISSUES 9.2: "two bindings on one chord is a refusal shown
+  // beside both rows, not a silent last-wins").
+  exclusive: const ['keys.', 'pointer.'],
 );
 
 const List<(String, String, String)> _bars = [

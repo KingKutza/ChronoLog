@@ -20,7 +20,6 @@ import '../chrome/menus.dart';
 import '../core/coordinate_entry.dart';
 import '../core/coordinate_law.dart';
 import '../core/eras.dart';
-import '../lens/theme.dart';
 import 'card_chrome.dart';
 
 /// The coordinate with [level] set to [picked] and every deeper level dropped.
@@ -80,35 +79,79 @@ class _CoordinateFieldState extends State<CoordinateField> {
   late final TextEditingController _controller = TextEditingController(
     text: coordinateText(widget.value, widget.law),
   );
+
+  /// A FIELD OWNS ITS TEXT WHILE THE HAND IS IN IT (ISSUES 9.2, Don: "editing
+  /// the anchor's timestamp by one digit replaces the whole timestamp with that
+  /// digit"). Focus is read, not assumed: while this node holds it, nothing
+  /// reformats the text and nothing commits.
+  final FocusNode _focus = FocusNode();
+
+  /// What was last COMMITTED, so leaving the field commits nothing a second
+  /// time. Enter and blur are two doors onto one act, not two acts -- the
+  /// journal grew one entry and one undo step per keystroke, and two entries
+  /// for one Enter would be the same defect wearing a smaller number.
+  ///
+  /// Not `late`: a lazy initializer would read the controller at the moment the
+  /// first commit ASKED, which is after the typing, and the field would believe
+  /// it had already written what the hand just typed.
+  String _committed = '';
+
   String? _refusal;
+
+  @override
+  void initState() {
+    super.initState();
+    _committed = _controller.text;
+    _focus.addListener(_focusChanged);
+  }
 
   @override
   void didUpdateWidget(CoordinateField old) {
     super.didUpdateWidget(old);
     final canonical = coordinateText(widget.value, widget.law);
-    // Only when the record moved underneath the field: a reformat must never
-    // fight what is being typed.
-    if (widget.value != old.value && canonical != _controller.text) {
+    // Only when the record moved underneath the field, AND never while the hand
+    // is in it: a reformat must never fight what is being typed. Assigning the
+    // canonical spelling back into a focused controller is exactly how one
+    // typed digit became the whole timestamp.
+    if (widget.value != old.value && canonical != _controller.text && !_focus.hasFocus) {
       _controller.text = canonical;
+      _committed = canonical;
       _refusal = null;
     }
   }
 
   @override
   void dispose() {
+    _focus.removeListener(_focusChanged);
+    _focus.dispose();
     _controller.dispose();
     super.dispose();
   }
 
-  void _read(String text) {
-    if (text.trim().isEmpty) {
-      setState(() => _refusal = null);
-      return widget.onChanged(null, null);
-    }
+  void _focusChanged() {
+    if (_focus.hasFocus) return;
+    _commit(_controller.text);
+    // AND THEN CATCH UP. While the hand held the field, the record may have
+    // moved underneath it -- a drag on the lens with the card open -- and
+    // `didUpdateWidget` deliberately refused to rewrite the text. Nothing was
+    // typed, so there is nothing to lose and a stale spelling to be rid of.
+    final canonical = coordinateText(widget.value, widget.law);
+    if (_controller.text != _committed || canonical == _controller.text) return;
+    setState(() {
+      _controller.text = canonical;
+      _committed = canonical;
+      _refusal = null;
+    });
+  }
+
+  /// Reads what is written WITHOUT WRITING IT: the refusal is live, because a
+  /// sentence about what you are typing is help, and a transaction about what
+  /// you are typing is a mess.
+  void _preview(String text) {
+    if (text.trim().isEmpty) return setState(() => _refusal = null);
     try {
-      final entry = parseCoordinateEntry(text, widget.law);
+      parseCoordinateEntry(text, widget.law);
       setState(() => _refusal = null);
-      widget.onChanged(entry.coordinate, entry.depth);
     } on Object catch (refusal) {
       // EVERY refusal reaches the author, in the law's own sentence. A thrown
       // value that is not a LawRefusal still carries text they can act on, and
@@ -117,26 +160,40 @@ class _CoordinateFieldState extends State<CoordinateField> {
     }
   }
 
+  /// THE ONE COMMIT. Enter, blur and a pick all arrive here; text that has
+  /// already been committed commits nothing, and text the law refuses commits
+  /// nothing and says why.
+  void _commit(String text) {
+    if (text == _committed) return;
+    if (text.trim().isEmpty) {
+      _committed = text;
+      setState(() => _refusal = null);
+      return widget.onChanged(null, null);
+    }
+    try {
+      final entry = parseCoordinateEntry(text, widget.law);
+      _committed = text;
+      setState(() => _refusal = null);
+      widget.onChanged(entry.coordinate, entry.depth);
+    } on Object catch (refusal) {
+      setState(() => _refusal = refusalText(refusal));
+    }
+  }
+
   /// Writes a picked coordinate back THROUGH THE SAME TEXT the parser reads, so
-  /// the picker and the field can never mean two different things.
+  /// the picker and the field can never mean two different things. A pick is a
+  /// deliberate act, so it commits where typing does not.
   void _pick(Coordinate next) {
     final text = coordinateText(next, widget.law);
     _controller.text = text;
-    _read(text);
+    _preview(text);
+    _commit(text);
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = ChronoTheme.of(context);
     final disabled = widget.disabledReason;
     if (disabled != null) return cardNote(context, disabled);
-    final border = OutlineInputBorder(
-      borderSide: BorderSide(
-        color: _refusal == null ? theme.hair : theme.primary,
-        width: ChromeScope.of(context).px('chrome.hair'),
-      ),
-      borderRadius: BorderRadius.circular(ChromeScope.of(context).px('chrome.corner')),
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -146,15 +203,17 @@ class _CoordinateFieldState extends State<CoordinateField> {
             width: cardPx(context, 'card.fieldWidth'),
             child: TextField(
               controller: _controller,
-              onChanged: _read,
+              focusNode: _focus,
+              // TYPING IS NOT WRITING. `onChanged` reads for the refusal only;
+              // Enter and leaving the field are the doors that commit.
+              onChanged: _preview,
+              onSubmitted: _commit,
               style: dataStyle(context),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: coordinateEntryPlaceholder(widget.law),
-                hintStyle: labelStyle(context, color: theme.hair),
-                contentPadding: EdgeInsets.all(cardPx(context, 'card.gap') / 2),
-                border: border,
-                enabledBorder: border,
+              decoration: fieldChrome(
+                context,
+                hint: coordinateEntryPlaceholder(widget.law),
+                refused: _refusal != null,
+                padding: cardPx(context, 'card.gap') / 2,
               ),
             ),
           ),

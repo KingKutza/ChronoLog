@@ -95,6 +95,7 @@ class Settings extends ChangeNotifier with FrameSafeNotifier {
   Settings({
     List<Map<String, String>> defaults = const [],
     List<Map<String, String>> texts = const [],
+    this.exclusive = const [],
   }) {
     for (final map in defaults) {
       shipped.addAll(map);
@@ -102,7 +103,18 @@ class Settings extends ChangeNotifier with FrameSafeNotifier {
     for (final map in texts) {
       shippedText.addAll(map);
     }
+    _findConflicts();
   }
+
+  /// The families in which no two keys may say the same thing, by prefix.
+  ///
+  /// TWO BINDINGS ON ONE CHORD IS A REFUSAL, NEVER A LAST-WINS (ISSUES 9.2, the
+  /// keybindings page): "a conflict is a refusal shown beside both rows". This
+  /// layer knows nothing about what a chord means -- it knows only that within
+  /// these families a value is a CLAIM, and two claims on one value is a thing
+  /// nobody can have meant. Which families are exclusive is the shell's
+  /// statement, so the rule is a shape rather than a special case for keys.
+  final List<String> exclusive;
 
   final Map<String, String> shipped = {};
   final Map<String, String> shippedText = {};
@@ -187,6 +199,27 @@ class Settings extends ChangeNotifier with FrameSafeNotifier {
     _invalidate();
   }
 
+  /// RESET A WHOLE PAGE (ISSUES 9.2, Don: the keybindings page "must allow
+  /// resetting"). Every override under any of [prefixes] goes; a shipped
+  /// default was never an override, so nothing here can delete authorship it
+  /// did not find. It is one act and it announces once, because a page of
+  /// twenty-three chords going back is one thing the person did.
+  ///
+  /// Returns the keys that actually had something authored on them, so the
+  /// surface can say what it undid rather than claiming work it did not do.
+  List<String> resetUnder(Iterable<String> prefixes) {
+    final gone = [
+      for (final key in {..._overrides.keys, ..._textOverrides.keys})
+        if (prefixes.any(key.startsWith)) key,
+    ]..sort();
+    for (final key in gone) {
+      _overrides.remove(key);
+      _textOverrides.remove(key);
+    }
+    if (gone.isNotEmpty) _invalidate();
+    return gone;
+  }
+
   /// Only what the user authored: the file records overrides, never the
   /// shipped defaults, so a default that changes reaches an existing install.
   Map<String, Object?> toJson() => {..._overrides, ..._textOverrides};
@@ -213,8 +246,60 @@ class Settings extends ChangeNotifier with FrameSafeNotifier {
     if (!refusals.contains(message)) refusals.add(message);
   }
 
+  /// Every conflict this layer has said, so a resolved one goes away.
+  ///
+  /// Recomputed WHOLE on every change rather than patched: a stale refusal
+  /// beside a binding somebody already moved is worse than none, and there is
+  /// no cheaper honest answer for "who else says this now".
+  final Set<String> _conflicts = {};
+
+  void _findConflicts() {
+    if (_conflicts.isNotEmpty) {
+      final stale = {..._conflicts};
+      _conflicts.clear();
+      refusals.removeWhere(stale.contains);
+    }
+    for (final family in exclusive) {
+      final claims = <String, List<String>>{};
+      for (final key in shippedText.keys) {
+        if (!key.startsWith(family)) continue;
+        final said = text(key).trim();
+        // AN EMPTY BINDING IS A BINDING TURNED OFF, and two things switched off
+        // are not two things fighting over one chord.
+        if (said.isEmpty) continue;
+        claims.putIfAbsent(said, () => []).add(key);
+      }
+      for (final entry in claims.entries) {
+        if (entry.value.length < 2) continue;
+        // ONE LINE PER KEY, each naming the others: a refusal is shown beside
+        // the row whose name it starts with, so a conflict said once would be
+        // said beside one of the two bindings and hidden beside the other.
+        for (final key in entry.value) {
+          final others = entry.value.where((other) => other != key).join(', ');
+          final line =
+              '$key: "${entry.key}" is also what $others says. Two bindings on one '
+              'chord: neither acts until one of them is written differently.';
+          _conflicts.add(line);
+          _note(line);
+        }
+      }
+    }
+  }
+
+  /// Is this key's binding contested? A contested binding ACTS FOR NOBODY --
+  /// the dispatcher binds neither, because picking one would be the last-wins
+  /// the refusal exists to refuse.
+  bool contested(String key) => _conflicts.any((line) => line.startsWith('$key:'));
+
+  /// A BINDING, AS THE SURFACES READ IT. Exactly [text], except that a
+  /// contested one reads as nothing at all -- which is the same thing an empty
+  /// binding says, and it is said in one place rather than at every dispatcher
+  /// that might otherwise pick a winner of its own.
+  String binding(String key) => contested(key) ? '' : text(key);
+
   void _invalidate() {
     _memo.clear();
+    _findConflicts();
     notifyListeners();
   }
 }

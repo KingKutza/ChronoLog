@@ -9,10 +9,12 @@
 // NOT-terms gate visibility and NEVER modify weight -- enforced inside
 // `composeWeight`, which is handed the mark rather than a filtered list.
 //
-// FALLOFF APPLIES TO UNRESOLVED OBJECTS ONLY. A done or closed object never
-// fades: its state grammar already says what it is, and fading it would say the
-// same thing twice and less clearly. A law with no clock mapping has no honest
-// distance from now, so it has no falloff either.
+// FALLOFF APPLIES TO UNRESOLVED OBJECTS ONLY. An object somebody has said a
+// status about never fades: its state grammar already says what it is, and
+// fading it would say the same thing twice and less clearly. Which status it is
+// does not enter into it -- Done is a frame like any other (ISSUES 9.2) -- so
+// the question asked is whether it is in a state frame at all. A law with no
+// clock mapping has no honest distance from now, so it has no falloff either.
 //
 // The derivation comes back WHOLE -- every ring, in order -- because the card's
 // explainer has to show how a weight was reached, not just what it came to.
@@ -43,15 +45,18 @@ typedef DisplayWeight = ({
 });
 
 /// State, from the ONE derivation (`stateAffiliations` in object_kinds.dart).
-/// Nothing else may read state, and nothing here enumerates the vocabulary --
-/// Done is a frame like any other, and "closed" is simply some other state
-/// frame the author made.
+///
+/// DONE IS A FRAME LIKE ANY OTHER (ISSUES 9.2, Don's question on Done). This
+/// reader used to say `done` when the object's state frame was the hard-coded
+/// one and `closed` when it was any other -- an enum of states whose second
+/// member meant nothing but "not the frame we typed out". No id is consulted
+/// now: membership in a state frame IS the statement, and which status it is
+/// and what it costs the weight are the frame's own authored handling.
 String todoState(ProjectionEngine engine, Fact fact) {
   if (fact.virtualId.isNotEmpty) return 'open';
   if (objectKindForEvent(fact.event) != 'todo') return 'open';
   final states = engine.facts.stateAffiliations(fact.event.id);
-  if (states.any((entry) => entry.frame == doneStateFrameId)) return 'done';
-  if (states.isNotEmpty) return 'closed';
+  if (resolvedByState([for (final entry in states) entry.frame])) return resolvedStateWord;
   // A title-only capture: nothing said about it beyond that it exists.
   final described = '${obj(fact.event.payload)?['description'] ?? ''}'.trim();
   if (described.isNotEmpty) return 'open';
@@ -73,7 +78,7 @@ String todoState(ProjectionEngine engine, Fact fact) {
 /// generic pair is the fallback for a surface that has not declared its own.
 DisplayWeight factDisplayWeight(LensScene scene, Fact fact, {String keyPrefix = 'weight'}) {
   final state = todoState(scene.engine, fact);
-  final resolved = state == 'done' || state == 'closed';
+  final resolved = state == resolvedStateWord;
   final fades = !resolved && objectKindForEvent(fact.event) == 'todo' && scene.law.mapsToClock();
   final half = halfDistanceFor(scene, fact);
   final derivation = scene.engine.weightOf(

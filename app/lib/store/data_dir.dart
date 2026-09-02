@@ -8,6 +8,16 @@
 // as a data home, so the resolver cannot land in one by accident because it
 // cannot name one at all.
 //
+// ONE EXCEPTION, AND IT IS NOT A PROFILE DIRECTORY (ISSUES 9.2, hazard found
+// live): Don's whole document -- snapshot, journal, layout, view and settings --
+// sat in `app/build/windows/x64/runner/Debug/`, beside the Debug executable
+// exactly as the portable ruling says, and that folder is what `flutter clean`
+// deletes outright and `flutter build` rewrites. A BUILD TREE IS NOT A HOME. So
+// a data root resolved from an executable under a `build` directory resolves to
+// the parent of that build tree instead of beside the executable. It is still
+// the app's own directory in the only sense that matters -- the checkout the
+// build came out of -- and it survives the commands that rebuild the exe.
+//
 // Pure resolution. Nothing here touches the disk; the store creates the
 // directory when it first writes.
 
@@ -31,7 +41,29 @@ String resolveDataRoot({
   final named =
       _named(explicit) ?? _named((environment ?? Platform.environment)[dataDirectoryVariable]);
   if (named != null) return Directory(named).absolute.path;
-  return parentDirectory(executablePath ?? Platform.resolvedExecutable);
+  return outsideBuildTree(parentDirectory(executablePath ?? Platform.resolvedExecutable));
+}
+
+/// The name a build tree wears. One word, and it is a SETTING of the resolver
+/// rather than a literal buried in a branch, so a toolchain that calls its
+/// output something else is one line here.
+const String buildTreeName = 'build';
+
+/// [directory], unless it lies inside a build tree -- in which case the parent
+/// of that tree, which is the checkout the executable was built out of.
+///
+/// The build segment NEAREST the executable is the one that wins: a person whose
+/// home directory is called `build` would otherwise have their data hoisted to
+/// the drive root. Both separators are honoured, because a Windows path may
+/// carry either and the segment must be recognised in both spellings.
+String outsideBuildTree(String directory) {
+  final segments = directory.split(RegExp(r'[/\\]'));
+  for (var index = segments.length - 1; index > 0; index -= 1) {
+    if (segments[index].toLowerCase() != buildTreeName) continue;
+    final above = segments.take(index).join(Platform.pathSeparator);
+    return above.isEmpty || above.endsWith(':') ? '$above${Platform.pathSeparator}' : above;
+  }
+  return directory;
 }
 
 String? _named(String? value) {

@@ -10,8 +10,15 @@
 // other ways."
 //
 // The continuity grammar is the whole design: start, middle and end are
-// different shapes so the eye reads one band, and only the START carries the
-// title -- a name repeated on every day of a week-long span is noise.
+// different shapes so the eye reads one band.
+//
+// AND EVERY VISIBLE SEGMENT NAMES ITSELF (ISSUES 9.2). The title used to be the
+// head's alone, on the grounds that a name repeated down a week is noise. Don:
+// "if I can't see the start I have no way to know what it is" -- a band scrolled
+// past its own head was an anonymous wash, and a name a person cannot see is not
+// noise saved, it is the object gone. The lens titles each segment it draws; the
+// head is still where the band's own START INSTANT reads, because a continuation
+// segment has no start of its own to report.
 
 import 'package:flutter/widgets.dart';
 
@@ -80,5 +87,7 @@ bool zoneFill(ProjectionEngine engine, Fact fact, Tunable? read) =>
   );
 }
 
-/// Only the first day of a band is titled.
+/// Is this segment the band's HEAD -- the day its own start instant falls on?
+/// The clock reading belongs to that segment and to no other; the NAME belongs
+/// to every segment (ISSUES 9.2).
 bool zoneTitled(String segment) => segment == zoneStart || segment == zoneWhole;

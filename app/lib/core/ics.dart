@@ -36,6 +36,7 @@ import 'eras.dart' show asList, asMap;
 import 'exact.dart';
 import 'ics_text.dart';
 import 'ics_values.dart';
+import 'object_kinds.dart' show doneStateFrameId;
 import 'projection.dart' show ProjectionEngine;
 import 'records.dart';
 import 'recurrence_end.dart';
@@ -44,6 +45,26 @@ import 'staples.dart' show Segment, Staples, isPlacement, startPoint;
 
 export 'ics_text.dart';
 export 'ics_values.dart';
+
+// --- The one legitimate named frame -----------------------------------------
+
+/// THE BOUNDARY'S NAMED DEFAULT IS A SETTING, NOT AN ENGINE CONSTANT (ISSUES
+/// 9.2, Don's question on Done).
+///
+/// "Why is Done treated special to any other staple?" Nowhere inside the model:
+/// a state frame is a frame, and no derivation asks for one by id any more. But
+/// the boundary is a different kind of place. A foreign VTODO says
+/// `STATUS:COMPLETED` and that has to land on SOME frame on the way in and be
+/// restated on the way out, so the mapping is unavoidable -- and being
+/// unavoidable is exactly why it is AUTHORED rather than compiled. This names
+/// the frame; the shipped value is the Done that the toggle mints lazily on
+/// first need, and anyone whose "finished" is called something else writes one
+/// line in `chronolog.settings`.
+///
+/// DECLARED AHEAD OF ITS READER, deliberately: the VTODO mapping itself is
+/// ruled ON HOLD (see the header), so a VTODO still rides through verbatim.
+/// When the mapping lands it reads this key, and it has no other door.
+const Map<String, String> icsTextDefaults = {'ics.completedFrame': doneStateFrameId};
 
 // --- The residual store -----------------------------------------------------
 
@@ -105,9 +126,49 @@ IcsComponent? retainedComponent(Document document, Event event) {
 /// Nothing is merged automatically: MEANING IS AUTHORED.
 typedef IcsSuggestion = ({String kind, String uid, List<String> events});
 
+/// One event a warning class covers, named the way a person reads a calendar:
+/// its TITLE and its DAY. Never the UID -- "each naming the event by its opaque
+/// UID" is half of what made the wall unreadable.
+typedef IcsWarned = ({String title, String when});
+
+/// ONE WARNING PER CLASS, WITH ITS COUNT (Don, ISSUES 9.2: "I just imported US
+/// Holidays and Work, and got an impressive wall of errors").
+///
+/// The three mismatch sites fired PER EVENT, and an Outlook export mixes those
+/// forms routinely, so a work calendar yielded one line per affected event: a
+/// wall by construction, saying the same three things hundreds of times about
+/// events nobody could identify. A class is the thing that was actually wrong;
+/// the events are which ones it happened to. Overscale rule: an import of 500
+/// calendars reads in a screen.
+typedef IcsWarningClass = ({String says, List<IcsWarned> events});
+
+/// The classes an import gathered, in the order they were first met.
+class IcsWarnings {
+  final Map<String, List<IcsWarned>> _classes = {};
+
+  /// [says] is the class -- what was wrong and what was done about it, with no
+  /// event named in it, because the same sentence covers every event it happened
+  /// to.
+  void say(String says, {required String title, required String when}) =>
+      (_classes[says] ??= []).add((title: title, when: when));
+
+  List<IcsWarningClass> get classes => [
+    for (final entry in _classes.entries) (says: entry.key, events: entry.value),
+  ];
+
+  /// The classes as lines: the count of events each covers, then the class.
+  /// A surface that can expand reads [classes] instead and names the events.
+  List<String> get lines => [
+    for (final entry in _classes.entries)
+      '${entry.value.length} ${entry.value.length == 1 ? 'event' : 'events'}: ${entry.key}',
+  ];
+}
+
 /// What one import came to. [warnings] are SURFACED, NEVER THROWN: a calendar
 /// whose EXDATE uses a different time form than its DTSTART still imports, and
-/// the author is told the exclusion may not match.
+/// the author is told the exclusion may not match. They are ONE LINE PER CLASS
+/// with its count; [warningClasses] carries the same thing with the events each
+/// class covers, for a surface that can expand one.
 class IcsImport {
   IcsImport({
     required this.document,
@@ -117,10 +178,12 @@ class IcsImport {
     required this.relations,
     required this.suggestions,
     required this.warnings,
+    required this.warningClasses,
   });
 
   final Document document;
   final List<String> frames, events, patterns, relations, warnings;
+  final List<IcsWarningClass> warningClasses;
   final List<IcsSuggestion> suggestions;
 }
 
@@ -196,18 +259,29 @@ Rational _occurrenceKey(IcsDate date, IcsDate? start) {
 
 /// An entry's duration in WALL SECONDS: DTSTART to DTEND when both are written,
 /// otherwise its own DURATION value. Both are the wire format's own seconds.
-Rational _durationSeconds(_Entry entry, List<String> warnings) {
+Rational _durationSeconds(_Entry entry, IcsWarnings warnings) {
   final start = entry.start, end = entry.end;
   if (start == null || end == null) {
     return parseIcsDuration(propertyText(entry.component, 'DURATION')) ?? Rational.zero;
   }
   if (!start.dateOnly && !end.dateOnly && !_sameTyping(start, end)) {
-    warnings.add(
-      'Event ${entry.uid}: DTSTART and DTEND use different time zones; '
-      'duration is their wall-clock difference',
+    warnings.say(
+      'DTSTART and DTEND use different time zones; duration is their'
+      ' wall-clock difference',
+      title: entry.title,
+      when: _dayText(start),
     );
   }
   return (end.days - start.days) * icsSecondsPerDay;
+}
+
+/// The day an ICS instant falls on, as a person reads a date. The wire format's
+/// own standard civil Gregorian, which is what an imported instant IS.
+String _dayText(IcsDate? date) {
+  if (date == null) return 'no date';
+  final civil = civilFromDays(date.days.floor());
+  return '${civil.year}-${civil.month.toString().padLeft(2, '0')}'
+      '-${civil.day.toString().padLeft(2, '0')}';
 }
 
 /// Reads one ICS file into a document. Every calendar in the file becomes its own
@@ -237,7 +311,8 @@ class _Importer {
   Document document;
   final String label;
   final IcsBoundary boundary;
-  final List<String> frames = [], events = [], patterns = [], relations = [], warnings = [];
+  final List<String> frames = [], events = [], patterns = [], relations = [];
+  final IcsWarnings warnings = IcsWarnings();
   final List<IcsSuggestion> suggestions = [];
 
   /// Every UID already in the document, plus every UID an earlier calendar in
@@ -257,7 +332,8 @@ class _Importer {
     patterns: patterns,
     relations: relations,
     suggestions: suggestions,
-    warnings: warnings,
+    warnings: warnings.lines,
+    warningClasses: warnings.classes,
   );
 
   void calendar(IcsComponent calendar) {
@@ -408,9 +484,11 @@ class _Importer {
   void _pattern(_Entry entry) {
     for (final date in entry.exdates) {
       if (_typingMismatch(date, entry.start)) {
-        warnings.add(
-          'EXDATE for ${entry.uid} uses a different time form than DTSTART; '
-          'the exclusion may not match any occurrence',
+        warnings.say(
+          'EXDATE uses a different time form than DTSTART; the exclusion may'
+          ' not match any occurrence',
+          title: entry.title,
+          when: _dayText(entry.start),
         );
       }
     }
@@ -474,9 +552,11 @@ class _Importer {
       if (bases.isEmpty) break;
       final base = bases.first;
       if (_typingMismatch(exception.recurrenceId, base.start)) {
-        warnings.add(
-          'RECURRENCE-ID for $uid uses a different time form than DTSTART; '
-          'the override may not match any occurrence',
+        warnings.say(
+          'RECURRENCE-ID uses a different time form than DTSTART; the override'
+          ' may not match any occurrence',
+          title: exception.title,
+          when: _dayText(exception.recurrenceId),
         );
       }
       final day = _occurrenceKey(exception.recurrenceId!, base.start).toJson();

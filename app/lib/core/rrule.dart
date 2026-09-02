@@ -33,7 +33,12 @@ Never _refuse(String message) => throw RecurrenceRefusal(message);
 
 // Weekday zero is Sunday, as RFC 5545 numbers BYDAY and as `_weekday` counts.
 const List<String> _weekdayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-const int _monday = 1;
+
+/// Which weekday a week opens on when WKST is not written. RFC 5545 says
+/// Monday, and that default is the WIRE FORMAT'S -- like the 24, the 1440 and
+/// the proleptic Gregorian year above it, and not this document's coordinate
+/// law, which has its own cycles and answers its own questions.
+const int _defaultWeekStart = 1;
 
 final BigInt _b4 = BigInt.from(4),
     _b7 = BigInt.from(7),
@@ -55,8 +60,25 @@ List<int> _integers(String text) => [for (final part in text.split(',')) int.par
 
 int _weekday(BigInt day) => floorMod(day + _b4, _b7).toInt();
 
-// The Monday that opens a day's week: the WKST this build counts weeks from.
-BigInt _weekOf(BigInt day) => day - BigInt.from((_weekday(day) - _monday) % 7);
+// The day that opens a day's week, counted from [weekStart].
+//
+// WKST IS NOT COSMETIC (ISSUES 9.2): it decides which week an interval counts
+// from, so `FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU` puts the pair in one week under
+// WKST=SU and straddles two under WKST=MO, which skips the second week's Sunday.
+// That is the whole of what this build owes it, and it is one argument.
+BigInt _weekOf(BigInt day, int weekStart) =>
+    day - BigInt.from((_weekday(day) - weekStart) % 7);
+
+// WKST as a weekday number. A value naming no weekday is refused with the part
+// named rather than quietly read as Monday: a rule that means something other
+// than what is written is unauditable.
+int _weekStart(RRule rule) {
+  final written = _part(rule, 'WKST');
+  if (written == null) return _defaultWeekStart;
+  final found = _weekdayCodes.indexOf(written.trim().toUpperCase());
+  if (found < 0) _refuse('RRULE WKST names no weekday (WKST=$written).');
+  return found;
+}
 
 BigInt _monthIndex(CivilDay civil) => civil.year * _b12 + BigInt.from(civil.month - 1);
 
@@ -159,11 +181,18 @@ String? unsupportedCalendarScale(RRule rrule, ScaleRegistry isRegisteredScale) {
 
 // RFC 5545 defines fourteen rule parts and RFC 7529 adds two. This build
 // implements FREQ, INTERVAL, COUNT, UNTIL (through `ruleOccurrenceDays`'s own
-// `until`), BYDAY, BYMONTHDAY, BYMONTH and RSCALE. Every part below is one the
-// standards define as deciding WHICH occurrences a rule names, so writing one
-// is refused with the part named rather than left silently inert.
+// `until`), BYDAY, BYMONTHDAY, BYMONTH, BYSETPOS, WKST and RSCALE. Every part
+// below is one the standards define as deciding WHICH occurrences a rule names,
+// so writing one is refused with the part named rather than left silently inert.
+//
+// BYSETPOS AND WKST LEFT THIS LIST TOGETHER (ISSUES 9.2): Don's Work calendar
+// carries sixteen rules spelled `FREQ=MONTHLY;BYDAY=MO;BYSETPOS=2` -- Outlook's
+// ordinary way of writing "the second Monday of the month" -- and every one of
+// them refused to project. WKST rides with it because it changes what "every two
+// weeks" means, and a build that honours one and refuses the other would answer
+// half of an ordinary export.
 final Set<String> _unimplementedParts =
-    'BYSECOND BYMINUTE BYHOUR BYYEARDAY BYWEEKNO BYSETPOS WKST SKIP'.split(' ').toSet();
+    'BYSECOND BYMINUTE BYHOUR BYYEARDAY BYWEEKNO SKIP'.split(' ').toSet();
 
 // RFC 5545 section 3.3.10's filter/expand model, stated once as the parts each
 // frequency EXPANDS: a BY* part finer than the frequency multiplies occurrences
@@ -284,62 +313,110 @@ List<Rational> ruleOccurrenceDays(
 
   Rational at(BigInt year, int month, int day) => Rational(daysFromCivil(year, month, day)) + time;
 
-  // Every day one month names, in order -- the whole of MONTHLY's and YEARLY's
-  // shared inner cycle.
-  bool sweep(BigInt year, int month) {
-    for (final day in _candidates(rule, year, month, baseCivil.day)) {
-      if (!emit(at(year, month, day))) return false;
+  // BYSETPOS: RFC 5545's LAST filter, and the only part that reads an interval
+  // as a SET rather than one instant at a time. The nth of the candidates the
+  // rule already computed, or the -nth counted back from the end -- so it needs
+  // the whole cycle in hand, which is why every frequency below builds its
+  // interval's candidates and hands them over instead of emitting as it goes.
+  // Nothing about it is calendar knowledge; it is an index.
+  final positions = _part(rule, 'BYSETPOS') == null ? null : _integers(rule['BYSETPOS']!);
+  if (positions != null && positions.contains(0)) {
+    _refuse(
+      'RRULE BYSETPOS counts from 1 or back from -1, never 0'
+      ' (BYSETPOS=${rule['BYSETPOS']}).',
+    );
+  }
+
+  // ONE INTERVAL'S SET, then the parts that read it whole: the limiting parts
+  // drop what does not match, and BYSETPOS indexes what is left. The order is
+  // the RFC's and it is load-bearing -- a position counted before the limits
+  // would index candidates the rule does not name.
+  bool cycle(List<Rational> candidates) {
+    final set = limited
+        ? [
+            for (final day in candidates)
+              if (allowed(civilFromDays(day.floor()))) day,
+          ]
+        : candidates;
+    if (positions == null) {
+      for (final day in set) {
+        if (!emit(day)) return false;
+      }
+      return true;
+    }
+    final chosen = <Rational>{};
+    for (final position in positions) {
+      final index = position > 0 ? position - 1 : set.length + position;
+      if (index >= 0 && index < set.length) chosen.add(set[index]);
+    }
+    for (final day in chosen.toList()..sort()) {
+      if (!emit(day)) return false;
     }
     return true;
   }
 
+  // Every day one month names, in order -- the whole of MONTHLY's and YEARLY's
+  // shared inner cycle.
+  List<Rational> sweep(BigInt year, int month) => [
+    for (final day in _candidates(rule, year, month, baseCivil.day)) at(year, month, day),
+  ];
+
+  // EVERY CYCLE IS BOUNDED BY ITS OWN OPENING, never by what it emits. A cycle
+  // whose BYSETPOS selects nothing emits nothing, so a generator that stopped
+  // only when an emission passed the window would run forever on
+  // `FREQ=WEEKLY;BYDAY=MO;BYSETPOS=3`. Each loop below tests the instant the
+  // cycle OPENS at, which no filter can take away.
   if (frequency == 'DAILY') {
     var index = _skip(count, ((lower - base) / Rational(interval)).ceil());
     for (; ; index += BigInt.one) {
-      if (!emit(base + Rational(index * interval))) break;
+      final day = base + Rational(index * interval);
+      if (day > upper || (until != null && day > until)) break;
+      if (!cycle([day])) break;
     }
   } else if (frequency == 'WEEKLY') {
-    final baseWeek = _weekOf(baseWhole);
+    final weekStart = _weekStart(rule);
+    final baseWeek = _weekOf(baseWhole, weekStart);
     final byDay = _parseByDay(_part(rule, 'BYDAY'));
-    final selected = byDay.map((item) => item.weekday).toSet();
-    if (selected.isEmpty) selected.add(_weekday(baseWhole));
-    final lowerWeek = _weekOf(lowerWhole);
-    var cycle = _skip(count, floorDiv(lowerWeek - baseWeek, _b7 * interval));
-    weekly:
-    for (; ; cycle += BigInt.one) {
-      final weekStart = baseWeek + cycle * interval * _b7;
-      for (var offset = 0; offset < 7; offset++) {
-        final day = weekStart + BigInt.from(offset);
-        if (!selected.contains(_weekday(day))) continue;
-        if (!emit(Rational(day) + time)) break weekly;
-      }
+    final chosen = byDay.map((item) => item.weekday).toSet();
+    if (chosen.isEmpty) chosen.add(_weekday(baseWhole));
+    final lowerWeek = _weekOf(lowerWhole, weekStart);
+    var index = _skip(count, floorDiv(lowerWeek - baseWeek, _b7 * interval));
+    for (; ; index += BigInt.one) {
+      final opens = baseWeek + index * interval * _b7;
+      if (Rational(opens) + time > upper) break;
+      final week = [
+        for (var offset = 0; offset < 7; offset++)
+          if (chosen.contains(_weekday(opens + BigInt.from(offset))))
+            Rational(opens + BigInt.from(offset)) + time,
+      ];
+      if (!cycle(week)) break;
     }
   } else if (frequency == 'MONTHLY') {
     final baseMonth = _monthIndex(baseCivil);
     final lowerMonth = _monthIndex(civilFromDays(lowerWhole));
-    var cycle = _skip(count, floorDiv(lowerMonth - baseMonth, interval));
-    for (; ; cycle += BigInt.one) {
-      final index = baseMonth + cycle * interval;
-      final year = floorDiv(index, _b12);
-      final month = floorMod(index, _b12).toInt() + 1;
+    var index = _skip(count, floorDiv(lowerMonth - baseMonth, interval));
+    for (; ; index += BigInt.one) {
+      final ordinal = baseMonth + index * interval;
+      final year = floorDiv(ordinal, _b12);
+      final month = floorMod(ordinal, _b12).toInt() + 1;
       if (at(year, month, 1) > upper) break;
-      if (!sweep(year, month)) break;
+      if (!cycle(sweep(year, month))) break;
     }
   } else if (frequency == 'YEARLY') {
     final lowerYear = civilFromDays(lowerWhole).year;
-    var cycle = _skip(count, floorDiv(lowerYear - baseCivil.year, interval));
+    var index = _skip(count, floorDiv(lowerYear - baseCivil.year, interval));
     // No BYMONTH is the base's own month, which is already inside the range.
     final byMonth = _part(rule, 'BYMONTH') ?? '${baseCivil.month}';
     final months = _integers(byMonth).toSet().toList()
       ..removeWhere((month) => month < 1 || month > 12)
       ..sort();
-    yearly:
-    for (; ; cycle += BigInt.one) {
-      final year = baseCivil.year + cycle * interval;
+    for (; ; index += BigInt.one) {
+      final year = baseCivil.year + index * interval;
       if (at(year, 1, 1) > upper) break;
-      for (final month in months) {
-        if (!sweep(year, month)) break yearly;
-      }
+      // THE YEAR IS ONE SET. BYSETPOS under FREQ=YEARLY indexes the whole year's
+      // candidates rather than each month's, so the months are concatenated in
+      // order before any position is read out of them.
+      if (!cycle([for (final month in months) ...sweep(year, month)])) break;
     }
   } else {
     _refuse('Unsupported FREQ in RRULE: ${written ?? '(missing)'}');

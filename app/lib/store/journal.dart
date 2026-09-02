@@ -191,6 +191,26 @@ class JournalStore {
       await files.read(snapshotFile) != null ||
       (await files.read(journalFile) ?? const <int>[]).isNotEmpty;
 
+  /// EVERY BYTE THIS DOCUMENT IS WRITTEN IN, GONE.
+  ///
+  /// Don, ISSUES 9.2: "delete all data, start clean as of a fresh install" --
+  /// the option behind the type-to-confirm door, "because full deletion is
+  /// mostly a testing act but has legitimate cases and no undo." So this is
+  /// deliberately the one act in the program nothing undoes, and it is exactly
+  /// what a person had to do by hand: the snapshot, the journal, the sequence
+  /// sidecar, and any temporary a crash left behind. Nothing else in the
+  /// directory is touched -- a person's own files are not this call's to judge.
+  ///
+  /// The numbering restarts, because the history it counted no longer exists.
+  Future<void> erase() async {
+    await files.delete('$snapshotFile.tmp');
+    await files.delete(snapshotFile);
+    await files.delete(journalFile);
+    await files.delete(_stateFile);
+    _seq = 0;
+    _entryCount = 0;
+  }
+
   /// Snapshot plus replay.
   ///
   /// When neither file exists the document is ESTABLISHED -- [establish] mints

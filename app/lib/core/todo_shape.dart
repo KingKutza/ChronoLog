@@ -34,8 +34,10 @@ String? entryState(
   required List<String> stateFrames,
   required List<String> groups,
 }) {
-  if (stateFrames.contains(doneStateFrameId)) return 'done';
-  if (stateFrames.isNotEmpty) return 'closed';
+  // DONE IS A FRAME LIKE ANY OTHER (ISSUES 9.2). The second of the two readers
+  // that used to return `done` for one hard-coded frame and `closed` for every
+  // other; both go through the one predicate now and no id is read.
+  if (resolvedByState(stateFrames)) return resolvedStateWord;
   final description = str(facts.document.events[objectId]?.payload?['description']);
   if ((description ?? '').trim().isNotEmpty || groups.isNotEmpty) return null;
   return facts.staples(objectId).isEmpty ? 'sparse' : null;

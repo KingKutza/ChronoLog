@@ -124,11 +124,19 @@ const Map<String, String> intimateTunableDefaults = {
   // a column IS a day and so a sideways pan steps whole columns -- and that is
   // exactly what Don felt as a ratchet with no preview: honesty and smoothness
   // are not a tradeoff, and a surface that cannot show a partial step owes a
-  // bleed that makes it showable. Across, the bleed is counted in COLUMNS, since
-  // a column is the step; a whole one past each edge is what lets a slide of up
-  // to one full day be previewed before it commits.
-  'intimate.bleed': '160',
-  'intimate.bleedColumns': '1',
+  // bleed that makes it showable.
+  //
+  // A VIEWPORT, NOT A STRIP (ISSUES 9.2). "A new column does not render till
+  // there is room for a whole column, so we still drag white onto the screen."
+  // One column across and 160 px down is a commit every column of travel and a
+  // hitch every 160 px -- the bleed was measured in marks when the thing it has
+  // to outlast is a GESTURE, and an ordinary drag crosses a window. So the
+  // depth is stated as a MULTIPLE OF THE VIEWPORT and the pixels fall out of
+  // the box the lens was handed: one viewport each way means a drag has a whole
+  // window of painted surface to slide in before anything commits. Two is a
+  // wider buffer at four times the raster; nothing here caps it, because the
+  // number is the author's.
+  'intimate.bleedViewports': '1',
   'intimate.labelSize': '10',
   'intimate.titleSize': '11',
   'intimate.pad': '4',
@@ -206,10 +214,19 @@ class IntimatePainter extends LensPainter implements ManyPositions {
 
   double get _railWidth => _plan.rail;
 
-  /// How many whole columns are painted past each edge.
-  int get _bleedColumns {
-    final asked = scene.whole('intimate.bleedColumns');
+  /// How many viewports of bleed the author asked for, never negative -- a
+  /// surface cannot paint less than its own box.
+  double get _bleedViewports {
+    final asked = scene.px('intimate.bleedViewports');
     return asked < 0 ? 0 : asked;
+  }
+
+  /// How many whole columns are painted past each edge: enough to cover the
+  /// asked-for viewports of width, rounded UP, because across this surface a
+  /// column is the step and half a painted column is a half-painted day.
+  int get _bleedColumns {
+    if (_columnWidth <= 0) return 0;
+    return (scene.size.width * _bleedViewports / _columnWidth).ceil();
   }
 
   /// The first and last column index this surface PAINTS, the bleed included.
@@ -223,11 +240,13 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       ? Rational.zero
       : Rational.parse(pixels.toDouble().toStringAsFixed(6)) / dayPixels * law.dayDays;
 
-  /// How far past its own box this surface paints, per axis. Down the rail, a
-  /// depth in pixels; across it, whole COLUMNS -- because across, a column is
-  /// the step, and a partial step can only be shown where a whole one is drawn.
+  /// How far past its own box this surface paints, per axis, both of them
+  /// measured in VIEWPORTS of the box it was handed (ISSUES 9.2). Across, the
+  /// depth lands on a whole column, because across this surface a column is the
+  /// step; down the rail there is nothing to land on and the depth is exact.
   @override
-  Offset get bleed => Offset(_columnWidth * _bleedColumns, scene.px('intimate.bleed'));
+  Offset get bleed =>
+      Offset(_columnWidth * _bleedColumns, scene.size.height * _bleedViewports);
 
   Rational get _bleedDays => _daysOfPixels(bleed.dy);
 
@@ -293,7 +312,17 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       scene,
       start: _columnTop(_firstPainted) - law.dayDays - _bleedDays,
       end: _columnTop(_lastPainted) + _visible + law.dayDays + _bleedDays,
-      budget: capacityOf(size.width, size.height, scene.tunable).queryBudget,
+      // A BLEED THAT GROWS IS A QUERY THAT GROWS (ISSUES 9.2). The budget is the
+      // PAINTED area's, never the viewport's: the window asked for spans every
+      // painted column and every painted pixel above and below, and a limit
+      // sized to the viewport alone would be spent on the past-side bleed before
+      // the visible day was reached -- the surface would say "N+" for facts it
+      // has the room to draw. Overscale: what is drawn is what is asked for.
+      budget: capacityOf(
+        size.width + bleed.dx * 2,
+        size.height + bleed.dy * 2,
+        scene.tunable,
+      ).queryBudget,
       law: law,
     );
     refusals.addAll(window.refusals);
@@ -684,7 +713,20 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       gap: scene.px('lane.gap'),
       minimum: scene.px('lane.minWidth'),
     );
-    for (final entry in admitted.drawn) {
+    // WEIGHT ADMITS, THE CLOCK ORDERS (ISSUES 9.1). The grid cells took this
+    // ruling and this surface did not: blocks were painted -- and so hit-listed
+    // -- in the same weight order the budget ranked them in, which held its
+    // shape only while the window was narrow enough that a lane rarely held
+    // two. Widening the bleed to a viewport (ISSUES 9.2) put many more segments
+    // in every column and the accident showed. So the same one line: what fits
+    // is weight's to say, where it stands is the clock's.
+    final drawn = [...admitted.drawn]..sort((a, b) {
+      final byTime = a.block.start.compareTo(b.block.start);
+      return byTime != 0
+          ? byTime
+          : a.block.segment.fact.identity.compareTo(b.block.segment.fact.identity);
+    });
+    for (final entry in drawn) {
       _paintBlock(canvas, column, entry.block, bands[packing.lanes[entry.index]], left);
     }
     if (admitted.hidden > 0) {
@@ -750,30 +792,13 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     final pad = scene.px('intimate.pad'), pip = scene.px('intimate.pip');
     final inset = box.left + rule + pad;
     spec.paint(canvas, Rect.fromLTWH(inset, box.top + pad, pip, pip), fact);
-    if (!zoneTitled(zoneSegment(block.segment))) return;
-    final title = '${fact.event.payload?['title'] ?? ''}';
-    final titleSize = scene.px('intimate.titleSize'), timeSize = scene.px('intimate.timeSize');
-    _text(
-      canvas,
-      title,
-      Offset(inset + pad + pip, box.top + pad),
-      scene.theme.ink.withValues(alpha: spec.opacity),
-      'intimate.titleSize',
-      width: box.right - pad - (inset + pad + pip),
-    );
-    // WHEN, in the data face, once the block is tall enough to say it without
-    // crowding the name. A clock reading is a coordinate, not prose.
-    if (box.height >= titleSize + timeSize + pad * 3) {
-      _text(
-        canvas,
-        law.clockLabel(law.minuteOfDay(block.start)),
-        Offset(inset, box.top + pad + titleSize + pad / 2),
-        scene.theme.muted.withValues(alpha: spec.opacity),
-        'intimate.timeSize',
-        width: box.width - rule - pad * 2,
-        data: true,
-      );
-    }
+    // EVERY SEGMENT OF A FACT IS THE FACT (ISSUES 9.2). Don: "double-click on
+    // the body of a spanning zone event does nothing; I have to click the head
+    // on the first day." A guard written to skip the TITLE on a continuation day
+    // sat above the hit registration, so every painted day of a span but the
+    // first was pixels a pointer could not reach. What a segment draws and what
+    // it answers to are two questions: the hit goes in the moment the body is
+    // drawn, and nothing about presentation may stand in front of it.
     final body = Path()..addRect(box);
     if (scene.isSelected(fact)) paintSelection(canvas, Path()..addRect(box));
     // ONE REGION, EVERY VERB (ISSUES 9.1). The body is what a click, a menu, the
@@ -782,21 +807,69 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     // stated way to create THROUGH an occupied span (ROADMAP #7) -- the rare
     // verb wears the modifier, and the common one is just there.
     hits.add((bounds: box, shape: body, grab: null, fact: fact, identity: fact.identity));
+    // THE NAME IS STICKY (ISSUES 9.2). Don: "if I can't see the start I have no
+    // way to know what it is." A band whose head is off-screen used to be an
+    // anonymous wash, because only the start day was titled; every visible
+    // segment says whose it is instead.
+    final title = '${fact.event.payload?['title'] ?? ''}';
+    final titleSize = scene.px('intimate.titleSize'), timeSize = scene.px('intimate.timeSize');
+    // THE REAL BOX, NOT ONE LINE (ISSUES 9.2). Don: "where an event has a lot of
+    // vertical space it should wrap text rather than cut it off." The name gets
+    // everything from where it starts to the block's own bottom, less the one
+    // line the clock reading will take when there is room for it -- so a tall
+    // block reads its whole name and a short one still ends in an ellipsis.
+    final clockShown = !block.segment.continuation && box.height >= titleSize + timeSize + pad * 3;
+    final titleTop = box.top + pad;
+    final painted = _text(
+      canvas,
+      title,
+      Offset(inset + pad + pip, titleTop),
+      scene.theme.ink.withValues(alpha: spec.opacity),
+      'intimate.titleSize',
+      width: box.right - pad - (inset + pad + pip),
+      height: box.bottom - pad - titleTop - (clockShown ? timeSize + pad : 0),
+    );
+    // WHEN, in the data face, once the block is tall enough to say it without
+    // crowding the name -- and BELOW however many lines the name actually took.
+    // A clock reading is a coordinate, not prose; a CONTINUATION segment has no
+    // start of its own to read, so it says nothing rather than reporting the
+    // midnight the segmentation put there.
+    if (clockShown) {
+      _text(
+        canvas,
+        law.clockLabel(law.minuteOfDay(block.start)),
+        Offset(inset, titleTop + painted + pad / 2),
+        scene.theme.muted.withValues(alpha: spec.opacity),
+        'intimate.timeSize',
+        width: box.width - rule - pad * 2,
+        data: true,
+      );
+    }
   }
 
-  void _text(
+  /// One label, in the box the caller names. [height] is the real room the
+  /// string has; a caller with nothing to say about it gets one line's worth,
+  /// which is what a rail label or a column name is. Answers with the height it
+  /// painted, so a second line can sit under however many lines the first took.
+  double _text(
     Canvas canvas,
     String text,
     Offset at,
     Color color,
     String key, {
     double? width,
+    double? height,
     bool data = false,
   }) => paintLabel(
     canvas,
     scene.theme,
     text,
-    Rect.fromLTWH(at.dx, at.dy, width ?? scene.size.width, scene.px(key) * 2),
+    Rect.fromLTWH(
+      at.dx,
+      at.dy,
+      width ?? scene.size.width,
+      height ?? scene.px(key),
+    ),
     color,
     scene.px(key),
     data: data,

@@ -25,10 +25,22 @@ class ControlSpec {
     this.options = const [],
     this.primary = false,
     this.hint,
+    this.floor,
   ]);
 
   final String kind, key, label;
   final String? setting, unit, hint;
+
+  /// The settings key holding the LEAST this control may be wound down to.
+  ///
+  /// THE WINDOW NUMBER IS THE ZOOM, AND IT IS CONTINUOUS (ISSUES 9.2, Lines).
+  /// A zoom step used to round its result to a whole number and stop at one, so
+  /// at a small window a wheel notch was a no-op in both directions -- the
+  /// control was dead exactly where it mattered most. A step is a multiplication
+  /// now, kept exact, and where it may stop is the lens's own authored number
+  /// rather than the integer 1. A control naming none stops at one, which is
+  /// what a count of columns or rings means.
+  final String? floor;
   final List<ControlOption> options;
 
   /// True lives on the bar itself; false lives under the one fold.
@@ -148,7 +160,9 @@ const List<LensSpec> _shipped = [
     isTimeSurface: true,
     spanUnit: 'day',
     spanFormula: 'days',
-    controls: [ControlSpec('number', 'days', 'Window', 'lines.days', 'day', [], true)],
+    controls: [
+      ControlSpec('number', 'days', 'Window', 'lines.days', 'day', [], true, null, 'lines.minDays'),
+    ],
   ),
   LensSpec(
     'spiral',
@@ -222,6 +236,11 @@ const Map<String, String> sessionTunableDefaults = {
   'wall.months': '3',
   'wall.detail': 'false',
   'lines.days': '14',
+  // THE FLOOR OF THE WINDOW, in the span's own unit (ISSUES 9.2). Lines counts
+  // in days and its window is its zoom, so how far in it may be wound is a
+  // FRACTION of a day and not the whole one an integer step used to stop at.
+  // A tenth of a day is a couple of hours across the surface.
+  'lines.minDays': '1/10',
   'radial.inward': '1',
   'radial.outward': '1',
   'radial.cycleDays': '7',

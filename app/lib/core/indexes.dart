@@ -343,3 +343,181 @@ class Indexes {
       if (document.events.containsKey(id)) id,
   };
 }
+
+
+// --- Finding a thing by its name --------------------------------------------
+
+/// WHAT A RECORD IS CALLED. One reading, so the find, the picker and the
+/// sentence rows cannot disagree about what a thing's name is. A record with no
+/// title wears its id, because a nameless row a person cannot pick is worse than
+/// an ugly one.
+String recordTitle(Object? record) => switch (record) {
+  Frame(:final title, :final id) => (title ?? '').trim().isEmpty ? id : title!.trim(),
+  Event(:final payload, :final id) =>
+    (str(payload?['title']) ?? '').trim().isEmpty ? id : str(payload!['title'])!.trim(),
+  _ => '',
+};
+
+/// The words of a name, as the find indexes them: lowercased, cut at everything
+/// that is not a letter or a digit. Not a language model -- a name is a bag of
+/// words and this is the bag.
+List<String> titleWords(String title) => [
+  for (final word in title.toLowerCase().split(_notWord))
+    if (word.isNotEmpty) word,
+];
+
+final RegExp _notWord = RegExp('[^a-z0-9]+');
+
+/// One match, with everything the ranking used, so a caller can say WHY this
+/// row is first.
+typedef TitleHit = ({String id, String label, String kind, int tier, int degree});
+
+/// THE FIND NEVER GOES BLIND (Don, ISSUES 9.2: "How does the staple-to search
+/// work with 50 frames, 2k todos and 1200 events? It seems like it would
+/// overwhelm fast.").
+///
+/// It did worse than overwhelm. The picker swept the document linearly, frames
+/// then events in map order, and cut the sweep at a RECORD budget -- so at Don's
+/// numbers the last twelve hundred objects were never looked at for ANY query
+/// and a todo authored late could not be found by its own name. A budget that
+/// skips DATA instead of bounding WORK is the shape overscale forbids: "if it is
+/// not usable at 500 calendars it is improperly built for 3."
+///
+/// So the words are INDEXED -- token to ids, once per document generation, where
+/// every other index lives -- and the index is consulted IN FULL. What stays
+/// bounded is the window a surface draws and the ordering work behind it.
+///
+/// RANKING, because the window stays small: an exact name beats a word of it,
+/// which beats the start of a word, which beats a run of letters inside one; and
+/// among equals THE MOST CONNECTED CANDIDATE WINS. The pile is a graph, so
+/// project the graph -- a thing already stapled to six others is the thing a
+/// person reaching for a name is most likely reaching for, and document order is
+/// not a ranking at all.
+class TitleIndex {
+  TitleIndex(Document document) {
+    for (final record in [...document.frames.values, ...document.events.values]) {
+      final label = recordTitle(record);
+      _titles[record.id] = label;
+      _kinds[record.id] = record is Frame ? 'frame' : 'object';
+      (_byTitle[label.toLowerCase()] ??= <String>{}).add(record.id);
+      for (final word in titleWords(label)) {
+        (_byWord[word] ??= <String>{}).add(record.id);
+      }
+    }
+    // GRAPH DEGREE, counted in the same pass every other index is built in: how
+    // many connections name this thing at all. An end counted once per staple,
+    // so an n-ary staple that names one object twice is still one connection to
+    // it.
+    for (final relation in document.relations.values) {
+      if (!relation.isStaple) continue;
+      for (final id in {for (final end in relation.ends) end.id}) {
+        _degree[id] = (_degree[id] ?? 0) + 1;
+      }
+    }
+    _words = _byWord.keys.toList()..sort();
+  }
+
+  final Map<String, String> _titles = {}, _kinds = {};
+  final Map<String, Set<String>> _byTitle = {}, _byWord = {};
+  final Map<String, int> _degree = {};
+  late final List<String> _words;
+
+  /// How many connections name this thing.
+  int degreeOf(String id) => _degree[id] ?? 0;
+
+  /// Every word the index knows that begins with [prefix]. Found by bisecting
+  /// the sorted vocabulary rather than walking it, because the vocabulary is the
+  /// part that grows with the document.
+  Iterable<String> wordsStarting(String prefix) {
+    var low = 0, high = _words.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      if (_words[middle].compareTo(prefix) < 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    final found = <String>[];
+    for (var index = low; index < _words.length; index += 1) {
+      if (!_words[index].startsWith(prefix)) break;
+      found.add(_words[index]);
+    }
+    return found;
+  }
+
+  /// The ids this one term matches, each with the best tier it matched at.
+  ///
+  /// The tiers are asked in order and the FIRST one an id answers wins, because
+  /// a better reason to show a row does not stop being the reason when a worse
+  /// one also holds.
+  Map<String, int> _matches(String term) {
+    final found = <String, int>{};
+    void offer(int tier, Iterable<String> ids) {
+      for (final id in ids) {
+        found.putIfAbsent(id, () => tier);
+      }
+    }
+
+    offer(0, _byTitle[term] ?? const <String>{});
+    offer(1, _byWord[term] ?? const <String>{});
+    for (final word in wordsStarting(term)) {
+      offer(2, _byWord[word]!);
+    }
+    // A RUN OF LETTERS INSIDE A WORD, over the index's own VOCABULARY and not
+    // over the records: the words are deduplicated, so this is the cheap half of
+    // what a linear sweep of every title used to cost, and it is complete.
+    for (final word in _words) {
+      if (word.contains(term)) offer(3, _byWord[word]!);
+    }
+    return found;
+  }
+
+  /// Every id this query reaches, worst tier per id.
+  ///
+  /// A query of several words is an AND over its words -- "reggie fo" means both
+  /// -- and the row's tier is the WORST of them, because a row is only as good a
+  /// match as its weakest word.
+  Map<String, int> matching(String query) {
+    final terms = titleWords(query);
+    if (terms.isEmpty) return const {};
+    Map<String, int>? standing;
+    for (final term in terms) {
+      final found = _matches(term);
+      if (standing == null) {
+        standing = found;
+        continue;
+      }
+      standing.removeWhere((id, _) => !found.containsKey(id));
+      for (final id in standing.keys) {
+        final tier = found[id]!;
+        if (tier > standing[id]!) standing[id] = tier;
+      }
+    }
+    // The whole query said as one name outranks any word-by-word reading of it.
+    for (final id in _byTitle[query.trim().toLowerCase()] ?? const <String>{}) {
+      if (standing!.containsKey(id)) standing[id] = 0;
+    }
+    return standing ?? const {};
+  }
+
+  String labelOf(String id) => _titles[id] ?? id;
+  String kindOf(String id) => _kinds[id] ?? 'object';
+}
+
+// MEMOIZED BY DOCUMENT IDENTITY, one entry, exactly as the coordinate laws are:
+// a find runs on every keystroke of every open picker and the document it reads
+// is immutable, so the index is built once per generation and dropped the moment
+// a different document is asked about. One entry rather than a cache, because
+// there is one document open and holding the previous generations would hold
+// every record they name.
+Document? _indexedDocument;
+TitleIndex? _titleIndex;
+
+TitleIndex titleIndexOf(Document document) {
+  if (!identical(_indexedDocument, document) || _titleIndex == null) {
+    _titleIndex = TitleIndex(document);
+    _indexedDocument = document;
+  }
+  return _titleIndex!;
+}

@@ -748,6 +748,7 @@ class ProjectionEngine {
         if (pattern.kind == 'ics-rrule') staples.templatePlacement(pattern)?.id,
     };
     final placed = <Fact>[];
+    final drawn = <String>{};
     final extents = <String, Extent?>{};
     var maxDuration = Rational.zero;
     String? error;
@@ -762,6 +763,22 @@ class ProjectionEngine {
       if (templates.contains(relation.id)) continue;
       final event = document.events[relation.event];
       if (event == null) continue;
+      // A PLACEMENT NAMES THE PLACEMENT POINT (ISSUES 9.2, Don's double render).
+      // A connection that names an instant but touches this object somewhere
+      // OTHER than its placement point -- an end anchor, a midpoint, a point the
+      // author named -- feeds the extent derivation and is not a mark of its
+      // own. Read as one, it drew Don's spanning events twice on every lens that
+      // projects Wall Time.
+      if (relation.coordinate != null && !isPlacement(relation, event.id)) continue;
+      // ONE OBJECT, ONE FRAME, ONE FACT. Two placement-shaped records naming the
+      // same object on the same sheet are ONE extent -- the second is reported as
+      // a contest by the extent derivation, in words, and never as a second
+      // mark. Two placements on DIFFERENT sheets stay two facts: this pass is
+      // per frame, so each answers on its own. Asked before the work rather than
+      // after it, and CLAIMED only where a fact is actually added below, so a
+      // membership relation this frame does not place never spends the mark its
+      // object's real placement is owed.
+      if (drawn.contains(event.id)) continue;
       // Resolved once per EVENT, not once per relation: two placements of one
       // object would otherwise pay for the same connection-chain walk twice.
       final extent = extents.putIfAbsent(event.id, () {
@@ -804,6 +821,7 @@ class ProjectionEngine {
       if (duration > maxDuration) maxDuration = duration;
       final space = anchored ? (extent.frame ?? frameId) : frameId;
       final coordinate = anchored ? daysCoordinate(space, day) : relation.coordinate!;
+      drawn.add(event.id);
       placed.add(
         Fact(
           kind: 'explicit',

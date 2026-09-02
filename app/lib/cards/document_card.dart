@@ -22,6 +22,24 @@
 // directory, and SHOWS the path it wrote. So a platform with no dialog loses a
 // convenience, never the boundary.
 //
+// THREE DOORS ON THE DOCUMENT, NOT ONE (Don, ISSUES 9.2: "No clear mechanism to
+// delete all the old data and start a new chronolog -- I had to follow the path
+// and delete the directory"):
+//
+//   NEW is the default and it is option (a): a fresh document at a new location,
+//   the old files LEFT IN PLACE. Nothing is deleted by making something.
+//
+//   OPEN reaches another chronolog, because "sometimes it might make sense to
+//   have two chronologs, instead of just two frames" -- multiple documents are
+//   a legitimate shape and the door says so.
+//
+//   DELETE ALL is option (b), its own door, explicitly destructive and never
+//   silent: it is armed by TYPING THE WORD (`document.deleteWord`) and nothing
+//   else. It is the one act in the program with no undo, which is why it asks
+//   for a word instead of a confirmation -- "no confirmation dialogs" is the
+//   standing rule, and typing the word is an authored act rather than a dialog
+//   a person clicks through without reading.
+//
 // TWO AUTHORED LOCATIONS, NEITHER A SINGLETON (Don, 8.31: "I don't appear to be
 // able to set a save location, only a location to look for .ics file and even
 // then only one such location"):
@@ -67,6 +85,12 @@ const Map<String, String> frameCardTextDefaults = {
   // setting"). The value names one of the card's own verbs; a name no card
   // offers is refused in words rather than guessed at.
   'card.closeVerb': 'save',
+  // THE WORD THAT ARMS THE DELETION (Don, ISSUES 9.2: "behind a type-to-confirm
+  // popup -- type the word, obliviate-style -- because full deletion is mostly
+  // a testing act but has legitimate cases and no undo"). It is a SETTING and
+  // not a constant, because which word a person has to type is not the engine's
+  // to decide: a shared machine may want a longer one.
+  'document.deleteWord': 'delete',
   // WHAT A NEW FRAME STARTS AS. A seed, not a species (ISSUES 9.1: "kinds are
   // TRAIT BUNDLES, not species"). The create door mints A FRAME; this is the
   // bundle the card opens holding, and every word of it is authored on the card.
@@ -118,9 +142,40 @@ class DocumentCard extends StatefulWidget {
 }
 
 class _DocumentCardState extends State<DocumentCard> {
-  List<String> _warnings = const [];
-  String _preset = '';
+  List<IcsWarningClass> _warnings = const [];
+  final Set<String> _opened = {};
+  String _preset = '', _elsewhere = '', _typed = '';
   String? _note;
+
+  /// NEW: a fresh chronolog somewhere else, the files here left alone.
+  Future<void> _new(Editor editor, String at) async {
+    final refusal = await editor.store.establishAt(at);
+    editor.resync();
+    setState(
+      () => _note = refusal ?? 'A new chronolog stands at $at. The old files are where they were.',
+    );
+  }
+
+  /// OPEN: the chronolog at another location, loaded the way a boot loads one.
+  Future<void> _open(Editor editor, String at) async {
+    if (at.trim().isEmpty) return setState(() => _note = 'Name a folder to open.');
+    await editor.store.openAt(at);
+    editor.resync();
+    setState(() => _note = 'Opened the chronolog at $at.');
+  }
+
+  /// DELETE ALL: armed only by the typed word, and then it is gone. The gate is
+  /// here and the deletion is the store's, so neither is half of the other.
+  Future<void> _deleteAll(Editor editor) async {
+    final root = editor.store.journal.dataRoot;
+    await editor.store.deleteEverything();
+    editor.resync();
+    setState(() {
+      _typed = '';
+      _warnings = const [];
+      _note = 'Everything at $root is deleted. This is a fresh, empty chronolog.';
+    });
+  }
 
   Future<void> _import(Editor editor, String path) async {
     final file = File(path);
@@ -129,7 +184,8 @@ class _DocumentCardState extends State<DocumentCard> {
     }
     final result = importIcsText(editor, await file.readAsString());
     setState(() {
-      _warnings = result.warnings;
+      _opened.clear();
+      _warnings = result.warningClasses;
       _note =
           'Imported ${result.events.length} objects on ${result.frames.length} frames'
           ' from $path, as one undoable change.';
@@ -181,6 +237,29 @@ class _DocumentCardState extends State<DocumentCard> {
     setState(() => _note = 'The chronolog saves to $chosen.');
   }
 
+  /// A class as one line: how many events it covers, then what was wrong and
+  /// what was done about it. The count is the whole point -- "47 events: start
+  /// and end carry different time zones" reads in a screen where forty-seven
+  /// notes do not.
+  String _classLine(IcsWarningClass klass) =>
+      '${klass.events.length} '
+      '${klass.events.length == 1 ? 'event' : 'events'}: ${klass.says}';
+
+  /// The host's dialog, answering into the elsewhere field rather than acting:
+  /// New and Open are different acts on one location, so the dialog names the
+  /// place and the person says which door.
+  Future<void> _elsewhereFromDialog(Editor editor, String at) async {
+    final picker = widget.picker;
+    if (picker == null) {
+      return setState(() => _note = 'No file dialog here — write the folder above.');
+    }
+    final picked = await picker.save(initialPath: at, suggestedName: snapshotFileName);
+    if (picked.refusal.isNotEmpty) return setState(() => _note = picked.refusal);
+    final path = picked.path;
+    if (path == null) return;
+    setState(() => _elsewhere = parentDirectory(path));
+  }
+
   Future<void> _export(Editor editor, String frameId, String path) async {
     final directory = Directory(path).existsSync();
     final target = directory ? storePath(path, '${declaredTitle(editor.document)}.ics') : path;
@@ -206,6 +285,7 @@ class _DocumentCardState extends State<DocumentCard> {
     // WHERE THE DOCUMENT SAVES, and WHERE CALENDARS ARE LOOKED FOR: one
     // resolver, two authored settings, and the second one is a LIST.
     final saveAt = authoredPath(chrome.settings.text('document.saveAt'), root);
+    final deleteWord = chrome.settings.text('document.deleteWord').trim();
     final locations = authoredPaths(chrome.settings.text('document.icsPaths'), root);
     final found = {for (final at in locations) at: icsFilesIn(at)};
     final calendars = [
@@ -298,6 +378,65 @@ class _DocumentCardState extends State<DocumentCard> {
                 : () => setState(() => chrome.settings.setText('document.saveAt', '')),
           ),
         ]),
+        // THE THREE DOORS ON THE DOCUMENT ITSELF.
+        cardRow(
+          context,
+          'Another chronolog',
+          cardWrap(context, [
+            CardField(
+              value: _elsewhere,
+              hint: 'a folder for another chronolog',
+              onChanged: (text) => setState(() => _elsewhere = text),
+              mono: true,
+            ),
+            namedAction(
+              context,
+              'New chronolog here',
+              hint: 'A fresh, empty document at that folder. These files stay where they are.',
+              onTap: _elsewhere.trim().isEmpty ? null : () => _new(editor, _elsewhere.trim()),
+            ),
+            namedAction(
+              context,
+              'Open the chronolog here',
+              hint: 'Loads whatever document that folder holds. Two chronologs is a shape.',
+              onTap: _elsewhere.trim().isEmpty ? null : () => _open(editor, _elsewhere.trim()),
+            ),
+            namedAction(
+              context,
+              'Choose a folder…',
+              hint: 'The dialog this host provides, where it provides one',
+              onTap: () => _elsewhereFromDialog(editor, saveAt),
+            ),
+          ]),
+        ),
+        cardRow(
+          context,
+          'Delete all data',
+          cardWrap(context, [
+            CardField(
+              value: _typed,
+              hint: 'type ${chrome.settings.text('document.deleteWord')}',
+              onChanged: (text) => setState(() => _typed = text),
+            ),
+            namedAction(
+              context,
+              'Delete all data…',
+              hint: 'The snapshot and the journal here, gone. There is no undo for this one.',
+              onTap: deleteWord.isNotEmpty && _typed.trim().toLowerCase() == deleteWord.toLowerCase()
+                  ? () => _deleteAll(editor)
+                  : null,
+            ),
+          ]),
+        ),
+        cardNote(
+          context,
+          'Delete all data removes the chronolog written at'
+          ' ${editor.store.journal.dataRoot} — the snapshot, the journal and'
+          ' their sequence file — and leaves this app standing on an empty'
+          ' document, as a fresh install would. Nothing else in that folder is'
+          ' touched. Every other act in this program is undoable; this one is'
+          ' not, so it does nothing at all until the word is typed.',
+        ),
         cardNote(
           context,
           // WHERE IT ACTUALLY IS, read off the store rather than off the field:
@@ -310,7 +449,46 @@ class _DocumentCardState extends State<DocumentCard> {
           ' they are.',
         ),
         if (_note != null) cardNote(context, _note!),
-        for (final warning in _warnings) cardNote(context, warning, refusal: true),
+        // ONE LINE PER CLASS, WITH ITS COUNT, expandable to the events it
+        // covers (ISSUES 9.2, the wall of errors). This rendered every warning
+        // as its own note, uncapped, and the ICS sites fired PER EVENT naming
+        // each by its opaque UID -- so an ordinary Outlook export said the same
+        // three things hundreds of times about events nobody could identify. A
+        // class is what was actually wrong; the events are which ones it
+        // happened to, and they are named by TITLE and DAY, never by UID.
+        //
+        // EVERY WARNING STILL KNOWS ABOUT THE OTHERS (ISSUES 9.2): "an
+        // impressive wall of errors" is one act to copy, and now the thing
+        // copied is the summary rather than the wall.
+        for (final klass in _warnings) ...[
+          cardNote(
+            context,
+            _classLine(klass),
+            refusal: true,
+            source: 'this import',
+            others: [
+              for (final other in _warnings)
+                if (other.says != klass.says) _classLine(other),
+            ],
+          ),
+          namedAction(
+            context,
+            _opened.contains(klass.says)
+                ? 'Fold these ${klass.events.length}'
+                : 'Name these ${klass.events.length}',
+            hint: 'Which events this class covers, by title and day',
+            onTap: () => setState(
+              () => _opened.contains(klass.says)
+                  ? _opened.remove(klass.says)
+                  : _opened.add(klass.says),
+            ),
+          ),
+          if (_opened.contains(klass.says))
+            cardNote(
+              context,
+              [for (final event in klass.events) '${event.title} (${event.when})'].join(', '),
+            ),
+        ],
         // The settings layer's own refusals for these keys -- a save location
         // another chronolog already occupies says so here.
         for (final line in chrome.settings.refusals)

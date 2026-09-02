@@ -97,14 +97,47 @@ the archive.
    (indefinite) is distinct from projection horizon (bounded, ~2 years) —
    the horizon is still a literal in the engine rather than a setting,
    and exposing it is the last piece of #1's settings work.
-5. **Pattern authoring beyond the RRULE dropdown** — the repeat control
+5. **One cycle idea, and coordinates authored on it** (ruled 2026-09-02,
+   deliberately parked here for consideration) — a recurring event, a
+   cycle, and every repeating structure beside them are ONE object, and
+   today they are three mechanisms: recurrence is a rule that generates
+   occurrences (`core/rrule.dart`), a cycle is something the coordinate
+   law declares, and a weekend is an authored group over a cycle. Same
+   idea, said three ways, which is the trinity's own complaint. The one
+   object is a period, an epoch anchor, and names — nothing else — and
+   everything above is that object with different numbers in it. THE
+   SECOND HALF, and the reason this is not merely tidying: a coordinate
+   must be authorable NATIVELY ON AN ATTACHED CYCLE, so "third Monday"
+   is a valid coordinate rather than a recurrence special-case. That is
+   an ordinal selection over a cycle position within a containing level,
+   and it subsumes what ICS spells `BYDAY=3MO` and `BYSETPOS` — those
+   become a TRANSLATION at the calendar boundary, never the mechanism.
+   An occurrence then stops being something a rule generates and becomes
+   something a coordinate names, read by the projection engine through
+   the same path every other coordinate takes. THE CALENDAR-AS-SYNTHESIS
+   QUESTION RIDES HERE (Don, 9.2): whether n frames each contributing a
+   rule compose into one basis frame. The analysis is in ISSUES.md and
+   its conclusion is a distinction, not a yes — a CYCLE contribution
+   (period, epoch, names) composes freely and is order-independent,
+   because two cycles never read each other; a STRUCTURE contribution
+   (levels, radices, intercalation) may be owned by exactly one frame,
+   and an overlap is a refusal in prose rather than a precedence rule,
+   because a precedence rule is an encoded right way. Parked on purpose:
+   Don, "so we have time to give more consideration, before we blunder
+   in and turn 7 heads to 14." It is a change to the substrate every
+   surface reads and must not share a wave with surface work. Subsumes
+   the authoring problem in #6 and the prerequisite in #7; the lunisolar
+   case (month depends on observation, year's month-count depends on the
+   moon) is a fixed point rather than a stack and is the hard edge to
+   design against, not to discover later.
+6. **Pattern authoring beyond the RRULE dropdown** — the repeat control
    is a rigid list of common Gregorian periods. "Every odd day of every
    even month of every odd year, except where any of those numbers is
    prime" is a repeat pattern with no entry path — and the dropdown
    plays worse still with non-Gregorian calendars. The formula language
    exists for exactly this; the authoring surface doesn't. Needs design
    alongside #4.
-6. **Custom calendars are first-class** — the prerequisite stage has
+7. **Custom calendars are first-class** — the prerequisite stage has
    shipped: the frame's coordinate declaration is the executed law. One
    coordinate-arithmetic engine (`src/coordinate-law.js`, and AGENTS.md's
    "Coordinate law") reads the levels / radix / transition ladder, the
@@ -144,36 +177,36 @@ the archive.
    computed sibling: a cycle derived from formula or ephemeris — the moon
    by Newton, not by a list of observations — with observation as the
    override, not the definition.
-7. **Intimate overlap and create-in-place** — overlap is indicated
+8. **Intimate overlap and create-in-place** — overlap is indicated
    locally, not globally: a 30-minute collision must not lane both
    events full-height. Events stay rectangles — no key-shaped blocks.
    The overlap itself gets drawn (a zone marking the contended interval)
    rather than deforming the participants. Placing an event inside an
    occupied span must not require dragging the occupant away and back —
    create-in-place works through an existing block.
-8. **Two-way calendar sync, Outlook first** — pushed down for difficulty,
+9. **Two-way calendar sync, Outlook first** — pushed down for difficulty,
    not priority of desire. Through ICS import/export semantics, never a
    provider API. The journal's per-op conflict foundation exists;
    provider-side conflict semantics for recurring/edited events still
    need design.
-9. **Control-bar aesthetics.**
-10. **New logo** — plain text until a better mark earns the spot.
-11. **More calendar subscriptions** — Google Calendar and other providers,
+10. **Control-bar aesthetics.**
+11. **New logo** — plain text until a better mark earns the spot.
+12. **More calendar subscriptions** — Google Calendar and other providers,
     each through its published ICS URL.
-12. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
+13. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
     web, built on the journal's per-op foundation.
-13. **Mobile version** — Android first. The dock becomes a full-screen
+14. **Mobile version** — Android first. The dock becomes a full-screen
     sheet under a width breakpoint; card paging becomes swipe gestures.
-14. **Super-strategic band** (naming candidate: the epoch view) — the
+15. **Super-strategic band** (naming candidate: the epoch view) — the
     lens beyond Strategic, which caps at 18 months where this band would
     take over: decades to centuries to millennia or longer. Needs design;
     pairs with #6's epochs/ages.
-15. **Field-level merge** — real merging on top of per-op sequencing. Needs
+16. **Field-level merge** — real merging on top of per-op sequencing. Needs
     design.
-16. **Compiled native binaries** — the distribution end-state; the portable
+17. **Compiled native binaries** — the distribution end-state; the portable
     Node bundles are interim. Native shells may pop dock cards out into
     real second OS windows on desktop platforms.
-17. **The document's own timeline** — a lens over the journal itself:
+18. **The document's own timeline** — a lens over the journal itself:
     scroll back through what the document was, watch a deleted series
     vanish and return. The journal already records every op; this is the
     view it makes possible. The very far bottom, on purpose.

@@ -78,15 +78,43 @@ List<String> traitsForObjectKind(Iterable<String>? existing, Object? kind) => {
 /// pattern-state frame (`['state', 'generated']`) is never mistaken for one.
 const List<String> stateFrameTraits = ['set', 'group', 'state'];
 
-/// The one deterministic state frame the substrate itself ever names, so every
-/// path -- toggle, inspector, ICS import -- converges on ONE Done rather than
-/// each minting its own. It is minted lazily by the first completion and NEVER
-/// seeded into an empty document.
+/// THE SHIPPED DEFAULT VALUE OF A SETTING, NOT A TRUTH OF THE ENGINE (ISSUES
+/// 9.2, Don's question on Done: "Why is Done treated special to any other
+/// staple? It seems to me like the data model does not support different frame
+/// types").
+///
+/// He is right, and this constant used to decide meaning at ten sites. It no
+/// longer decides anything: no derivation asks whether a frame is THIS frame.
+/// What survives is a spelling -- the frame the shipped `ics.completedFrame`
+/// names, so the ICS boundary's one legitimate named default and the toggle a
+/// person reaches for converge on ONE Done rather than each minting its own. It
+/// is minted lazily on first need and NEVER seeded into an empty document.
 const String doneStateFrameId = 'frame:state-done';
 const String doneStateTitle = 'Done';
 
+/// WHAT MAKES A FRAME A STATE FRAME IS THE `state` TRAIT, AND NOTHING ELSE.
+///
+/// The trait is what the person said: "this group reads as a status". Which
+/// status, and what it costs the object's weight, is the frame's own authored
+/// handling -- so an object in a state frame somebody minted this morning reads
+/// exactly as one in the shipped Done when the two frames say the same thing.
 bool isStateFrame(Frame? frame) =>
     frame != null && frame.traits.contains('group') && frame.traits.contains('state');
+
+/// Is this object resolved -- has somebody said a status about it at all?
+///
+/// THE ONE PREDICATE, over the affiliations rather than over an id. Every
+/// reader of "resolved" goes through it, which is what keeps the answer the
+/// same on every surface and keeps no frame special.
+bool resolvedByState(Iterable<String> stateFrames) => stateFrames.isNotEmpty;
+
+/// The word a resolved object reads as, in the mark vocabulary (`marks.dart`
+/// strikes it and fades it by `mark.doneOpacity`). It is a word about the
+/// DRAWING, not a state the engine believes in: the strings `done` and `closed`
+/// used to be two, split by whether the object's state frame happened to be the
+/// hard-coded one. There is one reading now, because there is one thing being
+/// said -- somebody stated a status.
+const String resolvedStateWord = 'done';
 
 /// Create-if-missing. An existing frame comes back UNTOUCHED and the document
 /// unchanged: the user may have retitled or recolored it, and that authorship

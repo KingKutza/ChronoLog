@@ -469,8 +469,13 @@ class _ViewTileState extends State<ViewTile>
       buttons: event.buttons,
       shift: keys.isShiftPressed,
       alt: keys.isAltPressed,
+      control: keys.isControlPressed,
       onMark: _grabbed != null,
       timeSurface: true,
+      // THE LIVE CHORDS (ISSUES 9.2): the pointer bindings are settings keys
+      // beside the keyboard's, so this surface asks the file rather than the
+      // branches that used to be in the table.
+      bindings: _settings.binding,
     );
     if (_verb != 'menu') return;
     // The app owns this button everywhere, marks included (ISSUES 8.26).
@@ -500,7 +505,23 @@ class _ViewTileState extends State<ViewTile>
     final at = _daysAt(event.localPosition), start = _daysAt(from);
     if (at == null || start == null) return;
     if (verb == 'move' && grabbed != null) {
-      editor.moveFact(grabbed.fact, at, timed: _control('grain') != null);
+      // THE PREVIEW AND THE COMMIT ARE ONE ARITHMETIC (ISSUES 9.2). Don:
+      // "dragging the start of a multi-day event is inaccurate to the preview";
+      // "the preview is not lining up with where it lands". The ghost was the
+      // block SHIFTED by the pointer's travel and the commit set the START to
+      // the pointer's absolute instant, so wherever the hand took hold -- up to
+      // a whole day into a multi-day block -- that grab offset was added to
+      // every move. A move is a TRAVEL, so the start moves by exactly the travel
+      // from any grab point in any segment.
+      //
+      // It is also what makes a mid-drag scroll harmless: both ends of the
+      // travel are read on the painter that is on screen at release, so a scroll
+      // during the gesture is honoured and never added.
+      editor.moveFact(
+        grabbed.fact,
+        grabbed.fact.day + (at - start),
+        timed: _control('grain') != null,
+      );
     } else if (verb == 'create') {
       createHere('event', start, endDays: at);
     }
@@ -697,10 +718,35 @@ class _ViewTileState extends State<ViewTile>
     _views.touch();
   }
 
-  void _grow(String key, Rational by) {
+  /// ONE ZOOM STEP, AS ARITHMETIC (ISSUES 9.2, Lines). The value this control
+  /// would hold after a step of [by]: the value times the factor, floored by
+  /// what the control says its least value is. Pure and exact -- no rounding, so
+  /// two opposite notches land back where they started and a step at a small
+  /// window is a real step.
+  ///
+  /// Don's report: "the Window number IS the zoom and the wheel drives it
+  /// continuously -- today it rounds the span to whole days and clamps at 1, so
+  /// at a small window a notch does nothing in either direction." Rounding a
+  /// multiplication is what killed it: 1 x 5/4 rounds back to 1 forever. The
+  /// floor is the lens's own authored number (`ControlSpec.floor`) and the
+  /// integer one only where a control never declared one, which is what a count
+  /// of columns or rings means.
+  Rational grownValue(String key, Rational by) {
     final next = _state.number(key, _settings) * by;
-    _state.write(key, next < Rational.one ? Rational.one : Rational(next.round()));
+    final floor = _floorOf(key);
+    return next < floor ? floor : next;
   }
+
+  Rational _floorOf(String key) {
+    final named = _state.spec.controls
+        .where((control) => control.key == key)
+        .map((control) => control.floor)
+        .whereType<String>()
+        .firstOrNull;
+    return named == null ? Rational.one : _tune(named);
+  }
+
+  void _grow(String key, Rational by) => _state.write(key, grownValue(key, by));
 
   /// A law that does not map to a clock HAS NO NOW, so this refuses rather than
   /// inventing a place to jump to.

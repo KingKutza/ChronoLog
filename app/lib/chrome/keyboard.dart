@@ -166,7 +166,12 @@ class ChromeKeyboard extends StatelessWidget {
     final shortcuts = <ShortcutActivator, Intent>{};
     for (final key in chromeKeyDefaults.keys) {
       if (key == 'keys.lensDigits') continue;
-      final activator = activatorFor(chrome.settings.text(key));
+      // NEVER LAST-WINS (ISSUES 9.2). Two bindings naming one chord used to
+      // land in this map one after the other and the second quietly took it;
+      // whichever way that fell, one of the two rows on the keyboard page was
+      // lying. A contested chord binds NEITHER, and the settings layer says so
+      // in prose beside both rows.
+      final activator = activatorFor(chrome.settings.binding(key));
       if (activator != null) shortcuts[activator] = ChromeIntent(key.substring('keys.'.length));
     }
     final digits = chrome.settings.text('keys.lensDigits');

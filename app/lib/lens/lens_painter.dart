@@ -132,6 +132,56 @@ class BledPainter extends CustomPainter {
       old.bleed != bleed || lens.shouldRepaint(old.lens);
 }
 
+/// The one label call every lens draws through, laid out to the box it is
+/// given. Returns the height it actually painted, so a caller stacking a second
+/// line under it knows where the first one ended.
+///
+/// TWO FACES, ONE RULE (ruled 2026-08-28): [data] is the monospace role and is
+/// for COORDINATES, COUNTS AND TIMES -- a clock reading, a day number, an "N+"
+/// lower bound. Everything a person reads as prose -- a title, a weekday name, a
+/// month -- is the humanist face and is the default, because a surface that
+/// drew every string as data came up in a typewriter from end to end.
+///
+/// AS MANY LINES AS FIT (ISSUES 9.2). Don: "where an event has a lot of vertical
+/// space it should wrap text rather than cut it off." This laid out `maxLines: 1`
+/// unconditionally, so a block tall enough for a paragraph still showed one line
+/// and an ellipsis -- five painters through one call, so it was every lens at
+/// once. The box's own height says how many lines it holds, the text says how
+/// many it needs, and the smaller of the two is what is drawn, with the ellipsis
+/// falling on the last line only. It LIVES HERE, with the painting seam, rather
+/// than inside one lens's file: it is nobody's lens's number.
+double paintLabel(
+  Canvas canvas,
+  ChronoTheme theme,
+  String text,
+  Rect box,
+  Color color,
+  double size, {
+  bool center = false,
+  bool data = false,
+}) {
+  if (text.isEmpty || box.width <= 0) return 0;
+  final span = TextSpan(
+    text: text,
+    style: (data ? theme.data : theme.ui).copyWith(color: color, fontSize: size),
+  );
+  // How tall ONE line of this face at this size is, asked of the same span that
+  // will be drawn -- never a multiple of the font size, which is a different
+  // number in every face.
+  final line = (TextPainter(text: span, textDirection: TextDirection.ltr)
+        ..layout(maxWidth: box.width))
+      .preferredLineHeight;
+  final holds = line <= 0 ? 1 : (box.height / line).floor();
+  final painter = TextPainter(
+    text: span,
+    textDirection: TextDirection.ltr,
+    maxLines: holds < 1 ? 1 : holds,
+    ellipsis: '…',
+  )..layout(maxWidth: box.width);
+  painter.paint(canvas, Offset(box.left + (center ? (box.width - painter.width) / 2 : 0), box.top));
+  return painter.height;
+}
+
 /// What a lens says when it cannot draw the document it was handed: the reason,
 /// in the law's own vocabulary. REFUSE LOUDLY -- rendering nothing and saying
 /// nothing is indistinguishable from an empty calendar.

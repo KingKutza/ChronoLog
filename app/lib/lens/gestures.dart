@@ -54,27 +54,122 @@ const Map<String, String> pointerTunableDefaults = {
   'pointer.refusalPad': '12',
 };
 
+/// THE POINTER BINDINGS ARE SETTINGS, BESIDE THE KEYBOARD CHORDS (ISSUES 9.2,
+/// Don: "a manual and a keybindings page... the keybindings page lands next
+/// round and must allow resetting").
+///
+/// They were hard-wired in `pointerVerb` -- shift meant pan, alt meant create,
+/// right meant menu, and none of the three could be moved without a recompile,
+/// which is the same defect the keyboard had before every chord became a key.
+/// TEXT settings, like the keyboard's: a chord is not arithmetic, and reading
+/// `pointer.pan` as algebra would be a category error.
+///
+/// THE GRAMMAR, and it is deliberately tiny: modifiers (`ctrl`, `shift`, `alt`,
+/// `meta`) and one button (`left`, `middle`, `right`), joined by `+`, with `|`
+/// between whole ALTERNATIVES -- pan is the middle button OR shift and the
+/// left, and it always was. A `drag` term says the binding wants motion rather
+/// than a press. An EMPTY setting is a binding turned off, not a binding that
+/// matches everything.
+const Map<String, String> pointerBindingDefaults = {
+  'pointer.pan': 'middle | shift+left',
+  'pointer.menu': 'right',
+  'pointer.create': 'alt+left',
+  // RIGHT-DRAG, on Don's own reading of what the modifiers already cost:
+  // "shift is taken; right is free only if the menu moves to
+  // release-without-movement, which is also the ordinary desktop convention"
+  // (ISSUES 9.2, the marquee binding). Declared here so the page and the file
+  // can author it; the verb that reads it lands with multi-select.
+  'pointer.marquee': 'right+drag',
+  'pointer.toggleSelect': 'ctrl+left',
+};
+
+/// The buttons, by the names a person writes them with.
+const Map<String, int> _buttons = {
+  'left': kPrimaryMouseButton,
+  'middle': kMiddleMouseButton,
+  'right': kSecondaryMouseButton,
+};
+
+/// Does this press satisfy one pointer chord?
+///
+/// Every named modifier must be held and the named button must be down. A
+/// modifier the chord does not name is not forbidden -- precedence between two
+/// chords that both match is the ORDER they are asked in, stated once in
+/// [pointerVerb], rather than a rule about which chord is more specific.
+bool pointerChordMatches(
+  String binding, {
+  required int buttons,
+  required bool shift,
+  required bool alt,
+  bool control = false,
+  bool meta = false,
+  bool drag = false,
+}) {
+  for (final alternative in binding.toLowerCase().split('|')) {
+    final parts = alternative.split('+').map((part) => part.trim()).where((p) => p.isNotEmpty);
+    if (parts.isEmpty) continue;
+    var button = 0;
+    var wants = true;
+    var wantsDrag = false;
+    for (final part in parts) {
+      switch (part) {
+        case 'ctrl':
+          wants &= control;
+        case 'shift':
+          wants &= shift;
+        case 'alt':
+          wants &= alt;
+        case 'meta':
+          wants &= meta;
+        case 'drag':
+          wantsDrag = true;
+        default:
+          button |= _buttons[part] ?? 0;
+      }
+    }
+    if (wantsDrag && !drag) continue;
+    // A chord naming no button at all names no press: an unreadable line turns
+    // the binding off rather than firing on everything.
+    if (button == 0 || buttons & button == 0) continue;
+    if (wants) return true;
+  }
+  return false;
+}
+
 /// Which verb this press means: `pan`, `menu`, `move`, `create` or `select`.
 ///
-/// ONE TABLE. Middle drag pans (the near-universal gesture, ISSUES 8.26); the
-/// secondary button is always the app's own menu and never the platform's;
-/// shift+left pans as well, which is what the old surface had. A lens that is
-/// not a time surface only ever selects -- "a drag onto nothing must never mint
-/// an object" is this property, not eight guard clauses. Alt forces create even
-/// over an occupied span, which is how creation works THROUGH an existing block
-/// (ROADMAP #7) without dragging the occupant away and back.
+/// ONE TABLE, and the table is now the SETTINGS. Middle drag pans (the
+/// near-universal gesture, ISSUES 8.26); the secondary button is the app's own
+/// menu and never the platform's; shift+left pans as well, which is what the
+/// old surface had -- all three read out of [pointerBindingDefaults] rather
+/// than out of these branches. A lens that is not a time surface only ever
+/// selects -- "a drag onto nothing must never mint an object" is this property,
+/// not eight guard clauses. Create forces itself even over an occupied span,
+/// which is how creation works THROUGH an existing block (ROADMAP #7) without
+/// dragging the occupant away and back.
+///
+/// [bindings] is the live settings reader; absent, the shipped chords answer,
+/// so a surface with no settings in reach still has the ratified vocabulary.
 String pointerVerb({
   required int buttons,
   required bool shift,
   required bool alt,
   required bool onMark,
   required bool timeSurface,
+  bool control = false,
+  String Function(String key)? bindings,
 }) {
-  if (buttons & kMiddleMouseButton != 0) return 'pan';
-  if (buttons & kSecondaryMouseButton != 0) return 'menu';
-  if (shift) return 'pan';
+  bool bound(String key) => pointerChordMatches(
+    bindings?.call(key) ?? pointerBindingDefaults[key] ?? '',
+    buttons: buttons,
+    shift: shift,
+    alt: alt,
+    control: control,
+  );
+  if (bound('pointer.pan')) return 'pan';
+  if (bound('pointer.menu')) return 'menu';
   if (!timeSurface) return 'select';
-  if (alt) return 'create';
+  if (bound('pointer.create')) return 'create';
   return onMark ? 'move' : 'create';
 }
 

@@ -71,7 +71,10 @@ capabilities go through `dart:ffi` (`host/`).
 
 - `data_dir.dart` — where the data lives, and where it never lives: the app's
   own directory or an explicit path. No branch here can name a profile
-  directory, and that absence IS the ruling.
+  directory, and that absence IS the ruling. ONE exception, and it is not a
+  profile directory: an executable under a `build` directory resolves to the
+  parent of that build tree, because `flutter clean` deletes what `beside the
+  exe` means there (ISSUES 9.2, hazard found live).
 - `journal.dart`, `document_store.dart` — snapshot plus append-only journal,
   the 350ms autosave debounce, refcounted deferral, in-flight coalescing that
   carries force forward, and a failed write that hands the ops back.
@@ -105,7 +108,8 @@ capabilities go through `dart:ffi` (`host/`).
 - `settings.dart` — every tunable as a named setting whose shipped default is an
   expression in the one math, plus text settings (key chords, theme name) which
   are deliberately not arithmetic. A refused expression keeps the last good
-  value and says why.
+  value and says why. `exclusive` families (`keys.`, `pointer.`) admit no two
+  keys saying the same thing; `resetUnder` puts a whole page back at once.
 - `lens_catalog.dart` — `LensSpec`/`ControlSpec` and the shipped lenses as DATA.
   A lens declares its controls; the context bar renders the declaration and
   knows no lens by name.
@@ -131,14 +135,18 @@ capabilities go through `dart:ffi` (`host/`).
 
 - `controls.dart` — `Chrome` (what the chrome is looking at) and the designed
   control vocabulary every bar, menu and card is made of. No raw number field,
-  no comma string, no bare record id.
+  no comma string, no bare record id. `fieldChrome` is the ONE decoration every
+  text entry draws through, so a field looks like a field everywhere and a new
+  field class cannot be born borderless.
 - `document_bar.dart`, `view_bar.dart`, `context_bar.dart` — what the document
   is and the actions on the whole of it; which lens the focused view tile is;
   that lens's own declared controls. An unclaimed action is not rendered.
 - `projection_control.dart` — which frames the focused view looks through, over
   the same row and the same selection the frames browser authors.
 - `menus.dart` — the one menu class every drop and every right-click uses.
-- `keyboard.dart` — one keyboard map; every binding is a setting.
+- `keyboard.dart` — one keyboard map; every binding is a setting. Two bindings
+  naming one chord bind NEITHER: the conflict is a refusal in prose beside both
+  rows, never a silent last-wins.
 - `shell.dart` — `chronologSettings()` (EVERY area's defaults, composed — a key
   in no map is a refusal naming it), the shipped stage preset, and
   `ChronoSurface`.
@@ -178,7 +186,10 @@ capabilities go through `dart:ffi` (`host/`).
   stated gap. `CardHost` carries the factory above every tile.
 - `card_chrome.dart` — the shared card frame: header, short primary path, ONE
   fold, footer. Plus the shared instruments (field, chips, links, compose,
-  colour, menu) so no site spells a control's shape.
+  colour, menu) so no site spells a control's shape — and `Refusal`, the one
+  interactive refusal every surface shows: click selects, double-click copies
+  the text with what it is about, right-click offers Copy / Copy all / Dismiss
+  for this session, hover shows the whole of a truncated line.
 - `coordinate_field.dart`, `staple_editor.dart`, `connection_picker.dart`,
   `state_control.dart`, `weight_explainer.dart`, `object_card.dart` — the
   variable-precision coordinate field; THE placement interface, where no staple

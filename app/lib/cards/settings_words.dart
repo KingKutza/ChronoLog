@@ -54,6 +54,7 @@ const Map<String, String> settingAreaNames = {
   'edit': 'editing',
   'falloff': 'fading with distance',
   'grid': 'the month grid',
+  'ics': 'the calendar boundary',
   'intimate': 'the Intimate lens',
   'keys': 'the keyboard',
   'lane': 'lanes',
@@ -85,10 +86,15 @@ const List<({String title, List<String> areas})> settingsCardTable = [
   (title: 'Cards', areas: ['card']),
   (title: 'The bars', areas: ['chrome']),
   (title: 'The stage', areas: ['stage']),
-  (title: 'The keyboard', areas: ['keys']),
-  (title: 'Mouse and wheel', areas: ['pointer']),
+  // ONE BINDINGS PAGE (ISSUES 9.2, Don: "a manual and a keybindings page...
+  // the keybindings page lands next round and must allow resetting"). The
+  // pointer chords are bindings exactly as the chords are, so they join the
+  // same page rather than sitting on a card of their own -- which is also what
+  // makes one Reset all mean the whole vocabulary.
+  (title: 'The keyboard and the mouse', areas: ['keys', 'pointer']),
   (title: 'Motion', areas: ['motion']),
   (title: 'The document', areas: ['document']),
+  (title: 'The calendar boundary', areas: ['ics']),
   (title: 'Editing', areas: ['edit']),
   (title: 'The minimap', areas: ['minimap']),
   (title: 'The Intimate lens', areas: ['intimate']),
