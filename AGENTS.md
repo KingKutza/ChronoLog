@@ -209,7 +209,7 @@ over in-memory fakes (`test/store/harness.dart`), never real file I/O inside
 ### `src/` — the JavaScript reference build (retiring)
 
 The web renderer was ruled dead 2026-08-27 ("exit two"). `src/`, `tools/`,
-`test/` and `pocket-instrument.html` remain only as the differential oracle for
+`test/` remain only as the differential oracle for
 `app/tool/` and as the reference for WHAT the old surface displayed — never for
 how. They are deleted when the harnesses no longer need them. The map below
 describes them as they stand.
