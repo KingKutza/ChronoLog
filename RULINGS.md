@@ -29,6 +29,25 @@ guess cost one glance instead of a wrong record.
 
 ---
 
+**What the tests found, 9.3 — this question cannot be answered by shape.**
+
+`app/test/core/bare_number_entry_test.dart` was authored against this section
+and could not pin any Gregorian time of day. The shipped ladder carries minute
+and second BOTH at radix 60, plus a continuous `subsecond` tail, so `17:30` is
+legally hour:minute, and minute:second, and second.subsecond — three readings
+with no range to separate them. The same cut lands on the example in this
+section: `26 3:15` read as "today at 3:15" is equally legal as year 26, March
+15.
+
+So there is no disambiguation-by-shape available and no digit-count test that
+is not a Gregorian hardcode. The binding has to be ruled, not derived. The test
+asserts only what every candidate answer agrees on — a run legal at exactly one
+alignment binds there, above from now, below absent, depth is the deepest
+typed — and quantifies that over invented tail-less ladders and the 8x8x8 law,
+leaving Gregorian time of day to this ruling.
+
+---
+
 ## 6. Twelve superseded tests
 
 Wave one's rulings turned twelve existing assertions into statements of pre-9.2
@@ -76,7 +95,7 @@ That is a fixed point, not a stack.
 
 ---
 
-## 11. Does the distance between two named anchors mean anything?
+## 11. What the distance between two staples means — SETTLED, residues at 13 and 14
 
 A named anchor point's relationship to a second anchor derives no magnitude
 today, and that is deliberate rather than missing: the two points are said to
@@ -117,3 +136,139 @@ have.
 
 **Answer:**
 
+**Settled, 9.3:**
+
+Language first: staples, not anchors. A staple has no name; only the things it
+attaches do.
+
+THE PRIMARY OF A PROJECTION NEVER WARPS; EVERYTHING ELSE WARPS TO IT. Project
+the object and time bends around it. Project the frame with the object on it and
+the staples win. Project the frame with the object relative to it and the object
+bends. Frame against frame is the same sentence again. Four cases, one rule.
+
+Under it: a derived value is computed at projection time, an authored value is
+recorded in the file, and where they disagree the PROJECTION decides which
+yields, never a precedence rule in the model.
+
+What derives. A staple on a time-bearing frame is when everything it attaches
+happens; on several such frames, when they happen in each. One object stapled at
+several points to ONE time-bearing frame has a duration: the distance between
+the staples, a single difference at two and piecewise from three, one segment
+per adjacent pair. An object with one staple to each of several time-bearing
+frames has no computable duration and that is fine -- the graph still honestly
+says this is connected to that via the other, without claiming a one-math
+projection.
+
+What is authored. Events and time-bearing frames carry a duration in the save
+file. With one staple, or one per time-bearing frame, it projects the object onto
+any attached frame, builds a one-math path between two frames that each single-
+staple to it, and displays on an object stapled to nothing at all.
+
+Where authored and derived disagree at n>1, the primary rule decides. At n>2 the
+excess or shortfall is distributed along the object in proportion to each
+piecewise part's share of the total computed duration. Between two frames whose
+durations differ on the same basis, the frame projected as primary wins and
+every other frame -- with whatever objects the projection carries -- warps to
+that difference across the frame's full length, piecewise per segment from three
+staples up, the tails continuing the last segment's projection. Frames of
+DISSIMILAR basis are bridged by their staples into a one-math route: two staples
+scale the non-primary continuously, three or more that disagree scale it
+piecewise under the same tail rule.
+
+TIME-BEARING IS DERIVED, NEVER DECLARED. A frame is time-bearing if it has a
+time rule, or a basis with a time rule. It is answered at projection time like
+every other projection question: no type, no flag, no special case. A frame has
+a basis or an authored time rule, never both.
+
+LOOPS. Staples terminal on the primary make a loop outright. Staples that are
+non-terminal warp into a loop on the primary -- in Lines, the primary draws
+straight and the others loop back over it.
+
+NEIGHBOURHOOD IS A DISTANCE, AND THE DISTANCE IS AUTHORED. What is stapled here
+means every node reachable within a distance, default one -- direct staples
+only -- and the distance is a value the person sets on the surface, two or
+eleven or whatever they ask for. Not a closure the query decides for them.
+
+---
+
+## 13. Are staples sized, or is a staple's point nullable?
+
+Points have size -- 0, all, or any one-math measure (8.31). So the distance
+between two sized points is not a scalar, and "duration is the distance between
+the staples" does not say what it returns when either end is sized.
+
+Don's sharper form of it: do we support SIZED STAPLES -- a staple carrying a
+location and a magnitude per connected frame or object -- or does a staple have
+a point where NULL is a valid answer, with null read as "all" in a wording way
+but not a math way?
+
+These are different models. A sized staple makes size a property of the
+CONNECTION, so one object can be attached loosely to one frame and exactly to
+another. A nullable point makes size a property of the POINT, and "all" is then
+a reading a surface gives an absent value rather than a measure the math
+carries.
+
+What turns on it: whether a fuzzy distance is a fuzzy magnitude the engine
+computes with, or whether fuzziness never enters the arithmetic at all and only
+describes what the arithmetic declined to pin.
+
+**Answer:**
+
+---
+
+## 14. Negative duration, and how a journey backwards is projected
+
+An object whose end resolves EARLIER on a frame than its start. Don's own
+reasoning, kept because the shape of the problem is in it:
+
+> "So yes an idiot like me would author it that way, the correct data model is
+> to build an inverse frame that runs the same time backwards. The event lives
+> on that frame and only staples to the main frame at its terminal points.
+> except no that is stupid because there is no special case to say wich frame
+> the object lives on if two staples hit both ends on both frames, that is three
+> points per staple, and no reason to prefer an intrpretation. So maybe maybe
+> the idiot me is right and it dose have negative duration."
+
+> "here I wonder about the projection of the event absent frame, how do we
+> distinguish between an event that ocurs in the reverse order of time, and one
+> that reverses negates time in its duration. Like imagine that in the year 1072
+> there is a great blip, caused by the then raging wizarding war on a distant
+> continent. The event created a pocket of negative time, like a congradualations
+> everyone it is monday agin. but then that would be an event forcing math on a
+> frame wich seems a bad idea."
+
+> "Okay so lets go to the what is time dimention, here we could say wibbly
+> wobbly ball, or we could say each observers personal experience of entropy, or
+> probably some other bullshit too. Now frames (frames of reference) would
+> represent one* observer / observation and or length of whatever weird yarn
+> David Tenant used. So then here I guess we could say that negative time would
+> constitued a sort of reverse entropy wich comes down in a way to determanism,
+> if time the thing we are representing contains a random element then negative
+> time is a thing that can exist and we could do like a time anti-time reactor
+> end cause all sorts of causality problems and if not then it would mutualy
+> anlialte in a perfect one to one fasion that means it is never projected and
+> thus never renderd and thus might as well not exist for data simplicity sake.
+> But I retain that nagging feeling that there is a valid interpretaion of
+> negative time we should be able to project."
+
+> "also none of this awnsers how we represent Anna got in a time machine primed
+> it with a bag of doritos and whent back 20 years. an event Anna's time machine
+> ride started in 2026 and ended in 2006. but then do we render that event as
+> being 20 years long, there is a case where she spend 20 years in the box (I
+> hope she packed more than one bag of doritos) and one where she spends 20
+> minutes in the box (1 bag aught to be plenty) if we are looking at the
+> calendar though her trip would take up an imense amount of space, and from her
+> perspective she is still moving forward. which brings me back to two frames."
+
+Three things are tangled here, and separating them may be most of the answer:
+the SIGN of a duration between two staples; whether an object may impose math on
+a frame it is merely attached to (the 1072 blip); and whether Anna's ride is one
+object of negative extent or one object on its own forward frame stapled to wall
+time at both ends, where the twenty minutes she experiences and the twenty years
+the calendar spends are two frames' readings of one journey.
+
+The sign reaches the arithmetic settled in 11 regardless: distributing a
+shortfall proportionally across piecewise segments does something strange across
+a sign change.
+
+**Answer:**
