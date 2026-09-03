@@ -12,10 +12,19 @@
 // N-ARY, DIRECTIONAL, NOT TYPED. A staple is n ends IN ORDER, and any scopes may
 // join. The JavaScript's `connects` end-scope gate -- and `endScopePair` /
 // `stapleKindScopes`, which existed only to read it -- have no counterpart here.
-// `kind` keeps ONLY the flags that SELECT A DERIVATION: does this kind partition
-// a series, may it carry a following rule, do its ends carry a position at all,
-// does it anchor a point of an object's extent. Which things a connection joins,
-// and how many, is the author's business.
+// Which things a connection joins, and how many, is the author's business.
+//
+// THE VERB CARRIES ZERO ENGINE MEANING (ruled 8.31, melted 9.3). `kind` is a
+// WORD ON THE CLAIM -- data, like colour: projections include by it, sort by it,
+// style by it, and any meaning beyond the identification is authored there.
+// Whether a staple anchors a point of an object's extent, whether it positions
+// anything, and whether two sheets correspond are read off the SHAPE: which
+// ends are objects and which are frames, which point of the object is named,
+// whether the far end resolves. Two staples identical in every term derive
+// identically whatever word is written on them, and a verb nobody has ever
+// typed is not a special case -- it is the ordinary case. What survives in
+// [stapleKinds] is wording the cards read, plus the series' own two flags, whose
+// structural answer is a ruling Don has not given (see [StapleKind.partitions]).
 //
 // AND THE REGISTRY IS SHRINKING. Ruled 8.31: "A staple connects n points and says
 // each is the same as the other. No exceptions No special cases No extra
@@ -63,24 +72,32 @@ import 'records.dart';
 
 // --- The kind registry ------------------------------------------------------
 
-/// What a `kind` SELECTS: a derivation, and nothing about what it may join.
+/// WHAT A WORD OFFERS, not what it means.
 ///
-/// Deliberately stricter than frame traits, which stay valid data when
-/// unfamiliar. A trait is a claim about capability a renderer may ignore with no
-/// consequence; a kind nothing honours would silently move things on screen --
-/// or silently fail to.
+/// Every field here is either wording the cards read, or a SERIES flag whose
+/// structural answer is an open ruling. Nothing about an object's placement or
+/// extent is decided here any more: the shape decides, and the melt that took
+/// [anchors] out is why a staple spelled with a word nobody registered anchors
+/// exactly as `anchor` does.
 class StapleKind {
   const StapleKind(
     this.label, {
     this.partitions = false,
     this.carriesRule = false,
     this.positions = true,
-    this.anchors = false,
   });
 
   final String label;
 
   /// Does this kind divide a series' rules into segments?
+  ///
+  /// THE ONE DERIVATION STILL SELECTED BY A WORD, and deliberately so: it needs
+  /// a ruling, not a refactor. `[series <-> frame instant]` is BYTE-IDENTICAL
+  /// under `end`, `phase` and (minus its `payload.rule`) `inflection`, and the
+  /// three mean three different things -- cut the rule here, count the cycle's
+  /// phase from here, change the rule here. Melting this gate without an answer
+  /// would make every phase staple terminate its own series. Reported, not
+  /// decided.
   final bool partitions;
 
   /// May this kind carry a following rule (`payload.rule`)?
@@ -97,8 +114,6 @@ class StapleKind {
   /// function now, not a rider a kind permits.
   final bool positions;
 
-  /// Does this kind anchor a named point of an object's extent?
-  final bool anchors;
 }
 
 /// THE WORD AN ANCHORING STAPLE IS SPELLED WITH, said once. Every writer that
@@ -116,13 +131,22 @@ const Map<String, StapleKind> stapleKinds = {
   // abutment the owner ruled for completion: "the end of this todo abuts the
   // beginning of this event". Same kind, no completion special case anywhere:
   // which reading an end staple gets is the consumer's derivation, never a field
-  // on the record. `anchors: false` is load-bearing for the object case too -- a
-  // completion instant names when the todo finished, not where the object sits,
-  // so it must never relocate the extent.
+  // on the record.
+  //
+  // AND SINCE THE 9.3 MELT THE OBJECT CASE IS NOT THIS ENTRY'S BUSINESS. The
+  // `anchors: false` that used to sit here kept a completion instant from
+  // relocating the extent -- BY THE WORD, so the identical staple spelled
+  // `anchor` relocated it and this one did not. The word cannot decide that, so
+  // the shape does, and the shape says the same thing under both spellings:
+  // `[object.end = coordinate]` anchors the object's end. WHICH READING that
+  // shape gets -- an instant that relocates the extent, or only a statement of
+  // when the thing finished -- is Don's open residue, and the completion
+  // reading is unharmed either way because [ObjectFacts._instant] reads the
+  // same staple off the same shape.
   'end': StapleKind('Ends here', partitions: true),
   'inflection': StapleKind('Rule changes here', partitions: true, carriesRule: true),
   'phase': StapleKind("Anchors the cycle's phase"),
-  'anchor': StapleKind('Anchors a point', anchors: true),
+  'anchor': StapleKind('Anchors a point'),
   // Frame to frame, each end a coordinate under ITS OWN frame's law. A set of
   // these between two frames is a CORRESPONDENCE, and the substrate must not
   // assume it is monotonic, total, or one-to-one: one point on frame A may
@@ -678,11 +702,20 @@ bool isPlacementPoint(String point) => point == startPoint || point == wholePoin
 /// `point: end`, far end a Wall Time coordinate -- read as a second placement
 /// beside the start, so the same event drew twice on every lens projecting Wall
 /// Time. An anchor on any other point positions the EXTENT and is never a second
-/// mark. The anchoring trait comes from the one kind registry that already
-/// answered that question -- nothing new decides it here.
+/// mark.
+///
+/// AND THE FOURTH IS NOW THE WHOLE OF IT. The anchoring fact used to come off
+/// the kind registry -- the last place a WORD selected a derivation. What the
+/// registry answered was "does this staple anchor a point of an object's
+/// extent", and the shape answers it outright: a staple that names a point of
+/// this object which is not the whole of it, and identifies that point with
+/// something that resolves, HAS anchored it. Naming the whole is an affiliation
+/// and claims no point; an unresolvable far end claims a point and fails to
+/// find it. Both readings live in [Staples._anchorsOf] already, so nothing here
+/// needs to ask a second time: what is left for this predicate is the placement
+/// question, which is whether the point named is a PLACEMENT point.
 bool isPlacement(Relation relation, [String? objectId]) {
   if (!relation.isStaple) return false;
-  if (!(stapleKind(relation.kind)?.anchors ?? false)) return false;
   if (relation.coordinate == null) return false;
   final named = [
     for (final end in relation.readEnds)
@@ -1108,7 +1141,16 @@ class Staples {
     if (frameId == null) return const [];
     final entries = <Correspondence>[];
     for (final staple in staplesOf(frameId)) {
-      if (staple.kind != 'correspondence') continue;
+      // NO KIND GATE (the verb law). SENTENCES.md says the structural reading
+      // outright -- "two frame points made one is what we call a
+      // correspondence" -- so a correspondence is a SHAPE, not a word: this
+      // frame's own end, another frame's end, both points made one. The gate
+      // that read `kind != 'correspondence'` meant an era boundary spelled
+      // `succession` corresponded two sheets and was invisible to every caller
+      // asking whether they correspond, while the identical staple spelled
+      // `correspondence` was not. [successionEdges] already reads that boundary
+      // off the points with no kind gate; this is the same document read the
+      // same way.
       final ends = staple.readEnds;
       // Oriented per END rather than per staple: a frame stapled to itself at
       // two different points is a legitimate correspondence (a loop), and it has
@@ -1348,7 +1390,6 @@ class Staples {
   List<ConnectionRow> effectiveObjectStaples(String objectId) {
     final rows = <ConnectionRow>[];
     for (final staple in staplesForObject(objectId)) {
-      final anchors = stapleKind(staple.kind)?.anchors ?? false;
       for (final index in staple.endIndexesOf<ObjectEnd>(objectId)) {
         final fars = staple.othersThan(index);
         rows.add((
@@ -1360,8 +1401,11 @@ class Staples {
           far: fars.length == 1 ? fars.single : null,
           fars: fars,
           // An affiliation says the two belong together and nothing about where,
-          // so a derivation about position must read no claim out of it.
-          positions: anchors,
+          // so a derivation about position must read no claim out of it -- and
+          // WHICH POINT THIS END NAMES is that distinction, said in the record
+          // rather than in the word on it. The whole of a thing is not a point
+          // any position can be read off; every other point is.
+          positions: endPoint(staple.readEnds[index]) != wholePoint,
         ));
       }
     }
@@ -1394,7 +1438,15 @@ class Staples {
     var cyclic = false;
     var order = 0;
     for (final staple in staplesForObject(objectId)) {
-      if (!(stapleKind(staple.kind)?.anchors ?? false)) continue;
+      // NO KIND GATE (the verb law, ISSUES 8.31 and the 9.3 melt). The gate here
+      // read `stapleKind(kind)?.anchors`, so the same identification anchored
+      // this object's point spelled `anchor` and said nothing spelled anything
+      // else -- a word choosing a derivation. Every filter that gate stood in
+      // for is written below and is structural: an end naming the WHOLE claims
+      // no point, an end identified with nothing places nothing, and a far end
+      // that does not resolve is reported unresolved. A staple whose verb
+      // nobody has ever typed anchors exactly as `anchor` does.
+      //
       // Traversing an edge must not count as arriving back at it. A staple
       // between A and B is ONE edge, and because direction is not stored both
       // objects see it; asking B where it is while resolving A would otherwise
@@ -1977,9 +2029,14 @@ Coordinate? _incrementedToDepth(CoordinateLaw law, Coordinate value, String dept
 //
 // A thin named wrapper over the open collection, rather than the substrate's own
 // idea of a privileged record: `end` is one registry entry among several, whose
-// flags say it partitions a series and anchors nothing. This is the convenience
-// a single-end-staple editor field still wants, and the one place the engine,
-// the series editor and ICS export all find that record.
+// one surviving flag says it partitions a series. This is the convenience a
+// single-end-staple editor field still wants, and the one place the engine, the
+// series editor and ICS export all find that record.
+//
+// STILL SPELLED BY THE WORD, and it is the same open ruling [StapleKind.partitions]
+// carries: on a SERIES, `end`, `phase` and `inflection` are one shape, so a
+// structural finder here would hand the series editor a phase staple to
+// overwrite. The word stays until Don says what `[series <-> instant]` means.
 
 Relation? seriesEndStaple(Document document, String? patternId) =>
     patternId == null || patternId.isEmpty

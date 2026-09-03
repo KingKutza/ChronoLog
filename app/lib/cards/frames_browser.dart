@@ -15,6 +15,8 @@
 import 'package:flutter/material.dart';
 
 import '../chrome/controls.dart';
+import '../chrome/frame_menu.dart';
+import '../chrome/menus.dart';
 import '../chrome/projection_control.dart';
 import '../core/calendar_structure.dart';
 import '../core/records.dart';
@@ -80,7 +82,20 @@ Widget frameProjectionRow(
           ),
         ),
         SizedBox(width: cardPx(context, 'card.gap')),
-        Expanded(child: cardLink(context, frame.title ?? frame.id, onOpen)),
+        // THE FRAME'S VERBS, WHERE THE FRAME IS NAMED (ISSUES 9.2). The one
+        // source -- the same rows the reading on the bar offers -- rather than
+        // a second list spelled for this surface.
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onSecondaryTapUp: (details) => showChronoMenu(
+              context,
+              details.globalPosition,
+              frameMenu(context, view, frame.id),
+            ),
+            child: cardLink(context, frame.title ?? frame.id, onOpen),
+          ),
+        ),
         if (basisGap)
           Tooltip(
             message: 'No basis: this frame counts in nothing, so it projects nothing.',

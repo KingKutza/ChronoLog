@@ -37,6 +37,7 @@ import '../marks.dart';
 import '../now.dart';
 import '../radial/cycles.dart';
 import '../radial/geometry.dart';
+import '../zones.dart';
 import '../tunables.dart';
 
 /// Every number the curve lenses draw with that the substrate had not already
@@ -272,10 +273,32 @@ abstract class CurvePainter extends LensPainter {
   /// bijection over the drawn window and a wheel notch can spin it.
   double daysToAngle(Rational days) => startRay + progressOf(days) * cycle.turns * math.pi * 2;
 
+  /// The exact inverse of [daysToAngle], COUNTED THROUGH THE TURNS as that one
+  /// counts. It does not wrap: an angle two turns past the start ray names a day
+  /// two turns along, which on a spiral is a different day from the one on the
+  /// same ray one turn in. Wrapping here would collapse every turn onto the
+  /// first and stop the pair being a bijection at all.
   Rational angleToDays(double angle) {
     final progress = (angle - startRay) / (cycle.turns * math.pi * 2);
     return cycle.start + (cycle.end - cycle.start) * Rational.parse('$progress');
   }
+
+  /// Where the angle a pointer actually lands at sits on the turn THIS surface
+  /// drew.
+  ///
+  /// `atan2` answers in `(-pi, pi]` and the start ray is `-pi/2`, so the raw
+  /// angle of the upper-left quadrant read a NEGATIVE progress: a day before
+  /// `cycle.start`, which `project` then refused, and a click there found the
+  /// lens disagreeing with itself (ISSUES 9.3). The remainder is taken with `%`,
+  /// which is non-negative for a positive divisor -- `remainder` keeps the sign
+  /// and would put the bug straight back.
+  ///
+  /// ONE TURN IS WHAT AN ANGLE CAN NAME. A surface winding more than one turn
+  /// puts many instants on the same ray, so its angle alone is the inverse of
+  /// nothing; such a surface reads the coordinate that does not repeat -- its
+  /// RADIUS -- and says so by overriding [unproject], as Spiral does. Here the
+  /// wrap is the whole answer, and on a one-turn window it IS the bijection.
+  double angleOnTurn(double angle) => startRay + (angle - startRay) % (math.pi * 2);
 
   @override
   Offset? project(Rational days) =>
@@ -283,16 +306,25 @@ abstract class CurvePainter extends LensPainter {
       ? null
       : polar(centre, radiusOf(0, progressOf(days)), daysToAngle(days));
 
+  /// THE SURFACE REACHES AS FAR AS ITS INK, NOT AS FAR AS ITS CENTRELINE
+  /// (ISSUES 9.3). A band is stroked [bandWidth] wide about its own radius, so
+  /// the outermost ring's ink ends half a band past [outer] -- and `project`
+  /// itself answers exactly [outer] for the outer ring, which a bound of
+  /// `outer` refused on the last bit of a double. A painter that knows both
+  /// directions may not refuse the very point it drew, so the bound is derived
+  /// from the drawing: the ink, plus whatever grace `curve.margin` states.
   @override
   Rational? unproject(Offset at) {
     final radius = (at - centre).distance;
-    if (cycle.period <= Rational.zero || radius > outer + scene.dim('curve.margin')) return null;
-    return angleToDays(math.atan2(at.dy - centre.dy, at.dx - centre.dx));
+    final reach = outer + bandWidth / 2 + scene.dim('curve.margin');
+    if (cycle.period <= Rational.zero || radius > reach) return null;
+    return angleToDays(angleOnTurn(math.atan2(at.dy - centre.dy, at.dx - centre.dx)));
   }
 
   @override
   void paint(Canvas canvas, Size size) {
     hits.clear();
+    zones.clear();
     refusals.clear();
     if (cycle.refusal case final String message) {
       refusals.add((source: lens, message: message));
@@ -316,10 +348,32 @@ abstract class CurvePainter extends LensPainter {
       ..sort((a, b) => weights[b.identity]!.weight.compareTo(weights[a.identity]!.weight));
     final admitted = admit(ranked, capacity, queryTruncated: window.truncated);
     final cascade = ColorCascade(scene.engine, scene.projection, scene.theme);
-    final drawn = bandsOf(admitted.drawn);
+    // FILL IS GROUND, ON A RING TOO (ISSUES 9.2). A ground never enters the band
+    // packing: on Radial a band is a frame crossed with a group, and a ground
+    // put into one would be a ring of its own that the figures it covers are
+    // nowhere near. A GROUND SPANS BY NATURE, so it spans the surface's whole
+    // radial reach for its own arc and the figures read over it wherever their
+    // own rings put them.
+    final grounds = [
+      for (final fact in admitted.drawn)
+        if (zoneFill(scene.engine, fact, scene.tunable)) fact,
+    ];
+    final drawn = bandsOf([
+      for (final fact in admitted.drawn)
+        if (!zoneFill(scene.engine, fact, scene.tunable)) fact,
+    ]);
     bands = drawn.isEmpty ? 1 : drawn.length;
     radii = bandRadii(bands);
-    paintTrack(canvas, cascade, drawn);
+    // A track whose figure this size cannot hold SAYS SO. The geometry refuses
+    // rather than drawing a pinched or backwards ribbon (ISSUES 9.3), and a
+    // lens paints its refusals and never throws, so the sentence lands in the
+    // same list a cycle refusal lands in and the rest of the scene still draws.
+    try {
+      paintTrack(canvas, cascade, drawn);
+    } on GeometryRefusal catch (refused) {
+      refusals.add((source: lens, message: refused.message));
+    }
+    _paintGrounds(canvas, grounds, cascade);
     final labels = _paintGuide(canvas);
     for (final (index, band) in drawn.indexed) {
       labels.addAll(_paintBand(canvas, band, index, weights, cascade));
@@ -347,6 +401,40 @@ abstract class CurvePainter extends LensPainter {
       );
     }
     paintRefusals(canvas, size);
+  }
+
+  /// Every ground, over its own arc, through the one pass every timed lens
+  /// shares. Drawn after the track and before the bands, which is what "beneath
+  /// everything" means on a surface whose track is the paper.
+  void _paintGrounds(Canvas canvas, List<Fact> grounds, ColorCascade cascade) {
+    for (final fact in grounds) {
+      final end = fact.day + scene.engine.eventDurationDays(fact.event);
+      final shape = groundArc(fact.day, end);
+      paintGround(
+        canvas,
+        this,
+        fact,
+        shape.getBounds(),
+        zoneSegmentOf(continuation: fact.day < cycle.start, continuesAfter: end > cycle.end),
+        cascade.colorOf(fact),
+      );
+      hits.add((
+        bounds: shape.getBounds(),
+        shape: shape,
+        grab: null,
+        fact: fact,
+        identity: fact.identity,
+      ));
+    }
+  }
+
+  /// THE REACH A GROUND COVERS ON THIS CURVE, between the two instants. Radial
+  /// spans every ring it has; Spiral spans its one track, whose radius is itself
+  /// the coordinate and cannot be spanned without covering other turns.
+  Path groundArc(Rational start, Rational end) {
+    final from = daysToAngle(start < cycle.start ? cycle.start : start);
+    final to = daysToAngle(end > cycle.end ? cycle.end : end);
+    return arcBand(centre, (outer + inner) / 2, (outer - inner) / 2, from, to);
   }
 
   /// The guide ring: the tick ladder from the law -- a 23-hour day gets 23 ticks

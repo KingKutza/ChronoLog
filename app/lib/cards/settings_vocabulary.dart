@@ -158,6 +158,21 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '10',
     high: '10000',
   ),
+  'card.pickerGrip': SettingSaid(
+    'Size of a picker handle',
+    'How large the grab handle on the colour field and the hue track is drawn, '
+        'in pixels.',
+    low: '6',
+    high: '30',
+  ),
+  'card.regionHeight': SettingSaid(
+    'How tall a region of sentences gets',
+    'How much room the sentences on a card take before that region rides its '
+        'own scroll, in pixels. The header above it never moves, so an object '
+        'with two hundred staples costs the same height as one with two.',
+    low: '120',
+    high: '1200',
+  ),
   'card.rowHeight': SettingSaid(
     'Height of a list row',
     'How tall one row of a card list stands, in pixels.',
@@ -184,6 +199,14 @@ const Map<String, SettingSaid> settingVocabulary = {
     'How large the little mark beside a card\'s title is drawn, in pixels.',
     low: '8',
     high: '40',
+  ),
+  'card.stapledDistance': SettingSaid(
+    'How far "stapled here" looks',
+    'A neighbourhood is a distance. One shows what is stapled directly to this; '
+        'two shows their neighbours too, and so on. Every card offers the '
+        'number, so nothing decides the reach for you.',
+    low: '1',
+    high: '8',
   ),
   'card.swatch': SettingSaid(
     'Size of a colour swatch',
@@ -290,6 +313,15 @@ const Map<String, SettingSaid> settingVocabulary = {
     'The room between a control\'s edge and the word inside it, in pixels.',
     low: '0',
     high: '24',
+  ),
+  'chrome.readingWidth': SettingSaid(
+    'How wide a reading may get',
+    'The widest, in pixels, that a drop-down showing a READING — the frames '
+        'this view projects, written out — may draw on a bar. A reading grows '
+        'with the document and the bar does not, so past this width it is '
+        'trimmed with an ellipsis and read in full inside the drop.',
+    low: '80',
+    high: '600',
   ),
   'chrome.rowHeight': SettingSaid(
     'Height of a menu row',
@@ -420,10 +452,30 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '10',
     high: '2000',
   ),
+  'edit.newPointFar': SettingSaid(
+    'Where a new sentence touches the other thing',
+    'Which point of the far object a sentence you start touches by default — '
+        'its start, its end, its midpoint, or the whole of it. Say another and '
+        'the row shows it before it writes it.',
+  ),
+  'edit.newPointNear': SettingSaid(
+    'Where a new sentence touches this thing',
+    'Which point of the object you are editing a sentence you start touches by '
+        'default. Stapling the end of this to the start of that is one word '
+        'away in each of the two keys.',
+  ),
   'edit.newSpanDays': SettingSaid(
     'How long a new thing lasts',
     'The span a freshly minted object claims, in days, and the step Push '
         'forward moves a placement by.',
+    low: '0',
+    high: '30',
+  ),
+  'edit.pasteStepDays': SettingSaid(
+    'How far a pasted copy lands',
+    'How far a keyboard duplicate sits from the thing it was duplicated from, '
+        'in days. A twin exactly on its source draws as one mark, so the paste '
+        'steps -- and how far it steps is yours.',
     low: '0',
     high: '30',
   ),
@@ -712,6 +764,14 @@ const Map<String, SettingSaid> settingVocabulary = {
     'How rounded the corners of a block are, in pixels.',
     low: '0',
     high: '16',
+  ),
+  'intimate.span': SettingSaid(
+    'Days on screen in Intimate',
+    'How many days Intimate shows at once before anything is said about it in '
+        'the view. A control writes whatever the view itself says; this is what it '
+        'falls back to.',
+    low: '1',
+    high: '31',
   ),
   'intimate.rail': SettingSaid(
     'Width of the time rail',
@@ -1137,6 +1197,13 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '0.01',
     high: '1',
   ),
+  'minimap.busy': SettingSaid(
+    'What makes a stretch look busy',
+    'The formula the waveform reads busyness from, over four things each object '
+        'carries: how much structure it holds beyond the staple that places it, '
+        'how long it lasts in days, its composed display weight, and its own '
+        'authored busy handling.',
+  ),
   'minimap.busyQuantile': SettingSaid(
     'What counts as busy',
     'The share of slices a slice must be busier than to read as a crest.',
@@ -1396,6 +1463,21 @@ const Map<String, SettingSaid> settingVocabulary = {
   // THE POINTER CHORDS (ISSUES 9.2, the keybindings page). Said in the same
   // words the keyboard chords are said in, because they belong on the same page
   // and answer the same question: what does this press mean?
+  'perf.frameMillis': SettingSaid(
+    'How long a frame may take',
+    'What a surface already up must keep to for motion to read as butter, in '
+        'milliseconds. Written as the rate it comes from, so it reads as sixty '
+        'a second rather than as a rounded number.',
+    low: '1000 / 240',
+    high: '1000 / 15',
+  ),
+  'perf.paintMillis': SettingSaid(
+    'How long a first paint may take',
+    'What the FIRST paint of a heavy document may take before the wait is a '
+        'thing a person notices, in milliseconds.',
+    low: '50',
+    high: '2000',
+  ),
   'pointer.pan': SettingSaid(
     'Drag to move the view',
     'The press that slides the view under the pointer instead of touching what '
@@ -1437,6 +1519,13 @@ const Map<String, SettingSaid> settingVocabulary = {
         'milliseconds.',
     low: '100',
     high: '800',
+  ),
+  'pointer.dropInto': SettingSaid(
+    'Drop inside a container',
+    'Which modifier, held while a window is dragged, drops it INTO the '
+        'container under the pointer rather than beside it on the stage. A '
+        'plain drag always targets the stage; this one joins the inner tree, '
+        'and the drop preview outlines which is about to happen.',
   ),
   'pointer.dragThreshold': SettingSaid(
     'How far before it is a drag',
@@ -1828,6 +1917,12 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '4',
     high: '40',
   ),
+  'stage.stripStays': SettingSaid(
+    'Keep the tab strip on a single tab',
+    'Whether a stack of tabs keeps its strip when it thins down to one tab. Off '
+        'ships, because a window wears no resting chrome; on keeps the tab and '
+        'its close mark standing where the hand last found them.',
+  ),
   'stage.handleBand': SettingSaid(
     'Where the pointer finds the handle',
     'How wide the band down the leading edge of a window is, in pixels — bring '
@@ -1953,6 +2048,14 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '16',
     high: '80',
   ),
+  'todo.chooserRows': SettingSaid(
+    'Rows in the column chooser',
+    'How many frames the board lists at once when you stand a column or switch '
+        'one. The list is a window over a find, never the whole document, so this '
+        'is how much of the find you see before typing narrows it.',
+    low: '3',
+    high: '40',
+  ),
   'todo.columnWidth': SettingSaid(
     'Width of a board column',
     'How wide one column of the board runs, in pixels.',
@@ -2016,11 +2119,32 @@ const Map<String, SettingSaid> settingVocabulary = {
   ),
 
   // --- The Tree lens --------------------------------------------------------
+  'tree.edgeLength': SettingSaid(
+    'How long a staple wants to be',
+    'The distance the layout pulls two stapled things toward, in pixels. Larger '
+        'spreads a neighbourhood out; smaller draws it tight.',
+    low: '30',
+    high: '600',
+  ),
   'tree.edgeWidth': SettingSaid(
     'Thickness of a connection',
     'How thick the line between two nodes is drawn, in pixels.',
     low: '0',
     high: '10',
+  ),
+  'tree.settleCool': SettingSaid(
+    'How fast the layout cools',
+    'How much of its movement each settling pass keeps. Near one settles slowly '
+        'and evenly; lower stops sooner and rougher.',
+    low: '0.5',
+    high: '0.999',
+  ),
+  'tree.settleSteps': SettingSaid(
+    'Passes the layout may settle in',
+    'How many passes the layout is allowed before it stands still, however '
+        'unsettled it still is. More passes is a calmer picture and more work.',
+    low: '20',
+    high: '2000',
   ),
   'tree.halfDistance': SettingSaid(
     'How fast far things fade',

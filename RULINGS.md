@@ -271,4 +271,126 @@ The sign reaches the arithmetic settled in 11 regardless: distributing a
 shortfall proportionally across piecewise segments does something strange across
 a sign change.
 
+**Found by the verb melt, 9.3 — the abs() is now reachable.**
+
+`_deriveExtent` carries a pre-existing `derived.abs()`. Until the melt it could
+not be reached on a completion shape; it can now. A todo placed at 09:00 with a
+completion staple at 04:00 the same day derives a magnitude of five hours
+FORWARD, so the extent reads 09:00 to 14:00 and the completion instant that
+produced it sits outside the extent entirely. Nothing was added — no sign
+convention, no refusal — but that `abs()` is the code silently answering this
+question, and it answers it wrong in a way a person can see on a card.
+
 **Answer:**
+
+---
+
+## 15. What does a staple between a series and an instant MEAN?
+
+The verb melt (9.3) took the word out of every derivation but one, and stopped
+at this because the record cannot tell three sentences apart.
+
+`[series <-> frame instant]` is BYTE-IDENTICAL spelled `end`, spelled `phase`,
+and spelled `inflection` (that last minus its `payload.rule`). The three are
+meant to mean three different things: cut the reigning rule here; count the
+cycle's phase for the whole series; change the rule from here on.
+
+So `seriesSegments`, `seriesEndStaple` and `seriesPhaseDays` still read the
+word, and they are the last three readers in the engine. Melting them without an
+answer makes every phase staple terminate its own series, and hands the series
+editor a phase staple to overwrite as if it were an end.
+
+One fact for the decision: NOTHING in `lib/` or `test/` mints a `'phase'`
+staple. `seriesPhaseDays` has zero producers, and its only distinct behaviour is
+replacing every segment's base for the whole series — which the segment
+machinery does not otherwise do.
+
+Is a staple between a series and an instant a cut, a phase, both, or is the
+rule simply PIECEWISE on the identified point, which is what SENTENCES.md
+already describes and would make all three one sentence?
+
+**Answer:**
+
+---
+
+## 16. An end instant relocates the extent — decided by default, needs ratifying
+
+This is the `[object.end = coordinate]` residue, and it is no longer neutral:
+the verb melt had to land somewhere and it landed here, so the code now has an
+answer that nobody ruled.
+
+Before the melt only the word `anchor` made an end-point staple anchor. Every
+other spelling — `end`, `phase`, `correspondence`, `succession`, and any word a
+person invents — did not. The melt made them ALL anchor, which is the reading
+the minority spelling had.
+
+Measured, all three spellings now agreeing, which is the law working:
+
+    end / anchor / glorps  ->  start=09:00  end=14:00  derived=true
+
+The alternative reading — none of them anchors — kills `_fromAnchor`'s `end`
+case, `_derivedMagnitude`'s `start+end`, and SENTENCES.md's "when both the
+beginning and the end are stapled, duration is derived", and takes the 17 test
+files carrying `point: 'end'` red.
+
+So: does an end instant RELOCATE an object's extent (today's answer), or does
+an object keep its own duration and the end instant say something else about
+it? The revert is one line — re-gate `Staples._anchorsOf` on
+`isPlacementPoint(role)` instead of dropping the gate — and it decides the
+question the other way at the cost of the corpus.
+
+**Answer:**
+
+---
+
+## 17. Which column does an entry head, when several admit it?
+
+A todo appears in every column whose projection admits it, and that is right.
+But a LIST files each entry once, so something has to choose which far end an
+entry reads under, and that choice is not ruled anywhere.
+
+By plain id sort the winner was the calendar frame, so every errand read under
+"Wall time" — technically true and useless. The board now files an entry under
+the first far end that BEARS NO TIME, falling back to a time-bearing one only
+when that is all the entry has. The reasoning is Don's own: "I could leave them
+there, using the frame as a todo list" (ISSUES 174) — the group is the list, so
+the group is what the list should head under.
+
+That is a decision taken on an unruled point and it should be ratified or
+overturned. The alternatives, none obviously wrong: the heaviest far end by
+display weight; the nearest by graph distance; the one the person last authored;
+or the entry heads under every far end and the LIST, not the board, is what
+should stop pretending an entry lives in one place.
+
+**Answer:**
+
+---
+
+## 18. When does a coordinate field commit — on typing, or on Enter?
+
+Two committed tests demand opposite things after the same call, and both are
+green against their own reading, so one of them is wrong and neither can be
+retired without your word.
+
+`test/cards/coordinate_field_test.dart` requires `enterText` ALONE to commit —
+type into the field and the value is said.
+
+`test/chrome/field_chrome_test.dart` requires the opposite after that same call:
+"a coordinate field commits once, on Enter — never per keystroke."
+
+The second is the newer one and it came from a real report: a field that
+committed on every keystroke wrote a garbage coordinate for every intermediate
+state a person typed through, and every one of those went on the undo history.
+That argues Enter.
+
+The first is what makes a field feel like a field: type `3` and the surface
+already knows you mean the third. That argues typing, with the undo history
+coalescing a run of keystrokes into one entry rather than the field refusing to
+speak until Enter.
+
+So the real question underneath: is commit-on-Enter the RULE, or is
+commit-as-you-type the rule with the undo history responsible for not recording
+every letter? The answer decides which of the two tests is retired.
+
+**Answer:**
+

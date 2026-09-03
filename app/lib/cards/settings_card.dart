@@ -248,7 +248,7 @@ class _SettingsCardState extends State<SettingsCard> {
         context,
         settingLabel(key),
         truth,
-        (next) => setState(() => settings.set(key, next ? 'true' : 'false')),
+        (next) => setState(() => saySetting(context, key, next ? 'true' : 'false')),
       ),
       // THE CONTROL FITS THE VALUE'S SHAPE. A number whose key states where it
       // ordinarily rides gets the line; one that states nothing gets the pair of
@@ -259,13 +259,13 @@ class _SettingsCardState extends State<SettingsCard> {
         high: rail.high,
         steps: cardPx(context, 'card.railSteps').round(),
         written: source,
-        onChanged: (written) => setState(() => settings.set(key, written)),
+        onChanged: (written) => setState(() => saySetting(context, key, written)),
       ),
       final Rational number => namedNumber(
         context,
         settingLabel(key),
         number,
-        (next) => setState(() => settings.set(key, next.toJson())),
+        (next) => setState(() => saySetting(context, key, next.toJson())),
       ),
       _ => controlChip(
         context,
@@ -274,7 +274,7 @@ class _SettingsCardState extends State<SettingsCard> {
         child: CardField(
           value: settings.text(key),
           width: cardPx(context, 'card.fieldWidth'),
-          onChanged: (written) => settings.setText(key, written),
+          onChanged: (written) => saySetting(context, key, written),
         ),
       ),
     };
@@ -308,7 +308,7 @@ class _SettingsCardState extends State<SettingsCard> {
                 'Reset ${settingLabel(key)}',
                 glyph: '↺',
                 hint: 'Back to the shipped default',
-                onTap: () => setState(() => settings.reset(key)),
+                onTap: () => setState(() => unsaySetting(context, key)),
               ),
           ],
         ),
@@ -317,7 +317,7 @@ class _SettingsCardState extends State<SettingsCard> {
             label: key,
             source: source,
             evaluate: (written) {
-              final refused = settings.set(key, written);
+              final refused = saySetting(context, key, written);
               if (refused != null) throw MathRefusal(refused);
               return '${settings.raw(key)}';
             },

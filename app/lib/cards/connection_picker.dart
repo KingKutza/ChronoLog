@@ -13,6 +13,9 @@ import 'package:flutter/material.dart';
 
 import '../chrome/controls.dart';
 import '../core/indexes.dart';
+import '../core/math.dart';
+import '../core/pile_search.dart';
+import '../core/projection.dart';
 import '../core/records.dart';
 import 'card_chrome.dart';
 
@@ -36,6 +39,21 @@ typedef ConnectableHits = ({List<Connectable> hits, int more, bool scanned});
 /// bound on the rest. [scan] survives as what it should always have been: a cap
 /// on the ORDERING work, and because candidates arrive best-tier first it can
 /// only cost order among equals -- never findability.
+/// DOES THIS QUERY SPEAK THE PILE GRAMMAR (ISSUES 9.2: "it is a search term,
+/// not a new panel")?
+///
+/// It does when it NAMES one of the graph measures. Parsing alone cannot be the
+/// test -- a bare word parses as an identifier in the one math, and "orphan" is
+/// a thing people type looking for a title. So the door is the vocabulary: a
+/// query that says `staples`, `unresolved` or `neighbours` is asking about the
+/// graph, and every other query is the title find it always was.
+bool speaksPileGrammar(String query) {
+  for (final measure in const [stapleCountName, unresolvedCountName, neighbourCountName]) {
+    if (RegExp(r'\b' + measure + r'\b').hasMatch(query)) return true;
+  }
+  return false;
+}
+
 ConnectableHits searchConnectables(
   Document document,
   String query, {
@@ -44,8 +62,28 @@ ConnectableHits searchConnectables(
   String? exclude,
   bool frames = true,
   bool objects = true,
+  ProjectionEngine? engine,
 }) {
   if (query.trim().isEmpty) return (hits: const [], more: 0, scanned: false);
+  // THE PILE GRAMMAR, IN THE BOX A PERSON ALREADY TYPES INTO. One search
+  // surface: `staples == 0` finds the orphans here, exactly as it does
+  // anywhere else, and a query the algebra refuses falls back to the title find
+  // rather than answering nothing.
+  if (objects && speaksPileGrammar(query)) {
+    try {
+      final over = engine ?? ProjectionEngine(document);
+      final found = searchPile(over, query, window: window);
+      final index = titleIndexOf(document);
+      final hits = [
+        for (final id in found.ids)
+          if (id != exclude)
+            (id: id, label: index.labelOf(id), kind: index.kindOf(id)),
+      ];
+      return (hits: hits, more: found.more, scanned: true);
+    } on MathRefusal {
+      // Not a sentence the algebra can read, so it was never a pile search.
+    }
+  }
   final index = titleIndexOf(document);
   final matches = index.matching(query);
   final candidates = <({String id, int tier})>[];
@@ -55,10 +93,10 @@ ConnectableHits searchConnectables(
     final kind = index.kindOf(entry.key);
     if (kind == 'frame' && !frames) continue;
     if (kind == 'object' && !objects) continue;
-    if (candidates.length >= scan) {
-      more += 1;
-      continue;
-    }
+    // THE SCAN CAPS THE WORK, and stopping is the cap. Counting on past it
+    // would be work the budget said not to do -- [more] is a LOWER bound on
+    // what was left, and zero is a lower bound like any other.
+    if (candidates.length >= scan) break;
     candidates.add((id: entry.key, tier: entry.value));
   }
   // AMONG EQUALS, THE MOST CONNECTED FIRST. The pile is a graph, so project the

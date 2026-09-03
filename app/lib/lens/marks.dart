@@ -154,6 +154,7 @@ class MarkSpec {
     required this.theme,
     this.bucket,
     this.read,
+    this.weight = 1,
   });
 
   final String sigil, state;
@@ -161,6 +162,27 @@ class MarkSpec {
   final ChronoTheme theme;
   final int? bucket;
   final Tunable? read;
+
+  /// HOW HEAVILY THIS MARK STATES ITSELF, over and above what its own falloff
+  /// and state already say.
+  ///
+  /// FILL IS GROUND, A MARK IS FIGURE (Don, ruled). A ground draws the same
+  /// vocabulary a figure does -- it is the same object, and its sigil is how a
+  /// person knows what it is -- but at GROUND weight, because a sigil stamped at
+  /// full strength on a wash is a figure sitting on its own background. One
+  /// number, so nothing here needs to know what a zone is.
+  final double weight;
+
+  /// The same mark, stated at [at] of the weight it states itself at now.
+  MarkSpec at(double at) => MarkSpec(
+    sigil: sigil,
+    state: state,
+    color: color,
+    theme: theme,
+    bucket: bucket,
+    read: read,
+    weight: weight * at,
+  );
 
   String get glyph => sigilGlyphs[sigil] ?? sigilGlyphs['point']!;
 
@@ -178,7 +200,7 @@ class MarkSpec {
       pixels(read, sigil == 'terminator' ? 'mark.strokeStrong' : 'mark.stroke');
 
   double get opacity {
-    final faded = falloffOpacity(bucket, read);
+    final faded = falloffOpacity(bucket, read) * weight;
     if (state == 'done') return faded * pixels(read, 'mark.doneOpacity');
     if (state == 'sparse') return faded * pixels(read, 'mark.sparseOpacity');
     return faded;

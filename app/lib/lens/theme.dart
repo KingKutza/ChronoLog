@@ -26,26 +26,38 @@ import 'package:flutter/material.dart';
 /// text is comfortably readable, and faint is nearly ink.
 const double _hairRatio = 1.24, _strongRatio = 4.8, _faintRatio = 8.5;
 
-/// Paper carried toward [toward] until it holds [ratio] against paper. Solved
-/// rather than mixed: luminance is not linear in the mix, so the ratio is found
-/// by bisection -- ten steps, exact to a thousandth of the way.
-Color _atRatio(Color paper, Color toward, double ratio) {
-  double contrast(Color of) {
-    final (low, high) = (paper.computeLuminance(), of.computeLuminance());
-    return low > high ? (low + 0.05) / (high + 0.05) : (high + 0.05) / (low + 0.05);
-  }
+/// What the eye measures between two tones: WCAG's `(L + 0.05)` ratio, in the
+/// one place every ratio in this file is taken.
+double contrastBetween(Color a, Color b) {
+  final (low, high) = (a.computeLuminance(), b.computeLuminance());
+  return low > high ? (low + 0.05) / (high + 0.05) : (high + 0.05) / (low + 0.05);
+}
 
-  if (contrast(toward) <= ratio) return toward;
+/// [base] carried toward [toward] until it FIRST holds [ratio] against [base].
+/// Solved rather than mixed: luminance is not linear in the mix, so the point is
+/// found by bisection.
+///
+/// It answers the near side of the crossing, never the midpoint of the last
+/// bracket: a tone that lands a hair UNDER its stated ratio is a tone the eye
+/// cannot tell from its ground, which is the whole defect this file's derived
+/// tones exist to avoid. The bracket is halved to the limit of a double, so
+/// "at least the ratio" and "the ratio" are the same answer to any measurement.
+///
+/// A [toward] that cannot reach the ratio at all is answered in full -- the
+/// furthest this pair of colours can go is the best this pair can do.
+Color _atRatio(Color base, Color toward, double ratio) {
+  if (contrastBetween(base, toward) <= ratio) return toward;
   var (low, high) = (0.0, 1.0);
-  for (var step = 0; step < 10; step += 1) {
+  for (var step = 0; step < 60; step += 1) {
     final middle = (low + high) / 2;
-    if (contrast(Color.lerp(paper, toward, middle)!) < ratio) {
+    if (middle <= low || middle >= high) break;
+    if (contrastBetween(base, Color.lerp(base, toward, middle)!) < ratio) {
       low = middle;
     } else {
       high = middle;
     }
   }
-  return Color.lerp(paper, toward, (low + high) / 2)!;
+  return Color.lerp(base, toward, high)!;
 }
 
 /// The authored roles, in the order a theme editor shows them.
@@ -122,6 +134,34 @@ class ChronoTheme extends ThemeExtension<ChronoTheme> {
   late final Color hair = _atRatio(paper, ink, _hairRatio);
   late final Color strong = _atRatio(paper, ink, _strongRatio);
   late final Color faint = _atRatio(paper, ink, _faintRatio);
+
+  /// A SURFACE STATES ITS STEP FROM ITS GROUND (ISSUES 9.2, Don: "the paper
+  /// colour blending into itself in the area").
+  ///
+  /// The three surfaces are elevation, and elevation that names a second TOKEN
+  /// is only separation while the palette happens to keep those two tokens
+  /// apart. Author a flat palette -- ground, surface and paper one colour -- and
+  /// every seam in the program vanishes at once, with nothing wrong anywhere.
+  ///
+  /// So a surface says its RELATION instead: one step above the ground it
+  /// actually sits on, and the step is the ground carried toward a pole until it
+  /// holds the hairline's own ratio against that ground. The yardstick is the
+  /// one the program already ships -- the contrast a hairline holds against
+  /// paper -- not a separation invented here.
+  ///
+  /// ELEVATION IS LIGHTER, as the shipped preset reads it (ground, then surface,
+  /// then paper), so the pole is white wherever white has the room. Only a
+  /// ground already so near white that lightening cannot reach the ratio steps
+  /// DOWN instead: there, one step further up does not exist, and saying so with
+  /// a tone the eye can find beats a step nobody can see.
+  ///
+  /// It is a function of the ground alone, so two surfaces on one ground agree
+  /// and three surfaces deep still read as three.
+  Color step(Color ground) {
+    const white = Color(0xffffffff), black = Color(0xff000000);
+    final up = contrastBetween(ground, white) >= _hairRatio;
+    return _atRatio(ground, up ? white : black, _hairRatio);
+  }
 
   /// Neutral ink: what a mark is drawn in when NOTHING is authored. Meaning is
   /// authored, so an unauthored object gets no colour, not an inferred one --

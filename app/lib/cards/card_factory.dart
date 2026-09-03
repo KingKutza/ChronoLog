@@ -34,10 +34,33 @@ const Map<String, String> cardTunableDefaults = {
   'card.noteLines': '12',
   'card.pickerWidth': '150',
   'card.pickerHeight': '200',
+  // The grab handle on the colour field and the hue track.
+  'card.pickerGrip': '12',
   // Overscale: a typeahead never enumerates. It lists this many hits and
   // reports the rest as a lower bound, exactly as a truncated fact window does.
   'card.searchWindow': '12',
   'card.searchScan': '2000',
+  // HOW FAR "STAPLED HERE" LOOKS. A neighbourhood is a DISTANCE and the
+  // distance is authored (ruled 2026-09-03): one means the things stapled
+  // directly to this, two means their neighbours too, and the row offers the
+  // number so nobody has to accept the one this file happens to prefer.
+  'card.stapledDistance': '1',
+  // HOW TALL A REGION OF SENTENCES GETS BEFORE IT SCROLLS ON ITS OWN (ISSUES
+  // 9.2: "the staple cards are so tall that it can be overwhelming"). The
+  // header stays put; the region below it takes this much room and then rides
+  // its own scroll, so two hundred staples cost the same height as two.
+  'card.regionHeight': '30 * 16',
+};
+
+/// The card layer's WORDS. A chord is not arithmetic and neither is the name of
+/// a point, so these ship as text rather than as expressions.
+const Map<String, String> cardTextDefaults = {
+  // WHICH POINT EACH END OF A NEW OBJECT-TO-OBJECT SENTENCE STARTS AT (ISSUES
+  // 9.2, the horde: thirteen todos stapled to a meeting drew nowhere because
+  // the + row wrote the whole on both ends). Don's own preference -- this
+  // object's start on that one's end -- is one word away in either key.
+  'edit.newPointNear': 'start',
+  'edit.newPointFar': 'start',
 };
 
 /// What a card was asked to edit: its class, the record it names, and the seed
@@ -118,6 +141,11 @@ class CardFactory {
       _card('newFrame', 'New frame', kind: kind, nonce: createId('card'));
 
   TileSpec framesBrowser() => _card('frames', 'Frames');
+
+  /// THE WHOLE LIST OF WHAT IS STAPLED TO ONE RECORD (ISSUES 9.2). The same
+  /// class as the frames browser -- a list of records with a find -- differing
+  /// only in which list it is, which is what the request's own id says.
+  TileSpec stapledBrowser(String recordId) => _card('frames', 'Stapled here', id: recordId);
 
   TileSpec documentCard() => _card('document', 'Document');
 

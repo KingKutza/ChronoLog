@@ -1,9 +1,18 @@
 // Intimate: N DAY COLUMNS side by side, each a continuous vertical surface that
 // scrolls THROUGH midnight.
 //
-// The column count is the lens's own span -- `back + forward + 1` -- clamped to
-// what the width can hold at `intimate.minColumnPixels` a column, never below
-// one. The hour rail is drawn ONCE, on the left: every column shares the same
+// THE SPAN IS THE SPAN (ISSUES 9.2, Don: "days ahead/behind seems to cap out for
+// some reason"). The column count is the view's own `span`, said once, and a day
+// column is exactly the area over it. The cap that used to sit here was measured
+// in PIXELS -- the smaller of the span asked for and what `intimate.minColumnPixels`
+// said fit -- so a tile showed seven columns however high the control counted and
+// nothing said why. The one wrong answer to "show me thirty days" is to silently
+// show seven; thirty narrow columns ruled at a coarser rung is a picture, and the
+// rule ladder is what makes it one. `intimate.minColumnPixels` survives as the
+// width at which a COLUMN steps a rung, never as the width at which a day
+// vanishes.
+//
+// The hour rail is drawn ONCE, on the left: every column shares the same
 // time of day at the same height, because the columns differ by whole days. A
 // day boundary is a rule with the closing day named to its left and the opening
 // day to its right, drawn where the LAW puts it, in every column.
@@ -62,7 +71,14 @@ import 'month_grid.dart';
 
 const Map<String, String> intimateTunableDefaults = {
   'intimate.rail': '46',
-  // The narrowest a day may become before the lens shows fewer of them.
+  // HOW MANY DAYS ARE ON SCREEN, said once (ISSUES 9.2 (b)). The view key `span`
+  // is what a control writes; this is what it falls back to. The pair of counts
+  // it replaces -- days behind and days ahead -- said the same number twice and
+  // let a person author a total nobody had asked for.
+  'intimate.span': '3',
+  // THE WIDTH AT WHICH A COLUMN STEPS A RUNG, and nothing about how many days
+  // are shown (ISSUES 9.2). A column this wide is ruled exactly as the rail is;
+  // a narrower one is ruled coarser, a wider one finer, on the same ladder.
   'intimate.minColumnPixels': '180',
   // THE RULE LADDER runs BOTH ways (Don, 2026-08-28) and is TWO-TIER at every
   // rung (Don, 2026-08-31): the surface coarsens as it shrinks and SUBDIVIDES as
@@ -193,19 +209,16 @@ class IntimatePainter extends LensPainter implements ManyPositions {
   /// during a paint. The host reads [bleed] to size the box it paints INTO,
   /// which happens before any paint has run, so a bleed measured in columns has
   /// to be answerable from the scene alone.
-  late final ({int count, double width, double rail}) _plan = () {
+  late final ({int count, double width, double rail, int asked}) _plan = () {
     final rail = scene.px('intimate.rail');
     final area = scene.size.width - rail;
-    final least = scene.px('intimate.minColumnPixels');
-    final wanted =
-        viewCount(scene, 'back', 'intimate.back') +
-        viewCount(scene, 'forward', 'intimate.forward') +
-        1;
-    // WHAT FITS, NEVER FEWER THAN ONE: a window too narrow for the days asked
-    // for shows the days it can hold rather than squeezing them to nothing.
-    final holds = least <= 0 ? wanted : (area / least).floor();
-    final count = wanted < 1 ? 1 : (holds < wanted ? (holds < 1 ? 1 : holds) : wanted);
-    return (count: count, width: count <= 0 ? area : area / count, rail: rail);
+    final asked = viewCount(scene, 'span', 'intimate.span');
+    // THE SPAN IS THE SPAN. Whatever was asked for is what is drawn, at whatever
+    // width that leaves; only a span of no days at all is a span this surface
+    // cannot honour, and that it SAYS, in the paint, rather than substituting a
+    // number nobody asked for.
+    final count = asked < 1 ? 1 : asked;
+    return (count: count, width: area / count, rail: rail, asked: asked);
   }();
 
   int get _columns => _plan.count;
@@ -298,14 +311,20 @@ class IntimatePainter extends LensPainter implements ManyPositions {
   @override
   void paint(Canvas canvas, Size size) {
     hits.clear();
+    zones.clear();
     refusals.clear();
     if (dayPixels <= Rational.zero) {
       refusals.add((source: 'intimate', message: 'An hour of no height draws no day.'));
       return paintRefusals(canvas, size);
     }
     _visible = _daysOfPixels(size.height);
-    final first =
-        law.dayOf(scene.focusDays) - BigInt.from(viewCount(scene, 'back', 'intimate.back'));
+    if (_plan.asked < 1) {
+      refusals.add((
+        source: 'intimate',
+        message: 'A span of ${_plan.asked} days is no days at all; one day is drawn.',
+      ));
+    }
+    final first = law.dayOf(scene.focusDays);
     final into = scene.focusDays - Rational(law.dayOf(scene.focusDays)) * law.dayDays;
     _top = Rational(first) * law.dayDays + into - _visible / Rational.fromInt(2);
     final window = queryWindow(
@@ -398,6 +417,28 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     preference: ladderPixels(scene.tunable, 'rule.preference'),
   );
 
+  /// THE COLUMN HAS A RUNG OF ITS OWN (ISSUES 9.2, Don: "the surface coarsens as
+  /// it shrinks and SUBDIVIDES as it grows").
+  ///
+  /// A narrow column is not a day to drop; it is a day ruled coarser. So the
+  /// same ladder that answers for the rail answers for the column, asked in the
+  /// same unit -- the law's hour -- and differing only in how many pixels an
+  /// hour gets ACROSS rather than down.
+  ///
+  /// `intimate.minColumnPixels` is the exchange rate, and that is its whole job
+  /// now: a column exactly that wide is ruled exactly as the rail is, a narrower
+  /// one coarser and a wider one finer, in proportion. The count of days is no
+  /// part of it. A floor of nothing states no exchange, so the column is ruled
+  /// as the rail is.
+  Rung get columnRung => rung(_columnHourPixels);
+
+  double get _hourPixels => (dayPixels / law.hoursPerDay).toDouble();
+
+  double get _columnHourPixels {
+    final floor = scene.px('intimate.minColumnPixels');
+    return floor <= 0 ? _hourPixels : _hourPixels * _columnWidth / floor;
+  }
+
   /// The rungs ABOVE an hour that belong to the LAW rather than to settings: its
   /// day, one turn of its weekday cycle, its month. A week is seven days only
   /// where the law says so, and a law that declares no week contributes none.
@@ -413,7 +454,7 @@ class IntimatePainter extends LensPainter implements ManyPositions {
 
   /// The rung in DAYS of this law, which is what the rail measures in.
   Rung get railRung {
-    final ladder = rung((dayPixels / law.hoursPerDay).toDouble());
+    final ladder = rung(_hourPixels);
     return (
       major: law.daysOfMinute(ladder.major * law.minutesPerHour),
       minor: law.daysOfMinute(ladder.minor * law.minutesPerHour),
@@ -453,11 +494,17 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     // series whose handling says zone -- and it arrives here the way every other
     // authored region does: as facts this lens paints as a band. A document that
     // authors no day object has no day zone, which is the honest first run.
-    for (
-      var day = law.dayOf(_top - _bleedDays) - BigInt.from(_bleedColumns);
-      day <= law.dayOf(_top + _visible + _bleedDays);
-      day += BigInt.one
-    ) {
+    // WHICH MIDNIGHTS A COLUMN HOLDS IS A QUESTION ABOUT ITS OWN WINDOW, and a
+    // column's window is the first column's shifted a whole day per column --
+    // so one offset range serves every column. The range used to be widened by
+    // `_bleedColumns`, which is a count of columns ACROSS: it bought nothing
+    // down the rail and made the rail's work the square of the span, which the
+    // old pixel floor on the count hid by never letting the span grow. Overscale
+    // (Don): a surface improperly built for five hundred days is improperly
+    // built for three.
+    final firstMidnight = law.dayOf(_top - _bleedDays);
+    final lastMidnight = law.dayOf(_top + _visible + _bleedDays);
+    for (var day = firstMidnight; day <= lastMidnight; day += BigInt.one) {
       for (var column = _firstPainted; column <= _lastPainted; column++) {
         _paintMidnight(canvas, size, column, day + BigInt.from(column));
       }
@@ -765,6 +812,10 @@ class IntimatePainter extends LensPainter implements ManyPositions {
       final grammar = zoneBand(box, color, zoneSegment(block.segment), scene.theme, scene.tunable);
       canvas.drawRRect(grammar.shape, grammar.fill);
       canvas.drawRRect(grammar.shape, grammar.edge);
+      // A GROUND THE PROGRAM CAN FIND IS THE GROUND THE EYE SEES: recorded in
+      // the same pass as the pixels, one entry per painted segment, for the same
+      // reason `hits` is (ISSUES 9.2).
+      zones.add((fact: fact, bounds: box));
     }
     final rule = zoned ? 0.0 : scene.px('intimate.rule');
     if (!zoned) {
@@ -791,7 +842,14 @@ class IntimatePainter extends LensPainter implements ManyPositions {
     final spec = markSpecFor(scene, law, fact, block.weight, color);
     final pad = scene.px('intimate.pad'), pip = scene.px('intimate.pip');
     final inset = box.left + rule + pad;
-    spec.paint(canvas, Rect.fromLTWH(inset, box.top + pad, pip, pip), fact);
+    // A GROUND STATES ITS OWN SIGIL AT GROUND WEIGHT, the weight its edge is
+    // already drawn at: the vocabulary survives -- a zoned todo still wears its
+    // ring -- and nothing opaque lands on a wash that exists to be seen through.
+    (zoned ? spec.at(scene.px('zone.edge')) : spec).paint(
+      canvas,
+      Rect.fromLTWH(inset, box.top + pad, pip, pip),
+      fact,
+    );
     // EVERY SEGMENT OF A FACT IS THE FACT (ISSUES 9.2). Don: "double-click on
     // the body of a spanning zone event does nothing; I have to click the head
     // on the first day." A guard written to skip the TITLE on a continuation day

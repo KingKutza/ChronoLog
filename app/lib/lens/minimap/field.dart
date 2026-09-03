@@ -1,10 +1,23 @@
 // The minimap's activity field: a sliding range, an exact magnitude
 // accumulation, and a scale that does not shimmer.
 //
-// THE MINIMAP IS NAVIGATION CHROME, NOT A SECOND EVENT LIST. It reads the
-// engine's already-indexed explicit facts by binary search over their day order
-// and never triggers a second recurrence expansion -- which is the whole reason
-// it stays cheap at 500 calendars.
+// THE MINIMAP MAPS BUSYNESS, AND BUSYNESS IS AUTHORED (ISSUES 9.2, two reports).
+//
+// It used to read the engine's already-indexed EXPLICIT facts, on the grounds
+// that skipping a second recurrence expansion is what keeps it cheap at 500
+// calendars. What that bought in cost it paid for in truth: a document whose
+// meetings are series -- which is most of them -- showed a minimap of nothing,
+// because not one occurrence is an authored fact. A map of half the document is
+// not a cheap map, it is a wrong one, so the field reads the SAME WINDOWED
+// PROJECTION the lenses read, budgeted the way every other query is.
+//
+// And what an object contributes is no longer the painter's own arithmetic.
+// "The important zone is filling the minimap; the event in question is
+// anti-busy." Busyness is a handling composed through the rings exactly as
+// weight is -- `display.busy` is a one-math term over `b` -- so a frame that
+// says `b * 0` empties its members' contribution by the same walk that gives
+// them their colour, and nothing here knows what out-of-office means. The
+// per-fact formula itself is the setting `minimap.busy`.
 //
 // HYSTERESIS. The range is a multiple of the visible span; while the focus stays
 // inside a band the range does not move, and outside it re-anchors to a stated
@@ -18,9 +31,13 @@
 // activity reads identically wherever it sits.
 
 import '../../core/exact.dart';
+import '../../core/math.dart';
 import '../../core/projection.dart';
+import '../../core/records.dart';
 import '../../core/staples.dart';
 import '../tunables.dart';
+import '../marks.dart';
+import 'tunables.dart';
 
 /// The window the field covers. Wider than what the lens shows, so there is
 /// context on both sides of the view box.
@@ -108,22 +125,105 @@ class MinimapField {
   }
 }
 
-/// One object's contribution: its own presence, every connection it carries, and
-/// how long it lasts, scaled by its composed display weight. Structure earns
-/// magnitude, which is why a heavily stapled object reads heavier than a bare
-/// one of the same length.
-double magnitudeOf(ProjectionEngine engine, Projection projection, Fact fact) {
-  // FLAGGED (core zone, ruled 2026-09-01): "every connection it carries" means
-  // every connection BEYOND the one that puts it here. A placement is a staple
-  // now, and `Rational.one` below is already its own presence -- counting the
-  // placement again would say every object is structured merely by existing.
+/// The per-fact formula, as `minimap.busy` states it.
+///
+/// A [Tunable] answers NUMBERS, and this setting's value is an expression over
+/// variables the field binds -- so the reader that serves every other lens
+/// number cannot serve this one, and the shipped text is read from the map it
+/// is written in. REPORTED (session zone): the settings seam wants a sibling
+/// that answers a key's EXPRESSION, so a person can re-author this one in
+/// `chronolog.settings` the way they can re-author every other.
+String busyFormula(Tunable? read) => minimapFormulaDefaults['minimap.busy']!;
+
+/// HOW BUSY THIS OBJECT SAYS IT IS, composed ring by ring exactly as its weight
+/// is: its own `display.busy`, then the frames that bear on it by increasing
+/// graph distance, then the projecting frame last. `b` is the busyness arriving
+/// from the ring within, so `b * 0` is a frame declaring that nothing it holds
+/// counts as busy -- and neither that word nor its meaning is known here.
+///
+/// MELT PENDING (core zone): this is `ProjectionEngine.weightOf` with one field
+/// name changed. The ring walk is the same walk, and the engine's own is
+/// private, so it is written out here rather than shared. What belongs in core
+/// is one `handlingOf(fact, projection, field)` that weight and busyness are
+/// both instances of.
+/// The variable a busyness term is written over: the busyness arriving from the
+/// ring within, as `w` is for weight.
+const String busyVariable = 'b';
+
+Rational busyOf(ProjectionEngine engine, Projection projection, Fact fact) {
+  final rings = <String, int>{};
+  final frame = fact.relation.frame;
+  if (frame != null) {
+    for (final entry in engine.framesAbove(frame).entries) {
+      rings[entry.key] = entry.value + 1;
+    }
+  }
+  for (final entry in engine.modifyingFrames(handlingSubject(engine, fact)).entries) {
+    final known = rings[entry.key];
+    if (known == null || entry.value < known) rings[entry.key] = entry.value;
+  }
+  final primary = projection.primaryFrame;
+  Object? authored(Json? extra) => obj(extra?['display'])?['busy'];
+  // The blessed chain, in the one order weight already uses: the object's own
+  // term, then the frames that bear on it by increasing graph distance with ties
+  // broken on the stable id, then the projecting frame last. A NOT-term gates
+  // visibility and never modifies, here as there.
+  final ordered =
+      [
+        for (final entry in rings.entries)
+          if (entry.key != primary && !projection.negatedFrames.contains(entry.key)) entry,
+      ]..sort(
+        (a, b) => a.value != b.value ? a.value.compareTo(b.value) : a.key.compareTo(b.key),
+      );
+  var busy = Rational.one;
+  Rational apply(Object? formula, Rational incoming) {
+    if (formula == null) return incoming;
+    try {
+      final answer = evaluateSource(
+        '$formula',
+        Env(values: {busyVariable: incoming}),
+      );
+      return answer is Rational && !answer.isNegative ? answer : incoming;
+    } catch (_) {
+      return incoming;
+    }
+  }
+
+  busy = apply(authored(fact.event.extra), busy);
+  for (final entry in ordered) {
+    busy = apply(authored(engine.document.frames[entry.key]?.extra), busy);
+  }
+  if (primary != null && !projection.negatedFrames.contains(primary)) {
+    busy = apply(authored(engine.document.frames[primary]?.extra), busy);
+  }
+  return busy;
+}
+
+/// One object's contribution, as the setting `minimap.busy` states it: its own
+/// presence, every connection it carries BEYOND the one that places it, how long
+/// it lasts, its composed display weight and its composed busyness.
+double magnitudeOf(
+  ProjectionEngine engine,
+  Projection projection,
+  Fact fact,
+  Tunable? read,
+) {
   final staples = engine.indexes
       .staplesOf(fact.event.id)
       .where((staple) => !isPlacement(staple, fact.event.id))
       .length;
-  final duration = engine.eventDurationDays(fact.event);
-  final weight = engine.weightOf(fact, projection).weight;
-  return (Rational.one + Rational.fromInt(staples) + duration).toDouble() * weight.toDouble();
+  final value = evaluateSource(
+    busyFormula(read),
+    Env(
+      values: {
+        'staples': Rational.fromInt(staples),
+        'duration': engine.eventDurationDays(fact.event),
+        'weight': engine.weightOf(fact, projection).weight,
+        'busy': busyOf(engine, projection, fact),
+      },
+    ),
+  );
+  return value is Rational ? value.toDouble() : 0;
 }
 
 /// Accumulates the field over [range].
@@ -145,18 +245,31 @@ MinimapField accumulate(
   final cap = count(read, 'minimap.countable') + 1;
   final width = range.end - range.start;
   if (width > Rational.zero) {
-    final sources = <String>{
-      for (final frameId in projection.frames) ...engine.indexes.frameClosure(frameId),
-    };
-    final seen = <String>{};
-    for (final source in sources) {
-      final facts = engine.explicitFacts(source);
-      for (var index = _lowerBound(facts, range.start); index < facts.length; index += 1) {
-        final fact = facts[index];
-        if (fact.day > range.end) break;
-        if (!seen.add(fact.identity)) continue;
-        _spread(engine, projection, fact, range, width, magnitudes, counts, present, motes, cap);
-      }
+    // THE SAME WINDOWED PROJECTION THE LENSES READ, occurrences included. The
+    // budget comes from the field's own shape: a bin already holding more than
+    // it can count is dense whatever else arrives, so there is nothing past one
+    // countable bin's worth per bin for the field to learn.
+    final query = engine.queryFacts(
+      projection,
+      start: range.start,
+      end: range.end,
+      limit: bins * cap,
+      includeOverlaps: true,
+    );
+    for (final fact in query.facts) {
+      _spread(
+        engine,
+        projection,
+        fact,
+        range,
+        width,
+        magnitudes,
+        counts,
+        present,
+        motes,
+        cap,
+        read,
+      );
     }
   }
   return MinimapField(
@@ -180,13 +293,14 @@ void _spread(
   List<int> present,
   List<List<Mote>> motes,
   int cap,
+  Tunable? read,
 ) {
   final bins = magnitudes.length;
   final end = fact.day + engine.eventDurationDays(fact.event);
   final from = _bin((fact.day - range.start) / width, bins);
   final to = _bin((end - range.start) / width, bins);
   final occupied = to - from + 1;
-  final share = magnitudeOf(engine, projection, fact) / occupied;
+  final share = magnitudeOf(engine, projection, fact, read) / occupied;
   // The mote goes where the fact is PLACED, once: a span is one thing that
   // happened, so counting its bins would be counting it seven times.
   present[from] += 1;
@@ -206,21 +320,6 @@ void _spread(
 int _bin(Rational fraction, int bins) {
   final index = (fraction * Rational.fromInt(bins)).floor().toInt();
   return index < 0 ? 0 : (index >= bins ? bins - 1 : index);
-}
-
-/// Binary search into the day-sorted explicit index. The facts are already
-/// ordered by the engine, so the minimap pays a log rather than a scan per frame.
-int _lowerBound(List<Fact> facts, Rational day) {
-  var low = 0, high = facts.length;
-  while (low < high) {
-    final middle = (low + high) >> 1;
-    if (facts[middle].day < day) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-  return low;
 }
 
 /// The coarse scale ladder, GENERATED rather than tabulated: powers of the base,

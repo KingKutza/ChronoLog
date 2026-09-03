@@ -18,6 +18,8 @@ import '../chrome/controls.dart';
 import '../core/coordinate_law.dart';
 import '../core/document.dart';
 import '../core/exact.dart';
+import '../core/object_kinds.dart';
+import '../core/stapled_here.dart';
 import '../core/projection.dart';
 import '../core/records.dart';
 import '../core/staples.dart';
@@ -79,35 +81,301 @@ List<SaidRow> objectSentences(Editor editor, String objectId) => [
     ),
 ];
 
-class StapleEditor extends StatelessWidget {
-  const StapleEditor({super.key, required this.objectId});
+/// EVERY SENTENCE A FRAME IS IN, from the frame's own side.
+///
+/// ISSUES 9.2: "no GUI path authors a frame-to-frame sentence ('10:00 here is
+/// 9:30 on Wall Time')". The edit card IS sentences (8.31, one card class), so
+/// the frame card says them too -- with the frame as the near end. One row per
+/// end that names this frame, exactly as the object side does, because a staple
+/// piercing one frame at two points says two things about it.
+List<SaidRow> frameSentences(Editor editor, String frameId) {
+  final rows = <SaidRow>[];
+  for (final staple in editor.staples.staplesOf(frameId)) {
+    final ends = staple.readEnds;
+    for (final (index, end) in ends.indexed) {
+      if (end is! FrameEnd || end.frame != frameId) continue;
+      final fars = [
+        for (final (other, far) in ends.indexed)
+          if (other != index) far,
+      ];
+      rows.add((
+        row: (
+          implicit: false,
+          relation: null,
+          staple: staple,
+          kind: staple.kind,
+          near: end,
+          far: fars.length == 1 ? fars.single : null,
+          fars: fars,
+          // A frame end that names no instant says the thing belongs on this
+          // sheet and nothing about where -- the frame's own affiliation.
+          positions: end.position != null,
+        ),
+        verb: staple.kind ?? '',
+        belonging: end.position == null,
+      ));
+    }
+  }
+  return rows;
+}
+
+/// WHAT THE SENTENCE IS, not which record spells it: one containment is read
+/// from both sides and one staple may pierce this object at two of its own
+/// points, so the record id alone names two rows.
+String sentenceKey(SaidRow said) =>
+    '${said.row.staple?.id ?? said.row.relation?.id ?? 'implicit'}'
+    '/${said.row.far?.id ?? ''}/${endPoint(said.row.near)}';
+
+/// WHICH KIND THE FAR END OF A SENTENCE WEARS, in the catalog's own words. A
+/// frame is not an object, so it gets the other word the substrate already
+/// files it under rather than a catalog row that would make a frame an object.
+({String kind, String label}) farKind(Document document, StapleEnd? far) {
+  final id = far?.id ?? '';
+  if (document.frames.containsKey(id)) {
+    return (kind: stapledFrameKind, label: stapledFrameLabel.toLowerCase());
+  }
+  final event = document.events[id];
+  if (event == null) return (kind: '', label: 'thing');
+  final kind = objectKindForEvent(event);
+  return (kind: kind, label: (objectKinds[kind]?.label ?? kind).toLowerCase());
+}
+
+/// THE ORDER SENTENCES READ IN (ISSUES 9.2): positional sentences first, then
+/// the affiliations, then whatever is left, each run in far-end title order.
+/// A card is read top to bottom, so what places the object comes first.
+int sentenceRank(SaidRow said, Document document) {
+  if (said.row.positions) return 0;
+  if (document.frames.containsKey(said.row.far?.id ?? '')) return 1;
+  return 2;
+}
+
+/// THE SHAPE A SENTENCE HAS, which is what makes two of them alike: the word on
+/// it, which point of this object it touches, which point of the far end it
+/// touches, and what kind of thing that far end is. Nothing about WHICH far
+/// record -- that is the only thing a fold's members differ in.
+String sentenceShape(SaidRow said, Document document) => [
+  said.row.kind ?? said.verb,
+  endPoint(said.row.near),
+  said.row.far is ObjectEnd ? endPoint(said.row.far) : '',
+  said.row.positions ? 'places' : 'affiliates',
+  farKind(document, said.row.far).kind,
+].join('/');
+
+/// A run of sentences that say one thing about many things.
+typedef SentenceFold = ({String shape, String label, List<SaidRow> members});
+
+/// The point vocabulary read as prose. A point the author invented is left as
+/// they wrote it -- there is no closed list here and no guessing at a word.
+String pointPhrase(String point) => switch (point) {
+  wholePoint => 'the whole',
+  'start' => 'the start',
+  'end' => 'the end',
+  'midpoint' => 'the midpoint',
+  _ => 'the $point',
+};
+
+/// THE SENTENCES REGION: one line per sentence, like sentences folded, and its
+/// own scroll under a header that does not move.
+///
+/// ISSUES 9.2 (Don): "the staple cards are so tall that it can be
+/// overwhelming" -- five to eight lines per sentence at rest, so a meeting with
+/// thirteen todos stapled to it was a hundred lines of card. Four things fix
+/// it, and all four are here:
+///
+///   AT REST A SENTENCE IS ONE LINE -- the prose and its sigil. The coordinate
+///   field, the fuzziness, the following rule and the unsay belong to the row
+///   that is OPEN, and exactly one row is open at a time.
+///
+///   THE LIKE FOLD. Sentences sharing a shape and a far-end kind read as one
+///   line with a count -- "13 todos: their start is the end of this" -- and the
+///   mass edits are offered on the fold, because that is where the selection
+///   already is. One click opens the list, one more opens any member: every
+///   sentence stays reachable in at most two.
+///
+///   THE REGION SCROLLS ON ITS OWN, so the header stays put however much is
+///   said about this object.
+///
+///   AND IT IS SORTED: positional first, then affiliations, then the rest.
+///
+/// Overscale is the acceptance: an object with two hundred staples renders this
+/// region inside a screen at rest.
+class StapleEditor extends StatefulWidget {
+  const StapleEditor({super.key, required this.objectId, this.nearEnd, this.openFirst = false});
 
   final String objectId;
 
+  /// The near end when the card is not an object's -- a frame card says
+  /// sentences too, with itself as the near end (ISSUES 9.2: the edit card IS
+  /// sentences, one card class).
+  final StapleEnd? nearEnd;
+
+  /// Opens holding its first sentence open: the sentence the gesture that made
+  /// this card just said.
+  final bool openFirst;
+
+  @override
+  State<StapleEditor> createState() => _StapleEditorState();
+}
+
+class _StapleEditorState extends State<StapleEditor> {
+  String? _open;
+  bool _openFar = false, _took = false;
+  final Set<String> _unfolded = {};
+
+  void _openRow(String key, {required bool far}) => setState(() {
+    final same = _open == key && _openFar == far;
+    _open = same ? null : key;
+    _openFar = !same && far;
+  });
+
+  Widget _row(SaidRow said, Editor editor) {
+    final key = sentenceKey(said);
+    return SentenceRow(
+      key: ValueKey(key),
+      objectId: widget.objectId,
+      said: said,
+      editor: editor,
+      open: _open == key,
+      openFar: _open == key && _openFar,
+      onOpen: (far) => _openRow(key, far: far),
+    );
+  }
+
+  /// Unsays every member of a fold in ONE act. The mass edit lives on the fold
+  /// because the fold is the selection: thirteen sentences chosen by saying one
+  /// thing about them.
+  void _unsayAll(Editor editor, SentenceFold fold) {
+    final ids = <String>{
+      for (final said in fold.members)
+        if (said.row.staple?.id ?? said.row.relation?.id case final String id) id,
+    };
+    editor.transaction('Unsay these', (document) {
+      var next = document;
+      for (final id in ids) {
+        next = next.relations[id]?.isStaple ?? false
+            ? removeStaple(next, id)
+            : next.remove('relations', id);
+      }
+      return next;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final editor = CardHost.of(context).editor;
+    final editor = CardHost.maybeOf(context)?.editor ?? ChromeScope.of(context).editor;
+    if (editor == null) return const SizedBox.shrink();
+    final document = editor.document;
+    final said = [
+      ...widget.nearEnd == null
+          ? objectSentences(editor, widget.objectId)
+          : frameSentences(editor, widget.objectId),
+    ]
+      ..sort((left, right) {
+        final byRank = sentenceRank(left, document) - sentenceRank(right, document);
+        if (byRank != 0) return byRank;
+        final byTitle = titleOfRecord(document, left.row.far?.id ?? '')
+            .compareTo(titleOfRecord(document, right.row.far?.id ?? ''));
+        return byTitle != 0 ? byTitle : sentenceKey(left).compareTo(sentenceKey(right));
+      });
+    // The folds, in the order their first member reads.
+    final order = <String>[];
+    final byShape = <String, List<SaidRow>>{};
+    for (final one in said) {
+      final shape = sentenceShape(one, document);
+      if (!byShape.containsKey(shape)) order.add(shape);
+      byShape.putIfAbsent(shape, () => []).add(one);
+    }
+    if (!_took && widget.openFirst && said.isNotEmpty) {
+      _took = true;
+      _open = sentenceKey(said.first);
+    }
+    final body = <Widget>[];
+    for (final shape in order) {
+      final members = byShape[shape]!;
+      if (members.length < 2) {
+        body.add(_row(members.single, editor));
+        continue;
+      }
+      final fold = (
+        shape: shape,
+        label: farKind(document, members.first.row.far).label,
+        members: members,
+      );
+      body.add(_fold(context, editor, fold));
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        extentSentence(context, editor.engine, editor.staples.resolveObjectExtent(objectId)),
-        for (final said in objectSentences(editor, objectId))
-          SentenceRow(
-            // WHAT THE SENTENCE IS, not which record spells it: one containment
-            // is read from both sides and one staple may pierce this object at
-            // two of its own points, so the record id alone names two rows.
-            key: ValueKey(
-              '${said.row.staple?.id ?? said.row.relation?.id ?? 'implicit'}'
-              '/${said.row.far?.id ?? ''}/${endPoint(said.row.near)}',
-            ),
-            objectId: objectId,
-            said: said,
-            editor: editor,
+        // WHERE THE SENTENCES PUT THIS. A frame is not put anywhere by them --
+        // it is the sheet -- so the note belongs to the object side alone.
+        if (widget.nearEnd == null)
+          extentSentence(
+            context,
+            editor.engine,
+            editor.staples.resolveObjectExtent(widget.objectId),
           ),
-        NewSentence(objectId: objectId, editor: editor),
+        // THE REGION'S OWN SCROLL. The header above it does not move, however
+        // many sentences are said about this object.
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: cardPx(context, 'card.regionHeight')),
+          child: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: body),
+          ),
+        ),
+        NewSentence(objectId: widget.objectId, editor: editor, nearEnd: widget.nearEnd),
       ],
     );
   }
+
+  Widget _fold(BuildContext context, Editor editor, SentenceFold fold) {
+    final open = _unfolded.contains(fold.shape);
+    final first = fold.members.first;
+    final count = fold.members.length;
+    final near = pointPhrase(endPoint(first.row.near));
+    final far = first.row.far;
+    final says = far is ObjectEnd
+        ? 'their ${endPoint(far)} is $near of this'
+        : first.row.positions
+        ? 'this sits on them at $near'
+        : 'this is stapled to them';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        cardWrap(context, [
+          namedAction(
+            context,
+            '$count ${fold.label}s: $says.',
+            hint: 'One line for $count sentences that say one thing. Opens the list.',
+            onTap: () => setState(
+              () => open ? _unfolded.remove(fold.shape) : _unfolded.add(fold.shape),
+            ),
+          ),
+          if (open)
+            namedAction(
+              context,
+              'Unsay all $count',
+              hint: 'Takes all $count sentences off, as one undoable act.',
+              onTap: () => _unsayAll(editor, fold),
+            ),
+        ]),
+        if (open)
+          Padding(
+            padding: EdgeInsets.only(left: cardPx(context, 'card.pad')),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [for (final said in fold.members) _row(said, editor)],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// What a record is CALLED -- a frame by its title, an object by its own.
+String titleOfRecord(Document document, String id) {
+  final frame = document.frames[id];
+  if (frame != null) return frame.title ?? id;
+  return str(document.events[id]?.payload?['title']) ?? id;
 }
 
 /// WHERE THE SENTENCES ACTUALLY PUT THIS, in words (ISSUES 9.1: "the readouts
@@ -132,31 +400,40 @@ Widget extentSentence(BuildContext context, ProjectionEngine engine, Extent exte
 
   final starts = at(extent.startDays);
   final ends = at(extent.endDays);
+  // ONE LINE, AND ONLY WHAT IS KNOWN (ISSUES 9.2). "'which is a legal thing for
+  // a record to say' is the card reassuring the person about the model -- cut."
+  // A real contest is not a note about the object at all: it is a refusal
+  // beside the sentence that caused it, which is where the correction is made.
   return cardNote(
     context,
     [
-      if (starts == null)
-        'Nothing here says when this starts.'
-      else
-        'This starts at $starts.',
-      if (ends == null)
-        'Nothing says when it ends, which is a legal thing for a record to say.'
-      else
-        'It ends at $ends.',
-      'Read from ${extent.source}.',
+      if (starts == null) 'No start said.' else 'This starts at $starts.',
+      if (ends == null) 'No end said.' else 'It ends at $ends.',
       if (extent.cyclic)
         'These sentences resolve back through this object, so there is no instant to report.',
-      for (final contest in extent.overdetermined)
-        'Something else also claims its ${contest.role}: ${contest.reason}. Both are kept and '
-            'neither is averaged in.',
-      for (final contest in extent.unresolved)
-        'Its ${contest.role} is claimed by something that resolves nowhere: ${contest.reason}.',
       if (!extent.spread.isZero)
-        'It is fuzzy by ${extent.spread.before.toDecimal(3)} of a day before and '
+        'Fuzzy by ${extent.spread.before.toDecimal(3)} of a day before and '
             '${extent.spread.after.toDecimal(3)} after.',
     ].join(' '),
     refusal: extent.cyclic,
   );
+}
+
+/// THE CONTESTS ONE SENTENCE CAUSED. A contest names the record it came off, so
+/// it is shown at that record's row and nowhere else -- and a sentence that
+/// claims no point cannot have caused one, whatever the derivation reported.
+List<String> contestsOn(Extent extent, ConnectionRow row) {
+  final id = row.staple?.id ?? row.relation?.id;
+  if (id == null || !row.positions) return const [];
+  bool mine(Contest contest) => (contest.staple?.id ?? contest.relation?.id) == id;
+  return [
+    for (final contest in extent.overdetermined)
+      if (mine(contest))
+        'Another sentence also says where its ${contest.role} is. Both are kept; '
+            'neither is averaged in.',
+    for (final contest in extent.unresolved)
+      if (mine(contest)) 'This says nothing an instant can be read off yet.',
+  ];
 }
 
 /// ONE SENTENCE, in terms you can say again.
@@ -166,11 +443,25 @@ class SentenceRow extends StatefulWidget {
     required this.objectId,
     required this.said,
     required this.editor,
+    this.open = false,
+    this.openFar = false,
+    this.onOpen,
   });
 
   final String objectId;
   final SaidRow said;
   final Editor editor;
+
+  /// The one row the region is holding open. At rest a sentence is one line of
+  /// prose and its sigil; everything that edits a term belongs to the open row.
+  final bool open;
+
+  /// Opened by touching the far term, so that term is already being said again.
+  final bool openFar;
+
+  /// Asks the region to open this row -- and, when the far term was the thing
+  /// touched, to open it saying that term again.
+  final void Function(bool far)? onOpen;
 
   @override
   State<SentenceRow> createState() => _SentenceRowState();
@@ -182,6 +473,10 @@ class _SentenceRowState extends State<SentenceRow> {
   Editor get _editor => widget.editor;
   ConnectionRow get _row => widget.said.row;
   String get _verb => _row.kind ?? widget.said.verb;
+
+  /// The word this sentence READS AS from this side.
+  String get _reads =>
+      _belonging && widget.said.verb.isNotEmpty ? widget.said.verb : _verb;
 
   /// A row that connects and says nothing about where either end sits: the
   /// belonging sentences, spelled in a record kind of their own.
@@ -389,8 +684,115 @@ class _SentenceRowState extends State<SentenceRow> {
     host.openFrame(frame.id);
   }
 
+  /// THE COORDINATE ONE END SAYS, in that frame's own words, or null where it
+  /// says none.
+  String? _coordinateOf(StapleEnd? end) {
+    Json? coordinate;
+    String? frameId;
+    if (end is FrameEnd) {
+      frameId = end.frame;
+      coordinate = end.position?.coordinate?.toJson();
+    }
+    if (_placement && end == _row.far) {
+      frameId = _row.relation?.frame ?? frameId;
+      coordinate = _row.relation?.coordinate ?? coordinate;
+    }
+    if (frameId == null || coordinate == null) return null;
+    try {
+      return coordinateText(Coordinate.fromJson(coordinate), _editor.engine.lawOf(frameId));
+    } on Object {
+      return null;
+    }
+  }
+
+  /// ONE LINE OF PROSE AND ITS SIGIL (ISSUES 9.2). The far end is its own word,
+  /// because touching the thing this is stapled to is how a person re-says it.
+  Widget _atRest(BuildContext context) {
+    final row = _row;
+    final far = row.far;
+    final farId = far?.id ?? '';
+    final isFrame = _editor.document.frames.containsKey(farId);
+    final nearAt = _coordinateOf(row.near);
+    final farAt = _coordinateOf(far);
+    final near = nearAt != null
+        ? '$nearAt here'
+        : endPoint(row.near) == wholePoint
+        ? 'This'
+        : pointPhrase(endPoint(row.near));
+    // THE WORD IS ITS OWN WORD. A belonging sentence wears a verb the author
+    // (or an older record) chose, and reading it means seeing it -- so it is
+    // said on its own rather than glued into a phrase.
+    final says = _belonging
+        ? null
+        : far is ObjectEnd
+        ? '$near is ${pointPhrase(endPoint(far))} of'
+        : '$near is on';
+    final after = farAt == null ? '.' : ' at $farAt.';
+    final host = CardHost.maybeOf(context);
+    final name = _nameOf(farId);
+    return _framed(
+      context,
+      cardWrap(context, [
+        // THE SIGIL IS THE HANDLE. Touching it opens this sentence -- one row
+        // at a time -- and everything that edits a term lives in the open row.
+        controlChip(
+          context,
+          button: true,
+          semantics: 'Open this sentence',
+          hint: 'Opens the sentence, where every term can be said again.',
+          onTap: () => widget.onOpen?.call(false),
+          child: Text(isFrame ? '▤' : '●', style: labelStyle(context)),
+        ),
+        if (says != null)
+          Text(says, style: bodyStyle(context))
+        else ...[
+          Text(near, style: bodyStyle(context)),
+          // WHICH SIDE IS READING. One containment reads "holds" from the
+          // parent and "is held by" from the child; the word on the record is
+          // the same record either way, so the reading is what is shown.
+          Text(_reads.isEmpty ? 'is stapled to' : _reads, style: bodyStyle(context)),
+        ],
+        // THE WORD IS THE LINK where it names a record -- "a staple you can
+        // only see from one side is half a record" -- and the mark beside it is
+        // the way to say the end again, which is the other half.
+        cardLink(context, name, () {
+          if (farId.isEmpty || host == null) return;
+          isFrame ? host.openFrame(farId) : host.openObject(farId);
+        }),
+        Text(after, style: bodyStyle(context)),
+        controlChip(
+          context,
+          button: true,
+          semantics: 'Say $name again',
+          hint: 'Points this end at something else, and carries what it says along.',
+          onTap: () => widget.onOpen?.call(true),
+          child: Text('✎', style: dataStyle(context)),
+        ),
+      ]),
+    );
+  }
+
+  Widget _framed(BuildContext context, Widget child, {VoidCallback? onTap}) {
+    final framed = Container(
+      margin: EdgeInsets.only(bottom: cardPx(context, 'card.gap')),
+      padding: EdgeInsets.all(cardPx(context, 'card.gap')),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: ChronoTheme.of(context).hair,
+          width: ChromeScope.of(context).px('chrome.hair'),
+        ),
+        borderRadius: BorderRadius.circular(ChromeScope.of(context).px('chrome.corner')),
+      ),
+      child: child,
+    );
+    return onTap == null
+        ? framed
+        : InkWell(onTap: onTap, child: framed);
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!widget.open) return _atRest(context);
     final host = CardHost.of(context);
     final document = _editor.document;
     final row = _row;
@@ -412,21 +814,18 @@ class _SentenceRowState extends State<SentenceRow> {
     final positions = stapleKinds[_verb]?.positions ?? true;
     final implicit = _placement;
     final near = row.near;
-    return Container(
-      margin: EdgeInsets.only(bottom: cardPx(context, 'card.gap')),
-      padding: EdgeInsets.all(cardPx(context, 'card.gap')),
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: ChronoTheme.of(context).hair,
-          width: ChromeScope.of(context).px('chrome.hair'),
-        ),
-        borderRadius: BorderRadius.circular(ChromeScope.of(context).px('chrome.corner')),
-      ),
-      child: Column(
+    return _framed(
+      context,
+      Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           cardWrap(context, [
-            Text('This', style: labelStyle(context)),
+            namedAction(
+              context,
+              'This',
+              hint: 'Closes this sentence back to its one line.',
+              onTap: () => widget.onOpen?.call(false),
+            ),
             // WHICH POINT OF THIS OBJECT the sentence touches.
             SentenceTerm(
               said: near == null ? 'point' : endPoint(near),
@@ -472,19 +871,24 @@ class _SentenceRowState extends State<SentenceRow> {
             SentenceTerm(
               said: _nameOf(farId),
               strong: true,
+              open: widget.openFar,
               offers: (typed) => _records(context, typed),
               hint: 'Connect to a frame or an object',
               onOpen: farId.isEmpty
                   ? null
                   : () => frame != null ? host.openFrame(farId) : host.openObject(farId),
-              onSaid: _belonging
+              // A BELONGING SENTENCE IS STILL A STAPLE, and every end of a
+              // staple is an authored term. Only a record that is NOT a staple
+              // -- an older kind nothing writes any more -- has an end this
+              // card cannot re-say, and that is what the refusal is about.
+              onSaid: row.staple == null
                   ? null
                   : (id) => _sayFarEnd(id, isFrame: document.frames.containsKey(id)),
-              onCreate: _belonging ? null : _create,
-              refusal: _belonging
-                  ? 'This is an older ${_row.relation?.type} record rather than a staple. '
-                        'Unsay it and say it again as a sentence.'
-                  : null,
+              onCreate: row.staple == null ? null : _create,
+              refusal: row.staple != null
+                  ? null
+                  : 'This is an older ${_row.relation?.type} record rather than a staple. '
+                        'Unsay it and say it again as a sentence.',
             ),
             if (far is ObjectEnd)
               SentenceTerm(
@@ -499,12 +903,18 @@ class _SentenceRowState extends State<SentenceRow> {
             namedAction(
               context,
               'Unsay this',
-              glyph: '✕',
               hint: 'Takes the sentence off. Undoable, like everything else.',
               onTap: _remove,
             ),
           ]),
           if (_refusal != null) cardNote(context, _refusal!, refusal: true),
+          // A CONTEST IS SAID WHERE IT WAS CAUSED, not as a paragraph about the
+          // object: the sentence that made it is the one a person corrects.
+          for (final contest in contestsOn(
+            _editor.staples.resolveObjectExtent(widget.objectId),
+            _row,
+          ))
+            cardNote(context, contest, refusal: true),
           if (steer != null)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -543,10 +953,14 @@ class _SentenceRowState extends State<SentenceRow> {
 /// with the verb this row is currently wearing -- so the verb is authored
 /// BEFORE the connection exists rather than steered to one word after it does.
 class NewSentence extends StatefulWidget {
-  const NewSentence({super.key, required this.objectId, required this.editor});
+  const NewSentence({super.key, required this.objectId, required this.editor, this.nearEnd});
 
   final String objectId;
   final Editor editor;
+
+  /// The near end when the card is not an object's. A frame card says sentences
+  /// with the frame as the near end, and this is that end.
+  final StapleEnd? nearEnd;
 
   @override
   State<NewSentence> createState() => _NewSentenceState();
@@ -554,21 +968,51 @@ class NewSentence extends StatefulWidget {
 
 class _NewSentenceState extends State<NewSentence> {
   String _verb = '';
+  String _near = '', _far = '';
 
   String _said(Document document) => _verb.isEmpty ? verbOffers(document).first : _verb;
 
-  void _say(String id, {required bool isFrame}) {
+  /// THE DEFAULT POINTS ARE SETTINGS (ISSUES 9.2, the horde of todos). The + row
+  /// wrote the WHOLE on both ends, so the only sentence it could say between two
+  /// objects was "connected to" and thirteen stapled todos drew nowhere. Which
+  /// point each end starts at is authored, not compiled.
+  String _point(BuildContext context, String key, String held) =>
+      held.isNotEmpty ? held : ChromeScope.of(context).settings.text(key);
+
+  void _say(BuildContext context, String id, {required bool isFrame}) {
     final editor = widget.editor;
     final verb = _said(editor.document);
-    final near = ObjectEnd(widget.objectId, point: defaultPoint);
-    final far = isFrame ? StapleEnd.frame(id) : ObjectEnd(id, point: defaultPoint) as StapleEnd;
+    final nearPoint = _point(context, 'edit.newPointNear', _near);
+    final farPoint = _point(context, 'edit.newPointFar', _far);
+    // A FRAME END NAMES NO POINT OF THE FRAME, so the near end says the WHOLE:
+    // "this belongs on that sheet, nothing about where" is the affiliation
+    // (ruled 9.1), and it is the same claim the minting gesture writes. A start
+    // with no instant beside it would be a position nobody said.
+    final near =
+        widget.nearEnd ??
+        ObjectEnd(widget.objectId, point: isFrame ? defaultPoint : nearPoint);
+    final far = isFrame
+        ? StapleEnd.frame(id)
+        : ObjectEnd(id, point: farPoint) as StapleEnd;
     editor.transaction(
       'Say a sentence',
       (d) => putStaple(d, kind: verb, ends: [near, far]).document,
     );
   }
 
-  void _create(String name) {
+  /// MAKES WHAT NOTHING IS CALLED YET, by kind, inside the sentence being said.
+  /// The offers are the registry's own rows -- a frame, and one per catalog
+  /// entry -- so a fourth kind is a door with no edit here.
+  List<({String label, void Function(String typed) make})> _creates(BuildContext context) => [
+    (label: 'Create a new frame', make: (name) => _createFrame(name)),
+    for (final entry in objectKinds.entries)
+      (
+        label: 'Create a new ${entry.value.label}',
+        make: (name) => _createObject(entry.key, name),
+      ),
+  ];
+
+  void _createFrame(String name) {
     final editor = widget.editor;
     final host = CardHost.of(context);
     final frame = Frame(
@@ -580,19 +1024,43 @@ class _NewSentenceState extends State<NewSentence> {
       },
     );
     editor.transaction('New frame $name', (d) => d.put('frames', frame.id, frame));
-    _say(frame.id, isFrame: true);
+    _say(context, frame.id, isFrame: true);
     host.openFrame(frame.id);
+  }
+
+  void _createObject(String kind, String name) {
+    final editor = widget.editor;
+    final host = CardHost.of(context);
+    final made = editor.newObject(kind, title: name);
+    editor.transaction('New ${objectKinds[kind]!.label} $name', (d) => d.put('events', made.id, made));
+    _say(context, made.id, isFrame: false);
+    host.openObject(made.id);
   }
 
   @override
   Widget build(BuildContext context) {
     final document = widget.editor.document;
+    final nearPoint = _point(context, 'edit.newPointNear', _near);
+    final farPoint = _point(context, 'edit.newPointFar', _far);
+    // EVERY TERM FROM THE FIRST KEYSTROKE (ISSUES 9.2): "the [start] of this
+    // [is] the [end] of [that]" -- what the row shows is what it writes.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         cardWrap(context, [
           Text('+', style: dataStyle(context, color: ChronoTheme.of(context).primary)),
           Text('This', style: labelStyle(context)),
+          if (widget.nearEnd == null)
+            SentenceTerm(
+              said: nearPoint,
+              offers: (typed) => [
+                for (final point in extentPoints)
+                  if (typed.trim().isEmpty || point.contains(typed.trim().toLowerCase()))
+                    (value: point, label: point),
+              ],
+              hint: 'which point of this object',
+              onSaid: (point) => setState(() => _near = point),
+            ),
           SentenceTerm(
             said: _said(document),
             offers: (typed) => [
@@ -603,6 +1071,16 @@ class _NewSentenceState extends State<NewSentence> {
             hint: 'the word this sentence uses',
             onSaid: (verb) => setState(() => _verb = verb),
             refusal: verbSays(_said(document)),
+          ),
+          SentenceTerm(
+            said: farPoint,
+            offers: (typed) => [
+              for (final point in extentPoints)
+                if (typed.trim().isEmpty || point.contains(typed.trim().toLowerCase()))
+                  (value: point, label: point),
+            ],
+            hint: 'which point of that one',
+            onSaid: (point) => setState(() => _far = point),
           ),
         ]),
         // The far term is the one that writes the sentence. Its offers are the
@@ -625,8 +1103,8 @@ class _NewSentenceState extends State<NewSentence> {
             ];
           },
           hint: 'Connect to a frame or an object',
-          onSaid: (id) => _say(id, isFrame: document.frames.containsKey(id)),
-          onCreate: _create,
+          onSaid: (id) => _say(context, id, isFrame: document.frames.containsKey(id)),
+          creates: _creates(context),
         ),
       ],
     );

@@ -9,8 +9,10 @@
 
 import 'package:flutter/material.dart';
 
+import '../cards/coordinate_field.dart';
 import '../core/coordinate_law.dart';
 import '../core/exact.dart';
+import '../lens/view_tile.dart';
 import '../session/lens_catalog.dart';
 import '../session/view_state.dart';
 import 'controls.dart';
@@ -75,6 +77,15 @@ class ContextBar extends StatelessWidget {
               ),
           ],
           trailing: [
+            // THE DOOR THAT TAKES A COORDINATE (ISSUES 9.2, Don: "We have no
+            // clear jump-to-date option"). The bar's whole vocabulary was
+            // relative steps plus one absolute destination, now -- so reaching
+            // February 2200 meant holding an arrow down. This says WHERE.
+            //
+            // It stands wherever the view HAS a law to place a coordinate in,
+            // which is derived from the projection's primary frame and not
+            // declared anywhere: a lens does not opt in to being jumpable.
+            if (law != null) _jump(context, tile, law),
             _step(context, '«', 'Back a window', -window, tile),
             _step(context, '‹', 'Back one ${view.spec.spanUnit}', -unit, tile),
             _step(context, '›', 'Forward one ${view.spec.spanUnit}', unit, tile),
@@ -123,6 +134,43 @@ CoordinateLaw? _law(Chrome chrome, ViewState view) {
     // A broken frame must not blank the bar; the lens says what is wrong.
     return null;
   }
+}
+
+/// JUMP TO A DATE: the same variable-precision coordinate field every other
+/// coordinate in the program uses, over the primary frame's own law, landing at
+/// THE DEPTH TYPED -- a year lands on the year, a month on the month, an instant
+/// on the instant. No new parser, and no picker of three boxes.
+///
+/// The landing rides the view tile's own glide, which is why it reaches for
+/// `jumpTo` rather than writing the focus here: a second "put the focus there"
+/// beside the glide would snap, and the two would drift apart.
+BarItem _jump(BuildContext c, String tile, CoordinateLaw law) {
+  final chrome = ChromeScope.of(c);
+  Widget door(String face) => Builder(
+    builder: (c) => controlChip(
+      c,
+      button: true,
+      hint: 'Jump to a date — type a coordinate at whatever depth you mean',
+      semantics: 'Jump to a date',
+      onTap: () {
+        final box = c.findRenderObject() as RenderBox?;
+        showChronoPanel(
+          c,
+          box == null ? Offset.zero : box.localToGlobal(box.size.bottomLeft(Offset.zero)),
+          CoordinateField(
+            law: law,
+            value: law.fromDays(chrome.views.focusOf(tile)),
+            onChanged: (value, _) {
+              if (value == null) return;
+              viewTileControllers[tile]?.jumpTo(law.toDays(value));
+            },
+          ),
+        );
+      },
+      child: Text(face, style: dataStyle(c)),
+    ),
+  );
+  return (label: 'Jump to a date', full: door('Jump to…'), compact: door('⇥'));
 }
 
 BarItem _step(BuildContext c, String glyph, String label, Rational by, String tile) {

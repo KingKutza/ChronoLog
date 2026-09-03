@@ -291,7 +291,7 @@ void main() {
         reason: 'ISSUES 9.2: the row read the AUTHORED 30 and never the derived extent',
       );
       expect(
-        find.descendant(of: row, matching: find.textContaining(RegExp('\b(${hours * 60}|$hours)\b'))),
+        find.descendant(of: row, matching: find.textContaining(RegExp('\\b(${hours * 60}|$hours)\\b'))),
         findsWidgets,
         reason: 'the derived value -- $hours hours -- is the number on the row',
       );

@@ -49,6 +49,12 @@ const Map<String, String> chromeTunableDefaults = {
   'chrome.menuWidth': '2 * 130',
   'chrome.rowHeight': '2 * 14',
   'chrome.labelCap': '28',
+  // HOW WIDE A READING MAY GET (ISSUES 9.2: "we need some fixed width or
+  // overflow rule for the projecting-frame drop-down so it does not force the
+  // lenses to first initials"). A reading is a VALUE, and a value grows with
+  // the document; the bar beside it does not. Ten projected frames are a
+  // sentence, and a sentence on a bar is capped and read in full in the drop.
+  'chrome.readingWidth': '2 * 130',
   'chrome.frameRows': '12',
   // A control is GHOST by default: it earns a ground under the pointer and a
   // tint when it is the one in force. A border on every button is what made the
@@ -495,7 +501,7 @@ BarItem barAction(
 
 /// What one layout of a run found out: the width it needed, and which controls
 /// it could not fit.
-typedef RunFit = ({double required, List<int> folded});
+typedef RunFit = ({double required, List<int> folded, List<double> widths});
 
 /// THE ONE BAR LAYOUT (ruled 2026-08-28). Controls lay out from the width the
 /// bar actually gets: full labels while they fit, then every control in its
@@ -519,15 +525,22 @@ class BarRun extends StatefulWidget {
 
 class _BarRunState extends State<BarRun> {
   final ValueNotifier<List<int>> _folded = ValueNotifier(const []);
-  bool _compact = false, _scheduled = false;
+  bool _scheduled = false;
 
-  /// What the full-label run measured last time it was laid out. Going back to
-  /// full labels waits for that much room, so a bar cannot oscillate across the
-  /// width where the two forms disagree.
-  ///
-  /// Zero means UNMEASURED, which is not the same as "needs nothing": the run
-  /// goes back to full labels to take the measurement again.
-  double _wide = 0;
+  /// WHICH CONTROLS ARE IN THEIR COMPACT FORM, and only those (ISSUES 9.2: "we
+  /// need some fixed width or overflow rule for the projecting-frame drop-down
+  /// so it does not force the lenses to first initials"). Compaction used to be
+  /// one flag over the whole run, so one wide reading took every lens chip down
+  /// to its initial with it. The rule is: give up the WIDEST control first, and
+  /// only as many as it takes.
+  Set<int> _tight = {};
+
+  /// What each control measured in its FULL form, last time it was in one.
+  /// Coming back out of the compact form waits for that much room, so a run
+  /// cannot oscillate across the width where the two forms disagree -- and it
+  /// is dropped whenever the run itself changes, because a measurement of a run
+  /// that no longer exists is not a measurement of this one.
+  final Map<int, double> _full = {};
 
   @override
   void dispose() {
@@ -547,7 +560,9 @@ class _BarRunState extends State<BarRun> {
   @override
   void didUpdateWidget(BarRun old) {
     super.didUpdateWidget(old);
-    if (_signature(old) != _signature(widget)) _wide = 0;
+    if (_signature(old) == _signature(widget)) return;
+    _tight = {};
+    _full.clear();
   }
 
   /// What the run IS, as far as its width is concerned: which controls, in what
@@ -557,18 +572,48 @@ class _BarRunState extends State<BarRun> {
 
   /// Reported from layout, applied after the frame: a notifier or a setState
   /// during layout would rebuild the very children being laid out.
+  /// Whether this control HAS a narrower form to give. A control that declared
+  /// none is handed back its own full form by [barItem], so compacting it would
+  /// change nothing -- and a run that spent its one step per frame on it would
+  /// never reach the control that could actually make room.
+  bool _compactable(int index) =>
+      index < widget.items.length &&
+      !identical(widget.items[index].full, widget.items[index].compact);
+
   void _report(RunFit fit, double available) {
-    // Compact and unmeasured: go back to full and find out, rather than trust a
-    // threshold taken of a run that no longer exists.
-    final compact = _compact && _wide > 0 ? _wide > available : fit.required > available;
-    if (!_compact) _wide = fit.required;
-    if (_scheduled || (compact == _compact && _same(fit.folded, _folded.value))) return;
+    for (var index = 0; index < fit.widths.length; index++) {
+      if (!_tight.contains(index)) _full[index] = fit.widths[index];
+    }
+    var next = _tight;
+    if (fit.required > available) {
+      // ONE STEP: the widest control still wearing its full form gives that
+      // form up. If the run still does not fit, the next frame takes the next
+      // widest -- so the bar spends exactly as much of its vocabulary as the
+      // room costs, and never a chip more.
+      var widest = -1;
+      for (var index = 0; index < fit.widths.length; index++) {
+        if (_tight.contains(index) || !_compactable(index)) continue;
+        if (widest < 0 || fit.widths[index] > fit.widths[widest]) widest = index;
+      }
+      if (widest >= 0) next = {..._tight, widest};
+    } else {
+      // Room came back: the first compacted control whose remembered full form
+      // fits in it gets its name back, one per frame, by the same rule.
+      for (final index in _tight) {
+        final full = _full[index];
+        if (full == null || fit.required - fit.widths[index] + full > available) continue;
+        next = {..._tight}..remove(index);
+        break;
+      }
+    }
+    final moved = next.length != _tight.length || !next.containsAll(_tight);
+    if (_scheduled || (!moved && _same(fit.folded, _folded.value))) return;
     _scheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduled = false;
       if (!mounted) return;
       _folded.value = fit.folded;
-      if (compact != _compact) setState(() => _compact = compact);
+      if (moved) setState(() => _tight = next);
     });
   }
 
@@ -594,7 +639,7 @@ class _BarRunState extends State<BarRun> {
         ),
         children: [
           for (final (index, item) in items.indexed)
-            LayoutId(id: index, child: _compact ? item.compact : item.full),
+            LayoutId(id: index, child: _tight.contains(index) ? item.compact : item.full),
           LayoutId(
             id: #more,
             child: ValueListenableBuilder<List<int>>(
@@ -701,6 +746,7 @@ class _BarRunLayout extends MultiChildLayoutDelegate {
           ? 0
           : sizes.fold(0.0, (total, of) => total + of.width) + gap * (count - 1),
       folded: folded,
+      widths: [for (final of in sizes) of.width],
     ), size.width * rows);
   }
 

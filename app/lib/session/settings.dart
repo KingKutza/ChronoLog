@@ -175,6 +175,18 @@ class Settings extends ChangeNotifier with FrameSafeNotifier {
 
   String text(String key) => _textOverrides[key] ?? shippedText[key] ?? '';
 
+  /// WHAT IS AUTHORED ON THIS KEY, or null where nothing is.
+  ///
+  /// The file records only overrides, so the absence of one is a real state and
+  /// not the shipped value written down: a changed shipped default must still
+  /// reach an install that never touched the key. Undo needs to be able to
+  /// restore that absence, so it needs to be able to read it.
+  String? overrideOf(String key) => _overrides[key] ?? _textOverrides[key];
+
+  /// Which vocabulary a key belongs to: a tunable is arithmetic, a text setting
+  /// is a chord or a name and reading it as algebra would be a category error.
+  bool isText(String key) => shippedText.containsKey(key);
+
   /// Accepts and returns null, or refuses and returns the reason. Validation
   /// is the evaluation itself: an expression that will not read is not stored.
   String? set(String key, String expression) {

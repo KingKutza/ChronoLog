@@ -275,13 +275,19 @@ class ObjectFacts {
 
   // --- The completion instant ------------------------------------------------
 
-  /// THE COMPLETION INSTANT IS A STAPLE, AND IT IS TERMINAL: the registered
-  /// `end` kind, the object's own `end` point, the other end a position under
-  /// some frame's law. Backdating is nothing but that position. Null is a legal
-  /// answer.
+  /// THE COMPLETION INSTANT IS A STAPLE, AND IT IS TERMINAL: the object's own
+  /// `end` point, the other end a position under some frame's law. Backdating is
+  /// nothing but that position. Null is a legal answer.
+  ///
+  /// NO KIND GATE (the verb law, melted 9.3). This read `kind != 'end'` and
+  /// skipped, so the roster answered "is this todo done, and when" BY VERB: the
+  /// same sentence -- this object's end is that instant -- said nothing at all
+  /// unless the author had also picked the word `end` out of a dropdown. The
+  /// shape is the whole of the claim and [_instant] already states it: an
+  /// ObjectEnd naming this object's `end` point, and some other end carrying a
+  /// coordinate. A verb nobody registered says it just as loudly.
   Relation? objectEndStaple(String objectId) {
     for (final staple in staples(objectId)) {
-      if (staple.kind != 'end') continue;
       if (_instant(staple, objectId) != null) return staple;
     }
     return null;
@@ -422,7 +428,14 @@ class ObjectFacts {
         affiliated = true;
       }
       if (affiliated) continue;
-      if (relation.isStaple && relation.kind == 'end') {
+      // NO KIND GATE, AND NO ELSE (the verb law, melted 9.3). The gate read
+      // `relation.kind == 'end'` and then `continue`d, which said two wrong
+      // things at once: a completion instant existed only under that one word,
+      // and a staple was either a completion or a placement but never both.
+      // Both questions are shapes and neither excludes the other -- one n-ary
+      // staple may name this object's end on one sheet and its start on
+      // another -- so each is asked of every staple, independently.
+      if (relation.isStaple) {
         for (final end in relation.ends) {
           if (end is! ObjectEnd) continue;
           final at = _instant(relation, end.object);
@@ -434,7 +447,6 @@ class ObjectFacts {
             instants[end.object] = (entry.key, at.coordinate);
           }
         }
-        continue;
       }
       if (isPlacement(relation)) {
         placements.putIfAbsent(relation.event!, () => relation);

@@ -12,6 +12,7 @@ import '../core/exact.dart';
 import '../lens/tunables.dart';
 import '../session/lens_catalog.dart';
 import '../session/settings.dart';
+import '../session/view_state.dart';
 import 'layout_tree.dart';
 import 'placement_rules.dart';
 
@@ -42,6 +43,49 @@ class TileSpec {
     build: build,
     onClose: onClose,
   );
+}
+
+/// A NAMED SUBTREE, AND WHAT ITS VIEW LEAVES WERE LOOKING THROUGH (ISSUES 9.2,
+/// Don: "named views live where persistent layouts live"; "presets and boards
+/// are one record kind").
+///
+/// ONE record kind, two uses. A preset is a named subtree whose leaves are any
+/// tiles; a board is one whose leaves are projection tiles. So a saved view is
+/// not a second thing -- it is this record with one leaf, which is why a board
+/// lays out like any preset and a preset carries a board.
+///
+/// [views] is what each view leaf SAID, by tile id, and it is
+/// [ViewState.said] rather than a serializer of its own: lens, projection
+/// expression, columns in order with their own expressions, the lens's own
+/// keys, and never the focus. Where the eye was looking is not what was said.
+class StagePreset {
+  StagePreset(this.root, {Map<String, Map<String, Object?>>? views}) : views = views ?? const {};
+
+  final LayoutNode root;
+  final Map<String, Map<String, Object?>> views;
+
+  Map<String, Object?> toJson() => {
+    'root': root.toJson(),
+    if (views.isNotEmpty) 'views': views,
+  };
+
+  /// A layout file's preset entry. The bare-node shape a file written before
+  /// views were named still reads: a record says so with its own `root` key,
+  /// and anything else IS the node. Nothing on the load path rewrites the file.
+  static StagePreset? fromJson(Object? source, {Rational? barShare}) {
+    final record = source is Map && source['root'] != null;
+    final node = normalizeLayout(
+      nodeFromJson(record ? source['root'] : source),
+      barShare: barShare,
+    );
+    if (node == null) return null;
+    final said = record ? source['views'] : null;
+    return StagePreset(node, views: {
+      if (said is Map)
+        for (final entry in said.entries)
+          if (entry.value is Map) '${entry.key}': Map<String, Object?>.from(entry.value as Map),
+    });
+  }
 }
 
 class Stage extends ChangeNotifier {
@@ -114,23 +158,43 @@ class Stage extends ChangeNotifier {
   @override
   void dispose() {
     settings?.removeListener(_placementSaid);
+    heldHandle.dispose();
     super.dispose();
   }
+
+  /// WHICH TILE IS HOLDING ITS HANDLE OUT. One notifier for the whole stage
+  /// rather than one per tile: a press is how a hand with no pointer says "this
+  /// one", a pointer can only be in one place, and a menu open on a handle
+  /// holds it out while it stands. It lives on the STAGE and not beside it,
+  /// because a handle held for a tile belongs to the arrangement that tile is
+  /// in -- a notifier outliving its stage is state one stage hands the next.
+  final ValueNotifier<String?> heldHandle = ValueNotifier(null);
 
   /// Told which view tile now shows which lens; the view book records it.
   final void Function(String viewTileId, String lensId)? onLens;
 
   final Map<String, TileSpec> tiles = {};
-  final Map<String, LayoutNode> presets = {};
+  final Map<String, StagePreset> presets = {};
 
-  /// The tile filling the stage on its own, and the pruned tree that shows it.
-  /// The real [root] is never touched, so un-zooming restores the exact
-  /// arrangement rather than a rebuilt approximation.
+  /// The tile filling the stage on its own. The real [root] is never touched,
+  /// so un-zooming restores the exact arrangement rather than a rebuilt
+  /// approximation.
   String? zoomedId;
-  LayoutNode? _zoomed;
 
   /// What the stage draws: the zoom when one is on, the arrangement otherwise.
-  LayoutNode? get displayRoot => _zoomed ?? root;
+  ///
+  /// DERIVED ON EVERY READ, never a stored copy (ISSUES 9.2, Don's live break:
+  /// "I get 'No tile named card:frames:one is open', and I cannot open another
+  /// tile"). A pruned COPY was the defect: close mutated the real tree and
+  /// never the copy, so the stage went on drawing a leaf whose tile was gone
+  /// and every later open landed underneath, invisible. A zoom is a QUESTION
+  /// asked of the live tree.
+  LayoutNode? get displayRoot {
+    final id = zoomedId;
+    if (id == null || findNode(root, id) == null) return root;
+    final keepBars = _setting('stage.zoomKeepsBars', Rational.one) > Rational.zero;
+    return zoomedTo(root, id, bars: keepBars && tiles[id]?.type != 'bar') ?? root;
+  }
 
   /// Open order, oldest first: what `tabWithNewest` reads.
   final List<String> openOrder = [];
@@ -154,6 +218,10 @@ class Stage extends ChangeNotifier {
       openOrder
         ..remove(spec.id)
         ..add(spec.id);
+      // THE ZOOM CLEARS (ISSUES 9.2, Don). The hand asked to SEE something; a
+      // tile that landed in the tree behind a zoom was invisible, which reads
+      // as the open having failed.
+      zoomedId = null;
     }
     focus(spec.id);
   }
@@ -203,6 +271,9 @@ class Stage extends ChangeNotifier {
     openOrder.remove(id);
     root = removeNode(root, id);
     spec?.onClose?.call();
+    // A zoom whose tile is gone clears itself: there is nothing left to fill
+    // the stage with, and a name pointing at nothing is what broke.
+    if (zoomedId == id) zoomedId = null;
     // Focus lands back in the STAGE REGION, never on a bar: chrome is not
     // somewhere a tile can be worked in, so it is not somewhere focus rests.
     if (focusedId == id) {
@@ -353,13 +424,8 @@ class Stage extends ChangeNotifier {
   void toggleZoom(String id) {
     if (zoomedId == id) {
       zoomedId = null;
-      _zoomed = null;
     } else if (findNode(root, id) != null) {
-      final keepBars = _setting('stage.zoomKeepsBars', Rational.one) > Rational.zero;
-      final tree = zoomedTo(root, id, bars: keepBars && tiles[id]?.type != 'bar');
-      if (tree == null) return;
       zoomedId = id;
-      _zoomed = tree;
       focusedId = id;
     }
     notifyListeners();
@@ -388,17 +454,45 @@ class Stage extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// CHANGE WHAT THIS BOX SHOWS (ISSUES 9.2, Don: "'Swap with X' already means
+  /// trade PLACES with another tile, so the content door cannot also say
+  /// 'swap' -- it says what it does to this box"). The box does not move, does
+  /// not resize and does not close: its filling is replaced, and the leaf
+  /// restates what it now IS so every strip, menu and placement rule reads the
+  /// new content rather than the one the tile was born with.
+  void showHere(String tileId, TileSpec spec) {
+    if (findNode(root, tileId) == null || spec.id != tileId) return;
+    tiles[tileId] = spec;
+    final leaf = TileLeaf(tileId, type: spec.type, klass: spec.klass, title: spec.title);
+    final parent = parentOf(root, tileId);
+    if (parent == null) {
+      root = leaf;
+    } else {
+      parent.children[parent.children.indexWhere((child) => child.id == tileId)] = leaf;
+    }
+    focus(tileId);
+  }
+
   /// A preset IS a saved tree. Applying one re-hosts the live tiles: a leaf
   /// naming a live tile keeps it, a leaf naming nothing adopts an unplaced tile
   /// of the same type and class or leaves, and a live tile the preset never
   /// names is re-placed by the rules.
-  void applyPreset(String name) {
-    final source = presets[name];
-    if (source == null) return;
-    var next = nodeFromJson(source.toJson());
+  ///
+  /// Hand it the view book and each view leaf comes back looking through what
+  /// it was looking through -- onto whichever live tile took that leaf's place,
+  /// which is not always the id the preset wrote.
+  void applyPreset(String name, {ViewBook? views}) {
+    final preset = presets[name];
+    if (preset == null) return;
+    var next = nodeFromJson(preset.root.toJson());
+    // Which live tile ended up standing in each saved leaf's place.
+    final stood = <String, String>{};
     final unplaced = tiles.keys.toSet();
     for (final leaf in leavesOf(next)) {
-      if (unplaced.remove(leaf.id)) continue;
+      if (unplaced.remove(leaf.id)) {
+        stood[leaf.id] = leaf.id;
+        continue;
+      }
       final adopted = unplaced.firstWhere(
         (id) => tiles[id]!.type == leaf.type && tiles[id]!.klass == leaf.klass,
         orElse: () => '',
@@ -406,6 +500,7 @@ class Stage extends ChangeNotifier {
       next = adopted.isEmpty
           ? removeNode(next, leaf.id)
           : _swapIn(next, leaf.id, TileLeaf(adopted, type: leaf.type, klass: leaf.klass));
+      if (adopted.isNotEmpty) stood[leaf.id] = adopted;
       unplaced.remove(adopted);
     }
     root = next;
@@ -415,12 +510,62 @@ class Stage extends ChangeNotifier {
       root = root == null ? leaf : _place(leaf);
     }
     focusedId = stageRegion(root) ?? edgeLeaf(root, false)?.id;
+    if (views != null) {
+      for (final entry in stood.entries) {
+        if (preset.views[entry.key] case final said?) views.showSaid(entry.value, said);
+      }
+    }
     notifyListeners();
   }
 
-  void savePreset(String name) {
-    if (root != null) presets[name] = nodeFromJson(root!.toJson())!;
+  /// Saves the arrangement, and -- when the book is handed in -- what every
+  /// view leaf in it SAID. Without the book it is the arrangement alone, which
+  /// is what it always was.
+  void savePreset(String name, {ViewBook? views}) {
+    final tree = root;
+    if (tree == null) return;
+    presets[name] = StagePreset(
+      nodeFromJson(tree.toJson())!,
+      views: {
+        if (views != null)
+          for (final leaf in leavesOf(tree))
+            if (leaf.type == 'view' && views.views.containsKey(leaf.id))
+              leaf.id: views.views[leaf.id]!.said,
+      },
+    );
     notifyListeners();
+  }
+
+  /// A NAMED VIEW: one tile's view state under a name, in the same map, as a
+  /// one-leaf arrangement -- so applying it lays out and showing it does not.
+  /// The leaf wears the live tile's own type and class, which is what lets a
+  /// different view tile adopt it later.
+  void saveView(String name, String tileId, ViewState state) {
+    final spec = tiles[tileId];
+    presets[name] = StagePreset(
+      TileLeaf(
+        tileId,
+        type: spec?.type ?? 'view',
+        klass: spec?.klass ?? 'lens',
+        title: spec?.title ?? name,
+      ),
+      views: {tileId: state.said},
+    );
+    notifyListeners();
+  }
+
+  /// THIS TILE NOW SHOWS THAT NAMED VIEW, and its focus is left alone. The
+  /// record's state for this very tile when it holds one, else the first view
+  /// leaf's in the saved tree's own order -- deterministic, so showing a view
+  /// twice shows the same view.
+  void showView(String name, String tileId, ViewBook views) {
+    final preset = presets[name];
+    if (preset == null) return;
+    final said =
+        preset.views[tileId] ??
+        [for (final leaf in leavesOf(preset.root)) ?preset.views[leaf.id]].firstOrNull;
+    if (said == null) return;
+    views.showSaid(tileId, said);
   }
 
   LayoutNode? _swapIn(LayoutNode? tree, String id, TileLeaf node) {
@@ -463,8 +608,8 @@ class Stage extends ChangeNotifier {
     if (source['presets'] is Map) {
       presets.clear();
       for (final entry in (source['presets'] as Map).entries) {
-        if (normalizeLayout(nodeFromJson(entry.value), barShare: share) case final node?) {
-          presets['${entry.key}'] = node;
+        if (StagePreset.fromJson(entry.value, barShare: share) case final preset?) {
+          presets['${entry.key}'] = preset;
         }
       }
     }

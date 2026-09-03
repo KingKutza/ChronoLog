@@ -16,6 +16,7 @@ import '../cards/frames_browser.dart';
 import '../core/records.dart';
 import '../session/view_state.dart';
 import 'controls.dart';
+import 'frame_menu.dart';
 import 'menus.dart';
 
 bool isStateFrame(Frame frame) => frame.traits.contains('state') && frame.traits.contains('group');
@@ -62,6 +63,7 @@ class _ProjectionControlState extends State<ProjectionControl> {
             (needle.isEmpty || (frame.title ?? frame.id).toLowerCase().contains(needle)))
           frame,
     ];
+    final lone = loneFrameOf(view);
     final rows = chrome.settings.value('chrome.frameRows').round().toInt();
     final shown = matches.take(rows).toList();
     final newFrame = chrome.cards['newFrame'];
@@ -72,6 +74,18 @@ class _ProjectionControlState extends State<ProjectionControl> {
       // than a phrase on a bar you have to already know how to read.
       name: 'Projection',
       glyph: reading.isEmpty ? 'Nothing projected' : reading,
+      // CAPPED, BY A SETTING (ISSUES 9.2). Ten projected frames of long titles
+      // is a sentence; unbounded on the bar it took every lens chip down to its
+      // initial. The whole reading is right here in the drop, and in the
+      // Expression field at the bottom of it, so nothing is lost by the cap.
+      cap: chrome.px('chrome.readingWidth'),
+      // THE READING NAMES A FRAME, SO THE READING CARRIES ITS VERBS (ISSUES
+      // 9.2). One source for those rows, never a list spelled here. A reading
+      // over several frames answers nothing: RULINGS #12 is open on what it
+      // should offer, and a guess would be the ruling.
+      onMenu: lone == null
+          ? null
+          : (at) => showChronoMenu(context, at, frameMenu(context, view, lone)),
       body: (context, close) => Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -83,6 +97,15 @@ class _ProjectionControlState extends State<ProjectionControl> {
               style: dataStyle(context),
               decoration: InputDecoration(isDense: true, hintText: 'Find a frame'),
             ),
+          ),
+          // THE EXPRESSION IS THE WHOLE STATEMENT, so it stands with the
+          // reading rather than under everything the reading is made of
+          // (ISSUES 9.2: "I don't see an expression field when I right-click
+          // on a frame" -- it was real, and it was at the bottom of a list).
+          // Statement first, then the parts it is made of.
+          Padding(
+            padding: EdgeInsets.all(chrome.px('chrome.pad')),
+            child: projectionExpression(context, view),
           ),
           // ONE projection row, shared with the frames browser: the two
           // surfaces author the same selection and the same expression, so
@@ -115,20 +138,6 @@ class _ProjectionControlState extends State<ProjectionControl> {
               // A truncated count is a LOWER bound and reads as one.
               child: Text('${matches.length - shown.length}+ more', style: labelStyle(context)),
             ),
-          Padding(
-            padding: EdgeInsets.all(chrome.px('chrome.pad')),
-            child: ExpressionField(
-              label: 'Expression',
-              source: reading,
-              // Reading it IS the validation: the one math parses it, and the
-              // frame names are the bindings this view already knows.
-              evaluate: (source) => ViewState(
-                lensId: view.lensId,
-                source: source,
-              ).projection(bindings: bindings).frames.join(', '),
-              onChanged: (source) => view.source = source,
-            ),
-          ),
         ],
       ),
     );

@@ -34,20 +34,58 @@ Offset polar(Offset centre, double radius, double angle) =>
 /// The ray a cycle starts and stops on.
 const double startRay = -math.pi / 2;
 
+/// A figure this geometry cannot draw, said in a sentence rather than drawn
+/// wrong. NaN and a silent clamp are the same thing to the eye: nothing, or
+/// something nobody asked for. Its subject is the drawing, so it sits with the
+/// drawing, beside `LawRefusal` and `MathRefusal` on their own subjects.
+class GeometryRefusal implements Exception {
+  const GeometryRefusal(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// One circular arc. Its endpoints are exactly on the rays of [from] and [to].
+///
+/// THE DOMAIN IS SAID (ISSUES 9.3). A sweep of a whole turn or more IS THE
+/// WHOLE CIRCLE, in the sweep's own direction: a fact spanning the entire cycle
+/// asks for exactly a turn, so refusing it would make the mark vanish, and the
+/// engine's own answer past a turn was the sweep modulo one -- a sweep of -2pi
+/// measured zero pixels. The magnitude is carried to a turn and no further, and
+/// the arc is laid in TWO HALVES of the carried sweep so the direction survives:
+/// `arcBand` closes an annulus by running the inner arc backwards, and an oval
+/// would lose the winding that fill depends on. Halving is how every sweep is
+/// drawn, not a branch for the large ones.
 Path arcPath(Offset centre, double radius, double from, double to) {
   final rect = Rect.fromCircle(center: centre, radius: radius);
   final start = polar(centre, radius, from);
+  final sweep = to - from;
+  final half = sweep.sign * math.min(sweep.abs(), math.pi * 2) / 2;
   return Path()
     ..moveTo(start.dx, start.dy)
-    ..arcTo(rect, from, to - from, false);
+    ..arcTo(rect, from, half, false)
+    ..arcTo(rect, from + half, half, false);
 }
 
 /// The spiral track's closed outline: offset along each sample's own radius, so
 /// both termini are flat cuts colinear with the start ray.
 ///
-/// [turns] must be whole. A fractional turn ends somewhere that is not the ray,
-/// and the flat cut stops being a cut and becomes a slice.
+/// [turns] is whole at every call site, so the flat cut is exact by
+/// construction. WHAT IT REFUSES, IT SAYS (ISSUES 9.3), because each of these
+/// used to be drawn wrong in silence:
+///
+///   * [samples] below one made `index / samples` NaN, every vertex NaN, and
+///     the engine dropped the outline without a word -- indistinguishable from
+///     an empty document.
+///   * [turns] below one wound the ribbon backwards THROUGH THE CENTRE, or not
+///     at all. A ribbon winds a whole positive number of turns; below one the
+///     flat cut this figure exists for is a reflection rather than a cut.
+///   * a [halfWidth] wider than [inner] put the inner edge at or past the
+///     centre, where a clamp pinched the ribbon to a point and it stopped being
+///     two half-widths wide on its first rays. The clamp WAS the defect: a
+///     ribbon that cannot be a ribbon is refused, not thinned quietly.
 Path spiralRibbon(
   Offset centre, {
   required double inner,
@@ -56,13 +94,29 @@ Path spiralRibbon(
   required int samples,
   required double halfWidth,
 }) {
+  if (samples < 1) {
+    throw GeometryRefusal(
+      'A spiral track needs at least one sample to have a shape, not $samples.',
+    );
+  }
+  if (turns < 1) {
+    throw GeometryRefusal(
+      'A spiral track winds a whole positive number of turns, not $turns.',
+    );
+  }
+  if (halfWidth > inner) {
+    throw GeometryRefusal(
+      'A track ${halfWidth * 2} wide does not fit inside a hole of $inner: '
+      'its inner edge would fall through the centre.',
+    );
+  }
   final outer = <Offset>[], within = <Offset>[];
   for (var index = 0; index <= samples; index += 1) {
     final progress = index / samples;
     final angle = startRay + progress * turns * math.pi * 2;
     final radius = inner + progress * turns * spacing;
     outer.add(polar(centre, radius + halfWidth, angle));
-    within.add(polar(centre, math.max(0, radius - halfWidth), angle));
+    within.add(polar(centre, radius - halfWidth, angle));
   }
   final path = Path()..moveTo(outer.first.dx, outer.first.dy);
   for (final point in outer.skip(1)) {

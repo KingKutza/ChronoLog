@@ -31,6 +31,7 @@ import '../law_context.dart';
 import '../lens_painter.dart';
 import '../lines/plan.dart';
 import '../marks.dart';
+import '../zones.dart';
 import '../minimap/labels.dart';
 import '../now.dart';
 import '../radial/geometry.dart';
@@ -138,6 +139,7 @@ class LinesPainter extends LensPainter {
   @override
   void paint(Canvas canvas, Size size) {
     hits.clear();
+    zones.clear();
     refusals.clear();
     final plan = framePlan(scene.engine, scene.projection, read: scene.tunable);
     for (final refused in plan.refused) {
@@ -351,9 +353,22 @@ class LinesPainter extends LensPainter {
     required bool identity,
   }) {
     final facts = {for (final fact in source) fact.identity: fact};
+    // FILL IS GROUND, ON THIS SURFACE TOO (ISSUES 9.2). A ground on a line is
+    // the STRETCH OF THE LINE its span covers, drawn beneath the marks and
+    // taking no fan offset -- a ground does not lane. What is left is the
+    // figures, which fan and stack as they always did.
+    final grounds = <Fact>[], marks = <String, Fact>{};
+    for (final fact in facts.values) {
+      if (zoneFill(scene.engine, fact, scene.tunable)) {
+        grounds.add(fact);
+      } else {
+        marks[fact.identity] = fact;
+      }
+    }
+    _paintGrounds(canvas, line, grounds, cascade, pins, ordinals, identity: identity);
     final points = <LinePoint>[];
     final xs = <String, double>{};
-    for (final fact in facts.values) {
+    for (final fact in marks.values) {
       final mapped = identity ? fact.day : warp(pins, fact.day);
       final at = ordinals != null ? ordinals[fact.event.id] : (mapped == null ? null : xAt(mapped));
       if (at == null || at < field.left || at > field.right) continue;
@@ -381,6 +396,54 @@ class LinesPainter extends LensPainter {
       hits.add(hit);
     }
     return points.length;
+  }
+
+  /// THE GROUNDS ON ONE LINE, through the one pass every timed lens shares: the
+  /// stretch of the line each span covers, at the line's own height.
+  ///
+  /// A ground whose span runs off an end is CUT BY THE FIELD, not dropped: what
+  /// is on screen of it is drawn, and the continuity grammar says which end the
+  /// rest of it is over -- which is the whole reason the grammar exists.
+  void _paintGrounds(
+    Canvas canvas,
+    LinePlan line,
+    List<Fact> grounds,
+    ColorCascade cascade,
+    List<Pin> pins,
+    Map<String, double>? ordinals, {
+    required bool identity,
+  }) {
+    if (grounds.isEmpty) return;
+    final y = yOf(line.index);
+    final half = scene.px('mark.pip');
+    for (final fact in grounds) {
+      final endDay = fact.day + scene.engine.eventDurationDays(fact.event);
+      final from = identity ? fact.day : warp(pins, fact.day);
+      final to = identity ? endDay : warp(pins, endDay);
+      if (from == null || to == null) continue;
+      final left = ordinals != null ? ordinals[fact.event.id] : xAt(from);
+      final right = ordinals != null ? left : xAt(to);
+      if (left == null || right == null) continue;
+      final box = Rect.fromLTRB(
+        left < field.left ? field.left : left,
+        y - half,
+        right > field.right ? field.right : right,
+        y + half,
+      );
+      if (box.right <= field.left || box.left >= field.right) continue;
+      paintGround(
+        canvas,
+        this,
+        fact,
+        box,
+        zoneSegmentOf(
+          continuation: left < field.left,
+          continuesAfter: right > field.right,
+        ),
+        cascade.colorOf(fact),
+      );
+      hits.add((bounds: box, shape: null, grab: null, fact: fact, identity: fact.identity));
+    }
   }
 
   /// The axis ladder: ticks on REAL boundaries of this law, never on an

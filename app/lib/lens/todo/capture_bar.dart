@@ -22,9 +22,15 @@ import '../../edit/editor.dart';
 import 'row.dart';
 
 class CaptureBar extends StatefulWidget {
-  const CaptureBar({required this.scene, this.seed = const {}, super.key});
+  const CaptureBar({required this.scene, this.seed = const {}, this.frame, super.key});
 
   final TodoScene scene;
+
+  /// The frame a capture from here is PLACED on, where the column it heads bears
+  /// time itself (ISSUES 9.2, the column-born todo). Null falls back to what the
+  /// view projects, which is what a list with no column of its own means; a
+  /// column that bears no time seeds a staple instead and places nothing.
+  final String? frame;
 
   /// The facts the section or column this bar sits in already carries, by
   /// `group` / `contains` / `state`. A capture from a column head is BORN
@@ -65,7 +71,7 @@ class _CaptureBarState extends State<CaptureBar> {
   void _submit() {
     final capture = scene.editor.captureQuickTodo(
       _composed,
-      frameId: scene.frameId,
+      frameId: widget.frame ?? scene.frameId,
       todayDays: scene.nowDays,
     );
     if (capture == null) return;

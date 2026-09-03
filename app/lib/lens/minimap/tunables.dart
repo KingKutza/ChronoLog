@@ -136,3 +136,26 @@ const Map<String, String> minimapTunableDefaults = {
   // --- The window box -------------------------------------------------------
   'minimap.windowWash': '0.07',
 };
+
+/// THE SETTINGS WHOSE VALUE IS A FORMULA OVER VARIABLES, not a number.
+///
+/// A SETTING THAT IS AN EQUATION IS NOT A SETTING THAT IS A NUMBER. Every key in
+/// `lensTunableDefaults` is promised to evaluate, on its own, to a number -- the
+/// substrate reads them with an empty environment and a lens asks for pixels.
+/// This one cannot: its variables are bound per fact, by the field, at the
+/// moment it is asked. So it composes as its own family rather than pretending
+/// to be a pixel, and the promise about numbers stays true of the numbers.
+const Map<String, String> minimapFormulaDefaults = {
+  // WHAT ONE OBJECT CONTRIBUTES TO A BIN (ISSUES 9.2, Don: "the goal for the
+  // minimap was to map busyness, and the event in question is anti-busy").
+  //
+  // It was arithmetic written into the painter, so the one thing a person might
+  // want to say about busyness -- that this kind of object is not busy -- had
+  // nowhere to be said. Now it is one formula over four variables the field
+  // binds: `staples`, how much structure the object carries beyond the staple
+  // that places it; `duration`, how long it lasts in days; `weight`, its
+  // composed display weight; and `busy`, its composed `display.busy` handling,
+  // which is how an Out-of-office frame saying `b * 0` empties every member's
+  // contribution without the minimap knowing what out-of-office means.
+  'minimap.busy': '(1 + staples + duration) * weight * busy',
+};

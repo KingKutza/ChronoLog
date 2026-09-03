@@ -26,9 +26,24 @@ class ListLens extends StatelessWidget {
     child: LayoutBuilder(
       builder: (context, box) {
         final admitted = todoEntries(scene, box.maxWidth, box.maxHeight);
+        // ONE ROW PER ENTRY. A board stands an entry under EVERY column that
+        // admits it -- that is what a column is for -- but a list is one
+        // roster read top to bottom, and the same to-do printed twice under
+        // two headings reads as two to-dos. So a list files an entry once and
+        // the row's own chips name the rest; nothing is hidden, and nothing is
+        // counted twice.
+        //
+        // UNDER THE LIST IT BELONGS TO, NOT UNDER THE CLOCK. Which one it is
+        // filed under must not fall out of an id sort, so the one it is filed
+        // under is the first that BEARS NO TIME: "a to-do with only a group
+        // staple has no position and that is fine -- the group is its list"
+        // (Don, ISSUES 9.2). A to-do placed on Wall Time and stapled to
+        // Errands is an errand that happens to be scheduled, and Errands is
+        // the heading a person is looking for. With nothing but time to go on,
+        // time is the heading.
         final sections = sectionsOf<TodoEntry>(
           admitted.drawn,
-          (entry) => placementsOf(scene, entry),
+          (entry) => _filed(scene, placementsOf(scene, entry)),
         );
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -50,6 +65,22 @@ class ListLens extends StatelessWidget {
       },
     ),
   );
+}
+
+/// The one section a list files an entry under: the first that bears no time,
+/// and otherwise the first there is.
+Iterable<Placement> _filed(TodoScene scene, Iterable<Placement> under) {
+  Placement? first, timeless;
+  for (final placement in under) {
+    first ??= placement;
+    if (placement.key case final key?) {
+      if (timeless == null && !bearsTime(scene, key)) timeless = placement;
+    } else {
+      timeless ??= placement;
+    }
+  }
+  final filed = timeless ?? first;
+  return filed == null ? const [] : [filed];
 }
 
 /// A section head: THE COLUMN'S NAME, and beside it how many are in it.
@@ -112,10 +143,15 @@ Widget groupingNote(TodoScene scene) => Padding(
   ),
 );
 
-Widget overflowFooter(TodoScene scene, String label) => Padding(
+Widget overflowFooter(TodoScene scene, String label) =>
+    footerNote(scene, '$label more than this surface holds');
+
+/// One quiet line under the surface, in the one footer voice: what the picture
+/// could not hold, and what it holds but could not file.
+Widget footerNote(TodoScene scene, String said) => Padding(
   padding: EdgeInsets.all(scene.px('todo.pad')),
   child: Text(
-    '$label more than this surface holds',
+    said,
     style: scene.theme.data.copyWith(fontSize: scene.px('todo.metaSize'), color: scene.theme.muted),
   ),
 );

@@ -42,7 +42,14 @@ Map<String, String> stapleKindLabels() => {
 
 /// The named points of an extent the substrate itself reads. A point the author
 /// invented carries its own offset instead and is left as typed.
-const List<String> extentPoints = ['start', 'end', 'midpoint'];
+///
+/// THE WHOLE IS ONE OF THEM (ISSUES 9.2). A point has a SIZE -- 0, all, or any
+/// one-math measure between -- so the whole of an object is a point like any
+/// other, and a vocabulary that omitted it could not say the affiliation the
+/// substrate's own default point means. The words come from the substrate,
+/// never spelled again here, and the list is never narrowed by an extent's
+/// current size: a zero-duration todo still has an end to be stapled at.
+const List<String> extentPoints = [wholePoint, startPoint, 'end', 'midpoint'];
 
 /// THE ONE STEERING RULE, pure and testable.
 ///
@@ -302,6 +309,32 @@ class _SeriesExclusionsState extends State<SeriesExclusions> {
   }
 }
 
+/// THE RULE AS ONE MATH, from the head the choices author. One rule, two
+/// spellings: this is the reading, [readOneMathRule] is the writing, and a
+/// round trip through either changes nothing.
+String oneMathRule(RRule rrule) => [
+  for (final entry in (RRule.of(rrule)..removeWhere((key, value) => value.trim().isEmpty)).entries)
+    '${entry.key.toLowerCase()} = ${entry.value}',
+].join('; ');
+
+/// The rule a person wrote, read back into the same head. A line the choices
+/// can say lands in their own terms; anything else is kept verbatim under
+/// `RRULE`, so a pattern the choices cannot express is never lost to them.
+RRule readOneMathRule(RRule was, String written) {
+  final text = written.trim();
+  if (text.isEmpty) return const {};
+  final next = RRule.of({});
+  for (final clause in text.split(';')) {
+    final at = clause.indexOf('=');
+    if (at < 0) return RRule.of(was)..['RRULE'] = text;
+    final key = clause.substring(0, at).trim().toUpperCase();
+    final value = clause.substring(at + 1).trim();
+    if (key.isEmpty || value.isEmpty) return RRule.of(was)..['RRULE'] = text;
+    next[key] = value;
+  }
+  return next;
+}
+
 /// An RRULE head as a map of strings, from wherever it was stored.
 RRule readRRule(Object? source) => {
   for (final entry in (obj(source) ?? const <String, dynamic>{}).entries)
@@ -432,12 +465,35 @@ class RepeatSugar extends StatelessWidget {
                 Text('until a staple cuts it', style: labelStyle(context)),
             ]),
           ),
-        if (frequency.isNotEmpty)
-          cardNote(
-            context,
-            'A pattern this sugar cannot say — "every odd day of every even month" — '
-            'is authored in the one math, not here.',
+        // THE THIRD INPUT MODE (ISSUES 9.2, Don: "the tooltip says we have to
+        // author complex patterns in one math but does not provide a link to or
+        // box for typing it. Also it says 'A pattern this sugar cannot say',
+        // which is very awkward"). "Sugar" is our word for the choices above,
+        // never a person's, so it does not face the hand -- and the box is
+        // here rather than pointed at: it reads and writes the SAME rule the
+        // choices do, so saying it either way says one thing.
+        cardRow(
+          context,
+          'Or write the rule',
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CardField(
+                value: rrule['RRULE'] ?? oneMathRule(rrule),
+                mono: true,
+                width: double.infinity,
+                hint: 'the rule in one math — every odd day of every even month',
+                onChanged: (text) => onChanged(readOneMathRule(rrule, text)),
+              ),
+              cardNote(
+                context,
+                'For a pattern the choices above cannot express, write it here. '
+                'The two are one rule: what you write shows in the choices where '
+                'they can say it, and stands on its own where they cannot.',
+              ),
+            ],
           ),
+        ),
       ],
     );
   }

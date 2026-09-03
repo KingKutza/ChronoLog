@@ -9,15 +9,27 @@ import 'package:chronolog/core/records.dart';
 import 'package:chronolog/edit/editor.dart';
 import 'package:chronolog/lens/lens_painter.dart';
 import 'package:chronolog/lens/painters/month_grid.dart';
+import 'package:chronolog/lens/gestures.dart';
 import 'package:chronolog/lens/painters/intimate.dart';
+import 'package:chronolog/lens/painters/radial.dart';
+import 'package:chronolog/lens/tree/tree_lens.dart';
 import 'package:chronolog/lens/theme.dart';
 import 'package:chronolog/lens/todo/row.dart';
 import 'package:chronolog/lens/tunables.dart';
 import 'package:chronolog/session/lens_catalog.dart';
 import 'package:chronolog/session/settings.dart';
 
-/// Every area's shipped defaults, composed exactly as the session composes them,
-/// so a spec reads the same numbers the program does.
+/// The lens layer's shipped defaults, composed the way the session composes
+/// them, so a spec reads the same numbers the program does.
+///
+/// A MISSING MAP IS A SILENT ZERO (ISSUES 9.3). `Settings.value` answers
+/// `Rational.zero` for a key in no map at all, so every `curve.*`, `radial.*`
+/// band, `lines.*` and `spiral.*` number read as nothing here while the program
+/// read the shipped value -- which is how `unproject` came to refuse the very
+/// point `project` had just drawn, and how a whole family of specs came to make
+/// claims about a lens drawn with no widths at all. The curve, pointer and tree
+/// maps join the six that were here; `chrome`, `stage` and the two card maps
+/// stay with their own areas' harnesses.
 Settings allSettings() => Settings(
   defaults: const [
     lensTunableDefaults,
@@ -26,6 +38,9 @@ Settings allSettings() => Settings(
     intimateTunableDefaults,
     todoTunableDefaults,
     editTunableDefaults,
+    curveTunableDefaults,
+    pointerTunableDefaults,
+    treeTunableDefaults,
   ],
 );
 

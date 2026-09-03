@@ -44,6 +44,7 @@ const Map<String, String> todoTunableDefaults = {
   'todo.metaSize': '10',
   'todo.sectionSize': '11',
   'todo.columnWidth': '248',
+  'todo.chooserRows': '8',
   'todo.captureHeight': '34',
   'todo.sparseOpacity': '0.55',
   'todo.rowFootprint': '30',
@@ -152,7 +153,7 @@ typedef TodoEntry = ({
   String? state,
   List<StateAffiliation> states,
   List<String> groups,
-  List<String> frames,
+  List<FarEnd> farEnds,
   List<String> parents,
   ContainsSummary contains,
   String promotion,
@@ -207,11 +208,11 @@ TodoEntry _entry(TodoScene scene, String id, Fact? fact) {
   // THERE IS NO MEMBERSHIP, ONLY STAPLES (Don, ruled 2026-09-01). `groups` is
   // the narrow reading -- direct membership -- and it stays, because the sparse
   // predicate and the row's own chips are about what was said ABOUT an object.
-  // Which frames an object BELONGS UNDER is the connection graph, read through
+  // Which records an object BELONGS UNDER is the connection graph, read through
   // the one accessor the projection algebra and the Tree already read: every
-  // frame at the far end of any staple, placement, containment or membership,
+  // record at the far end of any staple, placement, containment or membership,
   // however that staple was authored.
-  final frames = stapledFrames(scene, id);
+  final farEnds = farEndsOf(scene, id);
   final weight = fact == null ? Rational.one : scene.engine.weightOf(fact, scene.projection).weight;
   final title = str(scene.engine.document.events[id]?.payload?['title']) ?? '';
   return (
@@ -221,7 +222,7 @@ TodoEntry _entry(TodoScene scene, String id, Fact? fact) {
     state: entryState(facts, id, stateFrames: [for (final s in states) s.frame], groups: groups),
     states: states,
     groups: groups,
-    frames: frames,
+    farEnds: farEnds,
     parents: facts.parents(id),
     contains: facts.containsSummary(id),
     promotion: promotionOf(weight, scene.tunable, keyPrefix: 'todo.${scene.lens}'),
@@ -229,41 +230,56 @@ TodoEntry _entry(TodoScene scene, String id, Fact? fact) {
   );
 }
 
-/// EVERY FRAME AN OBJECT IS STAPLED TO, however the staple was said (ISSUES
-/// 9.1, ruled): membership, placement, containment and an anchor are not kinds
-/// of relationship, they are staples, and the grouping reads the graph. State
-/// frames are left out on purpose -- Done is a state frame, and the state
-/// grouping is where it columns; the surface says so in words rather than
-/// leaving the omission to be discovered.
-List<String> stapledFrames(TodoScene scene, String objectId) {
+/// EVERY RECORD AN OBJECT IS CONNECTED TO, however the connection was said
+/// (ISSUES 9.1, ruled): membership, placement, containment and an anchor are not
+/// kinds of relationship, they are staples, and a grouping reads the graph.
+///
+/// NOTHING IS FILTERED HERE. The old reading dropped state frames on the way
+/// out, which is what made "group by frame" a filtered grouping wearing the
+/// unfiltered name (ISSUES 9.2, the melt): the filter is the GROUPING's, said
+/// once in its own row of the table, and this is the whole set it filters.
+/// `holder` carries the one ruled direction there is -- who holds whom in a
+/// containment -- so the grouping that reads containers reads it from here too.
+List<FarEnd> farEndsOf(TodoScene scene, String objectId) {
   final engine = scene.engine;
-  final found = <String>{};
+  final found = <String, FarEnd>{};
   for (final edge in engine.connectionsOf(objectId)) {
     final far = edge.from == objectId ? edge.to : edge.from;
     if (far == objectId) continue;
-    final frame = engine.document.frames[far];
-    if (frame == null || isStateFrame(frame)) continue;
-    found.add(far);
+    final holder = edge.kind == containsEdge && edge.from != objectId;
+    final already = found[far];
+    if (already != null && (already.holder || !holder)) continue;
+    found[far] = (id: far, frame: engine.document.frames[far], holder: holder);
   }
-  return found.toList()..sort();
+  return found.values.toList()..sort((left, right) => left.id.compareTo(right.id));
 }
 
 /// One sentence about what a grouping READS, so a column that never appears is
 /// explained where it fails to appear (ISSUES 9.1: "nothing on the surface says
-/// so"). Derived from the grouping, never a per-lens copy.
-String groupingReads(String grouping) => switch (grouping) {
-  'frame' => 'Columns are every frame a to-do is stapled to. State frames column '
-      'under Group by state.',
-  'container' => 'Columns are what holds a to-do.',
-  'importance' => 'Columns are the composed display weight, against this lens own thresholds.',
-  _ => 'Columns are the state frames this document holds, empty ones included.',
-};
+/// so"). The grouping says it itself; no surface keeps a copy.
+String groupingReads(Object? grouping) => groupingFor(grouping).reads;
+
+/// The word each weight band reads as. The bands themselves are the thresholds
+/// already in settings; these are their names, and they live beside the
+/// promotion that derives them.
+/// The mark a row wears for a staple to another object. One glyph, said once.
+const String stapleSigil = '↔';
 
 const Map<String, String> promotionTitles = {
   landmarkWeight: 'Landmark',
   importantWeight: 'Important',
   standardWeight: 'Standard',
 };
+
+/// TIME-BEARING IS DERIVED, NEVER DECLARED (Don, ruled 2026-09-03). No flag, no
+/// trait test, no `isCalendarFrame` stored anywhere: the law a frame actually
+/// resolves to is asked whether it is positional at all, and then whether its
+/// positions are commensurable with the running clock. A group whose basis is a
+/// calendar answers yes through the basis, which is the second half of the
+/// ruling ("a time rule, or a basis with a time rule"), and a record that is no
+/// frame bears no time because it has no law to ask.
+bool bearsTime(TodoScene scene, String id) =>
+    scene.engine.windowFrameFor(id) != null && scene.engine.lawOf(id).mapsToClock();
 
 /// What to call a frame or an object by id: its authored title, never a bare
 /// record id where one exists.
@@ -275,32 +291,25 @@ String frameTitle(TodoScene scene, String id) {
 
 /// Where one entry belongs under [TodoScene.grouping]. A null key is the unnamed
 /// section, which leads; nothing here emits an empty one.
-Iterable<Placement> placementsOf(TodoScene scene, TodoEntry entry) => switch (scene.grouping) {
-  'importance' => [
-    (key: entry.promotion, title: promotionTitles[entry.promotion] ?? entry.promotion, meta: null),
-  ],
-  'container' =>
-    entry.parents.isEmpty
-        ? const [(key: null, title: 'Held by nothing', meta: null)]
-        : [
-            for (final parent in entry.parents)
-              (key: parent, title: frameTitle(scene, parent), meta: parent),
-          ],
-  'frame' =>
-    entry.frames.isEmpty
-        ? const [(key: null, title: 'No frame', meta: null)]
-        : [
-            for (final frame in entry.frames)
-              (key: frame, title: frameTitle(scene, frame), meta: frame),
-          ],
-  _ =>
-    entry.states.isEmpty
-        ? const [(key: null, title: 'Open', meta: null)]
-        : [
-            for (final state in entry.states)
-              (key: state.frame, title: state.title, meta: state.at),
-          ],
-};
+///
+/// ONE READING, FILTERED BY THE GROUPING ITSELF (ISSUES 9.2, the melt). This was
+/// a switch over four names, three of whose branches said the same sentence
+/// about a different subset of the same graph. The grouping names its own
+/// columns now and this asks it, so a fifth grouping is a row in the table and
+/// nothing here learns its name.
+Iterable<Placement> placementsOf(TodoScene scene, TodoEntry entry) {
+  final grouping = groupingFor(scene.grouping);
+  final keys = grouping.columnsOf((farEnds: entry.farEnds, band: entry.promotion));
+  if (keys.isEmpty) return [(key: null, title: grouping.unnamed, meta: null)];
+  return [
+    for (final key in keys) (key: key, title: columnTitle(scene, key), meta: key),
+  ];
+}
+
+/// What a column is called: the band's own word where the key names no record,
+/// and otherwise the record's authored title.
+String columnTitle(TodoScene scene, String key) =>
+    promotionTitles[key] ?? frameTitle(scene, key);
 
 /// The one row. A card on a board and a line in a list are the same chrome.
 class TodoRow extends StatefulWidget {
@@ -377,6 +386,7 @@ class _TodoRowState extends State<TodoRow> {
                   ),
                 ),
               ),
+              ..._sigils(),
               _chooser(),
             ],
           ),
@@ -415,6 +425,33 @@ class _TodoRowState extends State<TodoRow> {
         ? GestureDetector(onTap: () => scene.onOpen?.call(entry.id), child: wrapped)
         : gestures(entry.id, wrapped);
   }
+
+  /// WHAT A SENTENCE JOINED, WORN ON THE ROW (ISSUES 9.2: "no indicator in
+  /// Board that two todos are stapled together -- I would expect a sigil, a
+  /// line, an adjacency, something"). One sigil per object-to-object staple,
+  /// and the hover says the sentence by naming the far object -- the adjacency
+  /// is the board's half of the same answer.
+  ///
+  /// The glyph is spelled here because the shared mark vocabulary has no word
+  /// for a staple yet; it belongs in `marks.dart` beside the other eight the day
+  /// that vocabulary gains one.
+  List<Widget> _sigils() => [
+    for (final end in entry.farEnds)
+      if (end.frame == null)
+        Tooltip(
+          message: 'Stapled to ${frameTitle(scene, end.id)}',
+          child: Padding(
+            padding: EdgeInsets.only(left: scene.px('todo.gap')),
+            child: Text(
+              stapleSigil,
+              style: scene.theme.data.copyWith(
+                fontSize: scene.px('todo.metaSize'),
+                color: scene.theme.muted,
+              ),
+            ),
+          ),
+        ),
+  ];
 
   /// The state chooser: every state frame the document holds, plus a new one by
   /// name. The vocabulary is whatever has been authored -- nothing enumerates it.

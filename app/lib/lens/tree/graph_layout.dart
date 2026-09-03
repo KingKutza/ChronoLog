@@ -20,6 +20,8 @@ import 'package:flutter/widgets.dart';
 
 import '../../core/projection.dart';
 import '../../core/records.dart';
+import '../tunables.dart';
+import 'tree_lens.dart';
 
 // The edge vocabulary and the whole-graph accessor live in the model, under the
 // name the model reserved for them; this file is the LAYOUT.
@@ -149,6 +151,102 @@ Map<String, Offset> radialLayout(
           ? centre
           : centre + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
     }
+  }
+  return places;
+}
+
+/// THE LOCAL GRAPH, LAID OUT BY SIMULATION (ISSUES 9.2, Don: "Tree should behave
+/// more like the local graph in Obsidian").
+///
+/// [radialLayout] spaces ring-mates BY ID, which is a statement about the
+/// alphabet and not about the pile: two objects stapled to each other land on
+/// opposite sides of their ring while strangers sit shoulder to shoulder, and
+/// the picture then reads as structure that is not there. A simulation says the
+/// one thing the graph actually knows -- STAPLES PULL, and everything else
+/// pushes -- so a cluster draws as a cluster because it is one.
+///
+/// Fruchterman-Reingold, which is that sentence as arithmetic: every pair
+/// repels by `k^2 / d`, every edge attracts by `d^2 / k`, and a cooling cap on
+/// each step's travel settles the field. A stapled pair therefore rests where
+/// the two balance -- at `k`, the authored edge length -- and an unstapled pair
+/// has nothing pulling it back, so it goes as far as the rest of the field
+/// allows. That is the whole property the report asks for.
+///
+/// THE SAME GRAPH DRAWS THE SAME WAY. There is no clock and no random seed: the
+/// starting positions are [radialLayout]'s, which are a function of the ids, and
+/// every pass runs over sorted ids. A lens reopened is the lens closed.
+///
+/// THE HAND WINS. A node in [pinned] is placed exactly where it was put and
+/// never moved -- a drag is an instruction, not a suggestion -- and the hop-zero
+/// node is held at [centre], because the centre is what you are on.
+Map<String, Offset> forceLayout(
+  Graph graph,
+  Offset centre, {
+  required Tunable? read,
+  Map<String, Offset> pinned = const {},
+}) {
+  final ids = [for (final node in graph.nodes) node.id]..sort();
+  final held = <String>{
+    for (final node in graph.nodes)
+      if (node.distance == 0) node.id,
+    ...pinned.keys,
+  };
+  final places = radialLayout(
+    graph,
+    centre,
+    step: treePixels(read, 'tree.ringStep'),
+    turn: treePixels(read, 'tree.ringTurn'),
+    spacing: treePixels(read, 'tree.ringSpacing'),
+  );
+  for (final node in graph.nodes) {
+    places[node.id] ??= centre;
+    if (node.distance == 0) places[node.id] = centre;
+  }
+  places.addAll(pinned);
+  final k = treePixels(read, 'tree.edgeLength');
+  final steps = treeSetting(read, 'tree.settleSteps').round().toInt();
+  final cool = treePixels(read, 'tree.settleCool');
+  if (k <= 0 || steps < 1 || ids.length < 2) return places;
+  // A pair exactly on top of another has no direction to push in, so the field
+  // needs one: the id order, which is the same order every time.
+  Offset apart(String from, String to, int rank) {
+    final delta = places[from]! - places[to]!;
+    if (delta.distance > 1e-9) return delta;
+    final angle = rank * math.pi * 2 / ids.length;
+    return Offset(math.cos(angle), math.sin(angle)) * 1e-6;
+  }
+
+  final edges = [
+    for (final edge in graph.edges)
+      if (places.containsKey(edge.from) && places.containsKey(edge.to)) edge,
+  ];
+  var travel = k;
+  for (var pass = 0; pass < steps; pass += 1) {
+    final push = {for (final id in ids) id: Offset.zero};
+    for (var one = 0; one < ids.length; one += 1) {
+      for (var two = one + 1; two < ids.length; two += 1) {
+        final delta = apart(ids[one], ids[two], one);
+        final gap = delta.distance;
+        final force = delta / gap * (k * k / gap);
+        push[ids[one]] = push[ids[one]]! + force;
+        push[ids[two]] = push[ids[two]]! - force;
+      }
+    }
+    for (final edge in edges) {
+      final delta = apart(edge.from, edge.to, 0);
+      final gap = delta.distance;
+      final force = delta / gap * (gap * gap / k);
+      push[edge.from] = push[edge.from]! - force;
+      push[edge.to] = push[edge.to]! + force;
+    }
+    for (final id in ids) {
+      if (held.contains(id)) continue;
+      final force = push[id]!;
+      final size = force.distance;
+      if (size <= 0) continue;
+      places[id] = places[id]! + force / size * math.min(size, travel);
+    }
+    travel *= cool;
   }
   return places;
 }

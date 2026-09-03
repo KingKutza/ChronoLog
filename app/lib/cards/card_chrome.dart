@@ -21,6 +21,7 @@ import '../lens/tunables.dart';
 import '../session/settings.dart';
 import '../stage/tile.dart';
 import 'card_factory.dart';
+import 'color_picker.dart';
 
 /// The card layer's numbers, as named settings whose defaults are expressions
 /// in the one math. Nothing below is a literal in a widget.
@@ -120,9 +121,52 @@ class _CardShellState extends State<CardShell> {
     // The tile under this already paints `paper`; a card that painted its own
     // ground a second time is where the three surface roles stopped meaning
     // elevation and started meaning nothing.
+    // A CARD IS A TILE AND A TILE MAY BE ANY SHAPE, unbounded height included:
+    // a card pumped inside a scrolling run is still a card, and an `Expanded`
+    // under an infinite constraint is a claim about space nobody promised. The
+    // body takes the room where there is room and shrink-wraps where there is
+    // not; the header and footer are unchanged either way.
+    return LayoutBuilder(
+      builder: (context, constraints) => _shell(context, chrome, theme, constraints.hasBoundedHeight),
+    );
+  }
+
+  Widget _shell(BuildContext context, Chrome chrome, ChronoTheme theme, bool bounded) {
+    final body = SingleChildScrollView(
+      padding: EdgeInsets.all(cardPx(context, 'card.pad')),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final child in widget.primary) _spaced(context, child),
+          if (widget.fold.isNotEmpty)
+            InkWell(
+              onTap: () => setState(() => _open = !_open),
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: cardPx(context, 'card.gap')),
+                child: Text(
+                  '${_open ? '▾' : '▸'}  ${widget.foldLabel}',
+                  style: labelStyle(context, color: theme.strong),
+                ),
+              ),
+            ),
+          AnimatedSize(
+            duration: chrome.motion,
+            curve: chrome.curve,
+            alignment: Alignment.topLeft,
+            child: _open
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [for (final child in widget.fold) _spaced(context, child)],
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+        ],
+      ),
+    );
     return DecoratedBox(
       decoration: BoxDecoration(color: theme.paper),
       child: Column(
+        mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _band(
@@ -152,39 +196,7 @@ class _CardShellState extends State<CardShell> {
             ),
             top: false,
           ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.all(cardPx(context, 'card.pad')),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final child in widget.primary) _spaced(context, child),
-                  if (widget.fold.isNotEmpty)
-                    InkWell(
-                      onTap: () => setState(() => _open = !_open),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: cardPx(context, 'card.gap')),
-                        child: Text(
-                          '${_open ? '▾' : '▸'}  ${widget.foldLabel}',
-                          style: labelStyle(context, color: theme.strong),
-                        ),
-                      ),
-                    ),
-                  AnimatedSize(
-                    duration: chrome.motion,
-                    curve: chrome.curve,
-                    alignment: Alignment.topLeft,
-                    child: _open
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [for (final child in widget.fold) _spaced(context, child)],
-                          )
-                        : const SizedBox(width: double.infinity),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          if (bounded) Expanded(child: body) else body,
           if (widget.footer.isNotEmpty) _band(context, cardWrap(context, widget.footer), top: true),
         ],
       ),
@@ -489,6 +501,37 @@ class _CardFieldState extends State<CardField> {
       ),
     );
   }
+}
+
+// --- One history, settings included -----------------------------------------
+
+/// SAY ONE SETTING, THROUGH THE ONE HISTORY (ISSUES 9.2, Don: "settings edits
+/// like theme changes should be subject to undo").
+///
+/// A write a PERSON said through a card is an authored change like any other,
+/// so it rides the editor's journal and one ctrl+z crosses the boundary without
+/// the person knowing there was one. Where there is no document open there is
+/// no history to ride, and the write goes straight to the store -- an
+/// instrument pumped on its own is still an instrument. Returns the refusal, or
+/// null when it landed.
+String? saySetting(BuildContext context, String key, String written) {
+  final chrome = ChromeScope.of(context);
+  final editor = chrome.editor;
+  // An editor holding no settings store has no history for this to ride, and a
+  // write that vanished would be worse than one that cannot be undone.
+  if (editor?.settingsStore != null) return editor!.setSetting(key, written);
+  final settings = chrome.settings;
+  if (!settings.isText(key)) return settings.set(key, written);
+  settings.setText(key, written);
+  return null;
+}
+
+/// Take one setting's authorship off, through the same history.
+void unsaySetting(BuildContext context, String key) {
+  final chrome = ChromeScope.of(context);
+  final editor = chrome.editor;
+  if (editor?.settingsStore == null) return chrome.settings.reset(key);
+  editor!.resetSetting(key);
 }
 
 // --- The draft contract -----------------------------------------------------
@@ -832,7 +875,18 @@ class _ColorFieldState extends State<ColorField> {
             ' colour until it reads as one.',
             refusal: true,
           ),
-        if (_picking)
+        if (_picking) ...[
+          // THE PICKER ITSELF, and it is the one every colour field opens.
+          ColorPicker(
+            value: widget.value,
+            // The picker STAYS OPEN while a colour is being chosen: a drag is
+            // many choices, and closing on the first would make the field a
+            // one-shot. The swatches below close, because a swatch IS one shot.
+            onChanged: (written) {
+              widget.onChanged(written);
+              setState(() {});
+            },
+          ),
           cardWrap(context, [
             for (final name in _palette(context))
               _swatch(
@@ -848,6 +902,7 @@ class _ColorFieldState extends State<ColorField> {
               onTap: () => _pick(''),
             ),
           ]),
+        ],
       ],
     );
   }

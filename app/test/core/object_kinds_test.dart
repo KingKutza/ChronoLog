@@ -350,20 +350,17 @@ void main() {
           ),
         ],
       ).document;
-      // Right point, wrong kind.
-      document = putStaple(
-        document,
-        id: 'relation:anchor',
-        kind: 'anchor',
-        ends: [
-          const StapleEnd.object('event:0', point: 'end'),
-          StapleEnd.frame(
-            'frame:wall-time',
-            position: Position.coordinate(daysToCivilCoordinate(Rational(BigInt.from(4))).toJson()),
-          ),
-        ],
-      ).document;
-      // Right kind and point, far end is not a single instant.
+      // NO "RIGHT POINT, WRONG KIND" CASE ANY MORE (melted 9.3). This block
+      // used to staple `[event:0.end = an instant]` spelled `anchor` and assert
+      // it was NOT a completion instant -- the roster reading done-or-not BY
+      // VERB, which `verb_law_test.dart` states as the thing that cannot be.
+      // The same sentence under a different word is the same sentence, so that
+      // staple IS a completion instant now and asserting otherwise would pin
+      // the defect. The two cases that remain are structural and are the whole
+      // of the claim: a staple naming the wrong POINT, and one whose far end
+      // names no instant.
+      //
+      // Right point, far end is not a single instant.
       document = putStaple(
         document,
         id: 'relation:void',

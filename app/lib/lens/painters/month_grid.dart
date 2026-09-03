@@ -69,7 +69,6 @@ const Map<String, String> gridTunableDefaults = {
   // its own number and not the glyph's: how big a mark is drawn and how closely
   // marks are set are two things an author may want to say separately.
   'grid.pipStep': '10',
-  'grid.washWeekend': '0.07',
   'grid.washToday': '0.1',
   // The record slash already says "this is behind us"; a wash saying it again
   // is the same claim twice, so it ships off (ruled 2026-08-28).
@@ -92,12 +91,14 @@ const Map<String, String> gridTunableDefaults = {
   // a positive factor reads earliest-first, a negative one reads latest-first,
   // and nothing here is a hardcoded comparator.
   'grid.drawOrder': '1',
-  // The weekend as AUTHORED cycle positions, never a hardcoded Saturday and
-  // Sunday: a calendar whose rest days fall elsewhere says so here, and a count
-  // of zero is a calendar with no weekend at all.
-  'grid.weekendCount': '2',
-  'grid.weekend.1': '0',
-  'grid.weekend.2': '6',
+  // NO SETTING HOLDS A WEEKEND (ISSUES 9.2, Don: "we don't want to encode that
+  // sort of thing in a lens"). The weekend used to be a count and a family of
+  // indexed positions -- an enum wearing numbers -- with a wash to match, so the
+  // sheet believed on its own that some positions of the weekday cycle are
+  // lesser. A weekend is an AUTHORED OBJECT, as the day became: a group that
+  // says zone, wearing its own colour, with a weekly series on the law's own
+  // cycle in it. It arrives here the way every other authored region does, and
+  // a document that authors none has none.
   // The first column is the weekday cycle's OWN position zero, not a Monday:
   // a calendar whose week starts elsewhere says so by moving this, and nothing
   // here assumes a Gregorian week (ruled 2026-08-28).
@@ -371,6 +372,7 @@ abstract class DayGridPainter extends LensPainter {
   @override
   void paint(Canvas canvas, Size size) {
     hits.clear();
+    zones.clear();
     refusals.clear();
     _spectrum.clear();
     final plan = layout();
@@ -442,7 +444,10 @@ abstract class DayGridPainter extends LensPainter {
         canvas,
         heading.label,
         Rect.fromLTWH(_gutter + column * _cellWidth, 0, _cellWidth, _header),
-        isWeekend(heading.cycle) ? scene.theme.primary : scene.theme.muted,
+        // ONE TONE FOR EVERY HEADING: which positions of the cycle a person
+        // rests on is theirs to author, and a sheet that tints two of them by
+        // itself has already decided.
+        scene.theme.muted,
         'grid.labelSize',
         center: true,
       );
@@ -458,15 +463,6 @@ abstract class DayGridPainter extends LensPainter {
       scene.theme.muted,
       'grid.labelSize',
     );
-  }
-
-  /// Is this cycle position one the settings call a weekend?
-  bool isWeekend(int? cycle) {
-    if (cycle == null) return false;
-    for (var index = 1; index <= scene.whole('grid.weekendCount'); index += 1) {
-      if (scene.whole('grid.weekend.$index') == cycle) return true;
-    }
-    return false;
   }
 
   void _text(
@@ -525,7 +521,12 @@ abstract class DayGridPainter extends LensPainter {
     final pad = scene.px('grid.pad');
     final start = Rational(day) * law.dayDays;
     final today = todayOrdinal;
-    if (isWeekend(weekdayOf(day))) _wash(canvas, cell, scene.theme.muted, 'grid.washWeekend');
+    // FILL IS GROUND, AND A GROUND SPANS BY NATURE (Don, ruled; ISSUES 9.2).
+    // Drawn FIRST, beneath everything this cell holds, across the WHOLE CELL and
+    // taking no lane -- a ground confined to a chip box was a ground being
+    // treated as a mark. Draw order is derived from the authored handling here
+    // and nowhere else: no layer field, no z-number, no lens knob.
+    if (found != null) _paintGrounds(canvas, cell, day, found);
     if (today != null && day < today) _wash(canvas, cell, scene.theme.muted, 'grid.washPast');
     if (today != null && day == today) _wash(canvas, cell, scene.theme.accent, 'grid.washToday');
     if (today != null && day < today) {
@@ -566,6 +567,10 @@ abstract class DayGridPainter extends LensPainter {
     if (found == null) return;
     final ranked = <({Fact fact, DisplayWeight weight})>[];
     for (final fact in found.facts) {
+      // A GROUND DOES NOT LANE. It has already been drawn across the whole cell
+      // and hit-listed there, so letting it into the chip budget would spend a
+      // row on something that is not standing in one.
+      if (zoneFill(scene.engine, fact, scene.tunable)) continue;
       final weight = factDisplayWeight(scene, fact, keyPrefix: lens);
       if (_spectrums(fact, weight) && today != null) {
         _spectrum.add((day: day, now: today, fact: fact, weight: weight));
@@ -597,6 +602,33 @@ abstract class DayGridPainter extends LensPainter {
       final byTime = a.fact.day.compareTo(b.fact.day) * drawOrder;
       return byTime != 0 ? byTime : a.fact.identity.compareTo(b.fact.identity);
     });
+    // PIPS GROUP BY SIGIL, CLOCK ORDER WITHIN THE GROUP (ISSUES 9.2, Don: "just
+    // put the diamonds with the diamonds and the circles with the circles").
+    //
+    // The grouping key is THE MARK ITSELF. A pip's sigil is already derived from
+    // what the object is, so grouping by it groups by that without the cell
+    // inventing a category of its own -- no kind test, no trait string, no
+    // second opinion about what a thing is. Inside a group the clock still runs,
+    // because the 9.1 ruling stands: weight admits, the clock orders. Which
+    // group comes first is nobody's ruling, so it is the sigil's own name --
+    // stable between paints, which is all that is asked of it.
+    List<({Fact fact, DisplayWeight weight})> bySigil(
+      List<({Fact fact, DisplayWeight weight})> entries,
+    ) {
+      final groups = <String, List<({Fact fact, DisplayWeight weight})>>{};
+      for (final entry in inClockOrder(entries)) {
+        final sigil = markSpecFor(
+          scene,
+          law,
+          entry.fact,
+          entry.weight,
+          cascade.colorOf(entry.fact),
+        ).sigil;
+        (groups[sigil] ??= []).add(entry);
+      }
+      return [for (final sigil in groups.keys.toList()..sort()) ...groups[sigil]!];
+    }
+
     var painted = 0;
     final height = scene.px('grid.chipHeight');
     for (final entry in inClockOrder(admittedNames.drawn)) {
@@ -618,7 +650,7 @@ abstract class DayGridPainter extends LensPainter {
     final step = scene.px('grid.pipStep'), pip = scene.px('grid.pipSize');
     if (step > 0) {
       var x = cell.left + pad, y = top;
-      for (final entry in inClockOrder(admittedPips.drawn)) {
+      for (final entry in bySigil(admittedPips.drawn)) {
         if (x + pip > cell.right - pad) {
           x = cell.left + pad;
           y += step;
@@ -702,27 +734,38 @@ abstract class DayGridPainter extends LensPainter {
     }
   }
 
+  /// Every ground this cell holds, across the whole of it, through the one pass
+  /// every timed lens shares.
+  void _paintGrounds(Canvas canvas, Rect cell, BigInt day, DensityDay<Fact> found) {
+    final dayStart = Rational(day) * law.dayDays;
+    for (final fact in found.facts) {
+      if (!zoneFill(scene.engine, fact, scene.tunable)) continue;
+      final end = fact.day + scene.engine.eventDurationDays(fact.event);
+      paintGround(
+        canvas,
+        this,
+        fact,
+        cell,
+        zoneSegmentOf(
+          continuation: fact.day < dayStart,
+          continuesAfter: end > dayStart + law.dayDays,
+        ),
+        cascade.colorOf(fact),
+      );
+      // A GROUND IS STILL THE OBJECT: what it covers is what answers for it, so
+      // a click anywhere on the day it grounds reaches it.
+      hits.add((
+        bounds: cell,
+        shape: null,
+        grab: null,
+        fact: fact,
+        identity: fact.identity,
+      ));
+    }
+  }
+
   void _paintMark(Canvas canvas, Rect box, Fact fact, DisplayWeight weight, Rational dayStart) {
     final color = cascade.colorOf(fact);
-    final duration = scene.engine.eventDurationDays(fact.event);
-    if (zoneFill(scene.engine, fact, scene.tunable)) {
-      final band = zoneBand(
-        box,
-        color,
-        zoneSegment((
-          fact: fact,
-          day: law.dayOf(dayStart),
-          startMinute: Rational.zero,
-          endMinute: Rational.zero,
-          continuation: fact.day < dayStart,
-          continuesAfter: fact.day + duration > dayStart + law.dayDays,
-        )),
-        scene.theme,
-        scene.tunable,
-      );
-      canvas.drawRRect(band.shape, band.fill);
-      canvas.drawRRect(band.shape, band.edge);
-    }
     final spec = markSpecFor(scene, law, fact, weight, color);
     final pip = scene.px('grid.pipSize');
     final hit = spec.paint(

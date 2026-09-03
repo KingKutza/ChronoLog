@@ -53,6 +53,16 @@ const Map<String, String> treeTunableDefaults = {
   // already placed. What the pass cuts is a COUNT, never a silence.
   'tree.labelFloor': '0.34',
   'tree.labelPad': '3',
+  // THE LOCAL GRAPH, LAID OUT BY SIMULATION (ISSUES 9.2, Don: "Tree should
+  // behave more like the local graph in Obsidian"). Rings space mates by id,
+  // which says nothing about which of them are stapled to each other; a
+  // simulation says exactly that and nothing else. Three numbers describe it:
+  // how long a staple wants to be, how many passes it is allowed to settle in,
+  // and how fast the field cools. Nothing here is a literal in the lens, and a
+  // person who wants a looser or tighter neighbourhood says so here.
+  'tree.edgeLength': '120',
+  'tree.settleSteps': '260',
+  'tree.settleCool': '0.97',
   // The pointer vocabulary, on a lens whose content exceeds its viewport
   // (ISSUES 9.1, "Tree has no way to pan around"). A wheel notch pans this
   // many pixels; ctrl+wheel scales the ring step between these bounds.

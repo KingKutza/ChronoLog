@@ -56,17 +56,19 @@ List<String> verbOffers(Document document) {
   ];
 }
 
-/// What a verb costs, in words. A registered word selects a derivation; an
-/// authored one selects none, which is legal and is SAID rather than silently
-/// doing nothing.
+/// What a verb costs, in words -- WHICH IS NOTHING (the verb law, melted 9.3).
+///
+/// This used to divide the words in two: a registered one "selects a
+/// derivation", an authored one "moves nothing". Neither half is true any more.
+/// Every staple says the one thing a staple says, its shape decides what that
+/// places, and a word nobody registered is not weaker -- it is the same
+/// sentence. So the offered words differ from a typed one in exactly one way,
+/// and this says that one way: the shipped list carries a label to read.
 String verbSays(String verb) {
-  final registered = stapleKinds[verb];
-  if (registered == null) {
-    return '"$verb" is a word you wrote. Nothing in the substrate reads it, so '
-        'this sentence says the two points are one and moves nothing.';
-  }
-  return '${registered.label}.'
-      '${registered.anchors ? ' It places this object.' : ' It does not place this object.'}';
+  final label = stapleKinds[verb]?.label;
+  return '${label ?? '"$verb" is a word you wrote'}. '
+      'What this sentence does comes from its terms, not from the word: the '
+      'points it names are one point.';
 }
 
 /// A word in a sentence, and the one way any word in any sentence is re-said.
@@ -87,6 +89,7 @@ class SentenceTerm extends StatefulWidget {
     this.hint = '',
     this.onOpen,
     this.onCreate,
+    this.creates = const [],
     this.open = false,
     this.strong = false,
   });
@@ -109,6 +112,13 @@ class SentenceTerm extends StatefulWidget {
 
   /// Makes what nothing is called yet, by the typed name.
   final void Function(String typed)? onCreate;
+
+  /// MAKES WHAT NOTHING IS CALLED YET, BY KIND (ISSUES 9.2, Don: "if I type the
+  /// name of a note, can I make a note?"). One offer per thing the registry
+  /// knows how to mint -- a frame, and every row of the object catalog -- so a
+  /// fourth kind is one more offer and no edit here. [onCreate] is the one-door
+  /// form of the same thing, for a term where only one kind can be made.
+  final List<({String label, void Function(String typed) make})> creates;
 
   /// Starts open -- the term of a sentence that is still being said.
   final bool open;
@@ -200,7 +210,10 @@ class _SentenceTermState extends State<SentenceTerm> {
                     ),
                   // A NAME NOTHING WEARS IS AN OFFER, said inside the sentence
                   // rather than in a widget beside it.
-                  if (offers.isEmpty && typed.isNotEmpty && widget.onCreate == null)
+                  if (offers.isEmpty &&
+                      typed.isNotEmpty &&
+                      widget.onCreate == null &&
+                      widget.creates.isEmpty)
                     namedAction(
                       context,
                       'Say "$typed"',
@@ -213,6 +226,23 @@ class _SentenceTermState extends State<SentenceTerm> {
                         });
                       },
                     ),
+                  if (typed.isNotEmpty && widget.creates.isNotEmpty) ...[
+                    if (offers.isEmpty)
+                      Text('Nothing here is called that.', style: labelStyle(context)),
+                    for (final make in widget.creates)
+                      namedAction(
+                        context,
+                        '${make.label} "$typed"…',
+                        hint: 'Makes it, says it here, and opens its own card.',
+                        onTap: () {
+                          make.make(typed);
+                          setState(() {
+                            _typed = '';
+                            _saying = false;
+                          });
+                        },
+                      ),
+                  ],
                   if (typed.isNotEmpty && widget.onCreate != null) ...[
                     if (offers.isEmpty)
                       Text('Nothing here is called that.', style: labelStyle(context)),

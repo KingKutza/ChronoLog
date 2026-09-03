@@ -30,16 +30,23 @@ String _word(Random random) =>
 void main() {
   group('the groupings are data', () {
     test('one shared list, and an unknown value normalizes', () {
-      expect(lensGroupings, ['state', 'importance', 'container', 'frame']);
+      // FRAME LEADS AND FRAME IS THE DEFAULT (ISSUES 172, ruled): state,
+      // container and frame are one reading -- the record at the far end of a
+      // staple -- differing only in which frames a column admits, so the
+      // unfiltered case is the default. The keys are spellings an old view may
+      // still carry, not a closed set the engine reasons about, so an unknown
+      // one normalizes to the table's FIRST ROW rather than to a named word.
+      expect(lensGroupings.first, 'frame');
+      expect(lensGroupings.toSet(), {'frame', 'importance', 'container', 'state'});
       for (final grouping in lensGroupings) {
         expect(normalizeGrouping(grouping), grouping);
       }
       final random = Random(specSeed);
       for (var index = 0; index < 20; index++) {
-        expect(normalizeGrouping(_word(random)), 'state');
+        expect(normalizeGrouping(_word(random)), lensGroupings.first);
       }
-      expect(normalizeGrouping(null), 'state');
-      expect(normalizeGrouping(7), 'state');
+      expect(normalizeGrouping(null), lensGroupings.first);
+      expect(normalizeGrouping(7), lensGroupings.first);
     });
   });
 

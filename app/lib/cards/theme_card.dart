@@ -94,7 +94,7 @@ class _ThemeCardState extends State<ThemeCard> {
 
   void _apply() {
     widget.onApply?.call(_draft!);
-    ChromeScope.of(context).settings.setText('theme.name', _draft!.name);
+    saySetting(context, 'theme.name', _draft!.name);
     setState(() => _note = 'Applied ${_draft!.name}.');
   }
 

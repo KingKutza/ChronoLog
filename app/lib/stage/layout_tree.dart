@@ -184,8 +184,19 @@ LayoutNode insertSplit(
   Rational ratio, {
   bool before = false,
 }) {
-  final target = findNode(root, targetId ?? '') ?? root;
-  if (target == null) return leaf;
+  final aimed = findNode(root, targetId ?? '') ?? root;
+  if (aimed == null) return leaf;
+  var target = aimed;
+  // A TAB PAGE IS ONE TILE (ISSUES 9.2, Don killed the accidental nested
+  // split). An ordinary split aimed at a tabbed leaf cuts BESIDE THE WHOLE
+  // STACK, never inside whichever page happened to be showing: the stack is
+  // the box, and what a box holds is changed by swapping, not by growing a
+  // second tree inside one of its pages. Climbing every tabs ancestor is what
+  // makes a stack inside a stack behave the same way.
+  for (var above = parentOf(root, target.id); above != null && above.mode == 'tabs'; ) {
+    target = above;
+    above = parentOf(root, target.id);
+  }
   final parent = parentOf(root, target.id);
   final split = Branch(
     mintContainerId('split'),
@@ -239,6 +250,20 @@ LayoutNode? moveNode(LayoutNode? root, String id, String targetId, String zone, 
   final pruned = removeNode(root, id);
   if (pruned == null || findNode(pruned, targetId) == null) return pruned ?? leaf;
   if (zone == 'center') return insertTab(pruned, leaf, targetId);
+  // INTO THE INNER TREE (ISSUES 9.2, Don's ruling on the named subtree): "plain
+  // drag targets the app layer; alt-drag drops INTO a container's inner tree".
+  // Every edge zone lands the leaf BESIDE the container on the stage; this one
+  // lands it among the container's own children, so a board is one box from
+  // outside and a tree inside. A LEAF has no inner tree to join, so `into` on
+  // one is a tab under it -- the nearest thing to "inside this box" a leaf has.
+  if (zone == 'into') {
+    final target = findNode(pruned, targetId);
+    if (target is! Branch) return insertTab(pruned, leaf, targetId);
+    target.children.add(leaf);
+    target.ratios = [];
+    normalize(target);
+    return pruned;
+  }
   final axis = zone == 'left' || zone == 'right' ? 'row' : 'column';
   return insertSplit(pruned, leaf, targetId, axis, ratio, before: zone == 'left' || zone == 'up');
 }

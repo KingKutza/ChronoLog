@@ -134,7 +134,10 @@ class Workspace {
       establish: createEmptyWorkspaceDocument,
     );
     final load = await store.load();
-    final editor = Editor(store, settings: settings.tunable);
+    // THE SETTINGS STORE, not only its reader (ISSUES 9.2, Don: "settings edits
+    // like theme changes should be subject to undo"): the editor holds the one
+    // history, and a settings write is an authored change that rides it.
+    final editor = Editor(store, settings: settings.tunable, settingsStore: settings);
     final views = ViewBook()..defaultFrames = defaultFramesOf(editor.document);
     // WHERE A NEW TILE LANDS IS AUTHORED (ISSUES 9.1): the layout FILE carries
     // the rule list -- `bindSession` below reads it and hot-loads it when it

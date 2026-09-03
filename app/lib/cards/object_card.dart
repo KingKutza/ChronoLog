@@ -29,16 +29,20 @@
 import 'package:flutter/material.dart';
 
 import '../chrome/controls.dart';
+import '../core/coordinate_law.dart';
 import '../core/document.dart';
 import '../core/exact.dart';
 import '../core/object_kinds.dart';
+import '../core/projection.dart';
 import '../core/records.dart';
+import '../core/staples.dart';
 import '../edit/editor.dart';
 import '../lens/marks.dart';
 import '../session/settings.dart';
 import 'card_chrome.dart';
 import 'card_factory.dart';
 import 'sentence_rows.dart';
+import 'sentences.dart';
 import 'staple_editor.dart';
 import 'state_control.dart';
 import 'weight_explainer.dart';
@@ -47,6 +51,41 @@ import 'weight_explainer.dart';
 /// the payload is a property the author added, and it gets a row of its own --
 /// which is what makes the + a real door rather than a decoration.
 const Set<String> namedObjectProperties = {'title', 'description', 'location'};
+
+/// THE FACT A GENERATED OCCURRENCE'S OWN ID NAMES.
+///
+/// A virtual id is `<pattern>/occurrence-<day>` -- the substrate builds it and
+/// [virtualPatternId] reads the pattern back off it, so the day is the rest and
+/// the generator is asked for that one day rather than searched for. One
+/// derivation: the fact returned is the fact the lens drew, not a second guess
+/// at it. Null where the id names no occurrence, which is the honest answer for
+/// an id that names nothing at all.
+Fact? generatedFact(Editor editor, String id) {
+  final pattern = editor.document.patterns[virtualPatternId(id)];
+  if (pattern == null) return null;
+  final key = Uri.decodeComponent(id.substring(id.lastIndexOf('/') + 1));
+  final said = key.startsWith('occurrence-') ? key.substring('occurrence-'.length) : key;
+  final Rational day;
+  try {
+    day = Rational.parse(said);
+  } on Object {
+    return null;
+  }
+  final frame =
+      str(pattern.extra['frame']) ??
+      editor.engine.indexes.placementOf(pattern.templateEvent ?? '')?.frame;
+  if (frame == null) return null;
+  final found = editor.engine.queryFacts(
+    Projection.of([frame]),
+    start: day,
+    end: day + Rational.one,
+    includeOverlaps: true,
+  );
+  for (final fact in found.facts) {
+    if (fact.virtualId == id) return fact;
+  }
+  return null;
+}
 
 class ObjectCard extends StatefulWidget {
   const ObjectCard({super.key, required this.request});
@@ -60,6 +99,16 @@ class ObjectCard extends StatefulWidget {
 class _ObjectCardState extends State<ObjectCard> {
   Draft? _draft;
   String _objectId = '';
+
+  /// Which unit a DERIVED length is being read in. A reading, held here rather
+  /// than written to the record: the staples say the length and the person is
+  /// only choosing the words to hear it in.
+  String? _shownUnit;
+
+  /// The sentence the gesture that opened this card said, where it said one.
+  /// Discarding the draft unsays it: the region shows one staple, so throwing
+  /// the session away must leave the document exactly as it was.
+  String? _seeded;
 
   /// Properties named through the + that carry no value yet: a row exists the
   /// moment it is named, and the record hears about it when something is typed.
@@ -80,6 +129,26 @@ class _ObjectCardState extends State<ObjectCard> {
     final editor = host.editor;
     final request = widget.request;
     if (request.id case final String existing) {
+      // AN OCCURRENCE OPENS (ISSUES 9.2, Don: "double-clicking an instance of a
+      // repeating event gives 'This object is no longer in the document'
+      // instead of an edit window ... the moment I put a series on, all
+      // instances INCLUDING THE ROOT become inaccessible"). The refusal was
+      // true of the id and false of the thing clicked: a generated occurrence's
+      // id is a key in no document. So the card resolves the id to the fact the
+      // generator drew and opens a PROVISIONAL draft over it, materialized
+      // through the one derivation a drag already uses -- discarding removes it
+      // and the series is untouched, and closing it unchanged lets the
+      // convergence invariant retire it back into the series.
+      if (!editor.document.events.containsKey(existing) &&
+          !editor.pending.containsKey(existing)) {
+        if (generatedFact(editor, existing) case final Fact fact) {
+          final made = editor.materializeFact(fact, at: fact.day);
+          editor.commit('Edit this occurrence', made.document);
+          _objectId = made.event;
+          _draft = editor.beginDraft(_objectId, provisional: true);
+          return;
+        }
+      }
       _objectId = existing;
       _draft = editor.beginDraft(existing);
       return;
@@ -92,13 +161,32 @@ class _ObjectCardState extends State<ObjectCard> {
     // it said, as one undo entry. Closing untouched means nothing happened.
     final kind = request.kind ?? 'event';
     if (request.frameId case final String frame) {
-      _objectId = editor.createAt(
-        frame,
-        request.startDays ?? Rational.zero,
-        request.endDays,
-        kind: kind,
+      // A SEED THAT SAYS WHERE is a placement: drag-create states a coordinate,
+      // so it commits on mouse-up and this card opens over a real record.
+      if (request.startDays case final Rational at) {
+        _objectId = editor.createAt(frame, at, request.endDays, kind: kind);
+        _draft = editor.beginDraft(_objectId, provisional: true);
+        return;
+      }
+      // A SEED THAT SAYS ONLY WHICH FRAME is a STAPLE, and nothing about where
+      // (ISSUES 9.2, Don: "the new window that opens should contain a
+      // prewritten staple for the frame I am coming from"). The old road called
+      // `createAt(frame, 0)` -- a placement at day zero nobody said. What is
+      // written instead is the one sentence the gesture said, visible in the
+      // region as a row like any other, and Save writes exactly it.
+      final made = editor.newObject(kind, title: '');
+      _objectId = made.id;
+      _draft = editor.beginDraft(_objectId, provisional: true, holding: made);
+      _seeded = createId('relation');
+      editor.transaction(
+        'Staple to ${editor.document.frames[frame]?.title ?? frame}',
+        (document) => putStaple(
+          document,
+          id: _seeded,
+          kind: verbOffers(document).first,
+          ends: [ObjectEnd(_objectId, point: defaultPoint), StapleEnd.frame(frame)],
+        ).document,
       );
-      _draft = editor.beginDraft(_objectId, provisional: true);
       return;
     }
     final held = editor.newObject(kind, title: '');
@@ -158,9 +246,20 @@ class _ObjectCardState extends State<ObjectCard> {
   }
 
   void _discard() {
+    _unsaySeed();
     _draft?.discard();
     _draft = null;
     CardHost.of(context).close();
+  }
+
+  /// Takes the seeded sentence off. A draft's discard removes the record it
+  /// held; the sentence it arrived wearing is part of the same nothing.
+  void _unsaySeed() {
+    final seeded = _seeded;
+    if (seeded == null) return;
+    _seeded = null;
+    if (!_editor.document.relations.containsKey(seeded)) return;
+    _editor.transaction('Discard draft', (d) => removeStaple(d, seeded));
   }
 
   void _settle() {
@@ -192,6 +291,7 @@ class _ObjectCardState extends State<ObjectCard> {
         _writeNow();
       },
       'discard': () {
+        _unsaySeed();
         draft.discard();
         _draft = null;
       },
@@ -284,7 +384,7 @@ class _ObjectCardState extends State<ObjectCard> {
             (factory) => factory.documentCard(),
           ),
         ]),
-        StapleEditor(objectId: _objectId),
+        StapleEditor(objectId: _objectId, openFirst: _seeded != null),
         cardRow(context, 'State', StateControl(objectId: _objectId)),
         ..._seriesMode(context),
       ],
@@ -355,7 +455,11 @@ class _ObjectCardState extends State<ObjectCard> {
         ),
         CardField(
           value: str(payload['title']) ?? '',
-          hint: definition.newTitle,
+          // THE HINT IS A QUESTION, NOT THE CATALOG'S NEW-CARD TITLE. "New
+          // event" is what an unnamed card is CALLED; wearing it here put the
+          // same words on a field and on the offer to make one, and a person
+          // (or a spec) reaching for "New event" could land on either.
+          hint: 'What this ${definition.label.toLowerCase()} is called',
           onChanged: (text) => _payload('title', text),
         ),
         namedAction(
@@ -423,14 +527,34 @@ class _ObjectCardState extends State<ObjectCard> {
     ];
   }
 
-  /// Duration, read and written through the GOVERNING FRAME'S OWN LAW: setting
+  /// DURATION SAYS WHICH DURATION IT IS SHOWING (ISSUES 9.2, and Don's law of
+  /// 9.3: "a derived value computes at projection time, an authored value is
+  /// recorded in the file, and where they disagree the PROJECTION decides which
+  /// yields").
+  ///
+  /// When both ends are anchored the magnitude is DERIVED -- the engine already
+  /// flags it -- and the card read the stored number instead, which is Don's
+  /// standing "adding an end staple did not adjust the end and duration". Three
+  /// things follow, and all three are here: the row shows the real length; it
+  /// says the length is derived and that the authored number is overridden; and
+  /// it offers nothing to type into, because editing a derived duration means
+  /// moving an end or deliberately replacing the derivation, and a number typed
+  /// over a derivation is a second truth the SURFACE minted, not the person.
+  ///
+  /// Read and written through the GOVERNING FRAME'S OWN LAW: setting
   /// hours-per-day to 23 changes what "one hour" is worth here.
   Widget _duration(BuildContext context, Event event) {
     final indexes = _editor.engine.indexes;
     final frame = indexes.calendarFrameOf(_objectId) ?? indexes.framesOf(_objectId).firstOrNull;
-    final law = frame == null ? null : _editor.engine.lawOf(frame);
+    CoordinateLaw? law;
+    try {
+      law = frame == null ? null : _editor.engine.lawOf(frame);
+    } on Object {
+      law = null;
+    }
     final level = event.duration?.coordinate.levels.firstOrNull;
-    final unit = level?.level ?? 'minute';
+    final extent = _editor.staples.resolveObjectExtent(_objectId);
+    final unit = (extent.derivedMagnitude ? _shownUnit : null) ?? level?.level ?? 'minute';
     final amount = level?.value ?? '0';
     void put(String value, String named) => _write(
       'Edit duration',
@@ -438,6 +562,44 @@ class _ObjectCardState extends State<ObjectCard> {
         magnitudes: {...event.magnitudes, 'duration': durationMagnitude(value, named)},
       ),
     );
+    /// THE UNIT CHANGES; THE LENGTH DOES NOT (ISSUES 9.2, still unfixed: the
+    /// menu carried the COUNT across verbatim, so 90 minutes became 90 hours).
+    /// The conversion goes through the governing frame's own law -- a constant
+    /// would be right only about Earth.
+    void reunit(String named) {
+      if (named == unit || law == null) return put(amount, named);
+      try {
+        final per = law.unitsPer(unit, named);
+        if (per.isZero) return put(amount, named);
+        return put((Rational.parse(amount) / per).toJson(), named);
+      } on Object {
+        return put(amount, named);
+      }
+    }
+
+    Widget unitMenu(void Function(String named) said) => cardMenu(context, unit, {
+      for (final name in law?.levelNames() ?? const ['minute']) name: name,
+    }, said);
+    if (extent.derivedMagnitude) {
+      final size = law?.unitDays(unit) ?? law?.meanUnitDays(unit);
+      final counted = size == null || size.isZero
+          ? null
+          : (extent.magnitudeDays / size).toDecimal(3);
+      return cardWrap(context, [
+        Text(counted ?? '${extent.magnitudeDays.toDecimal(3)} days', style: dataStyle(context)),
+        // READING A DERIVED LENGTH IN ANOTHER UNIT IS A READING, not a write:
+        // the two staples say the length, and choosing hours to read it in must
+        // not store a duration beside them.
+        unitMenu((named) => setState(() => _shownUnit = named)),
+        cardNote(
+          context,
+          'Derived: two staples already say where this begins and ends, so the length is '
+          'read from them. The authored $amount $unit is overridden. Move an end to change '
+          'it — a number typed here would be a second truth beside the two that already '
+          'answer.',
+        ),
+      ]);
+    }
     return cardWrap(context, [
       CardField(
         value: amount,
@@ -445,9 +607,7 @@ class _ObjectCardState extends State<ObjectCard> {
         width: cardPx(context, 'card.narrowWidth'),
         onChanged: (text) => put(text, unit),
       ),
-      cardMenu(context, unit, {
-        for (final name in law?.levelNames() ?? const ['minute']) name: name,
-      }, (name) => put(amount, name)),
+      unitMenu(reunit),
     ]);
   }
 

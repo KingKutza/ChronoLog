@@ -29,6 +29,7 @@ import 'resay.dart';
 
 export 'capture.dart';
 export 'cascades.dart';
+export 'clipboard.dart';
 export 'drafts.dart';
 export 'gestures.dart';
 export 'reach.dart';
@@ -42,13 +43,34 @@ const Map<String, String> editTunableDefaults = {
   'edit.newSpanDays': '1',
   'edit.snapGrainMinutes': '30',
   'edit.groupFuzz': '2',
+  // How far a keyboard duplicate lands from the thing it duplicates, in days.
+  // A twin exactly on its source is two marks at one coordinate, which every
+  // timed lens draws as one, so the paste steps -- and how far it steps is the
+  // person's, like every other number in this area.
+  'edit.pasteStepDays': '1',
 };
 
+/// ONE AUTHORED SETTINGS CHANGE: the key, what stood on it, and what it became.
+///
+/// [was] and [now] are OVERRIDES, and null is a real value in both: the file
+/// records only overrides, so undoing the first write of a key must restore the
+/// ABSENCE of one rather than write the shipped value back as authorship
+/// nobody claimed.
+typedef SettingEdit = ({String key, String? was, String? now});
+
 /// One committed edit: its label, what it did, and what undoes it.
-typedef Edit = ({String label, List<Op> ops, List<Op> inverse});
+///
+/// A SETTINGS WRITE RIDES THE SAME HISTORY (ISSUES 9.2, Don: "settings edits
+/// like theme changes should be subject to undo"). It was unrecoverable because
+/// there were two stores and only one of them was journalled -- and two undo
+/// stacks would be the enum in another costume, so an edit carries whichever of
+/// the two it was and one ctrl+z crosses the boundary without the person
+/// knowing there was one.
+typedef Edit = ({String label, List<Op> ops, List<Op> inverse, List<SettingEdit> settings});
 
 class Editor extends ChangeNotifier with FrameSafeNotifier {
-  Editor(this.store, {this.settings}) : engine = ProjectionEngine(store.document);
+  Editor(this.store, {this.settings, this.settingsStore})
+    : engine = ProjectionEngine(store.document);
 
   final DocumentStore store;
   final ProjectionEngine engine;
@@ -57,8 +79,30 @@ class Editor extends ChangeNotifier with FrameSafeNotifier {
   /// evaluating its own shipped default.
   final Rational Function(String key)? settings;
 
+  /// The settings STORE, not only its reader: a settings write is an authored
+  /// change like any other and rides this history, which means this door has to
+  /// be able to make one and take it back.
+  final Settings? settingsStore;
+
   /// Open edit-session drafts, keyed by object id. N cards hold N drafts.
   final Map<String, Draft> drafts = {};
+
+  /// WHAT THE LAST COPY CARRIED -- the records themselves, snapshot at the copy,
+  /// never their ids. A cut still holds its record after the document has let
+  /// it go, and a paste taken after the source was edited pastes what was
+  /// copied; ids could say neither. Empty is the ordinary state and means
+  /// nothing has been copied.
+  List<Event> get clipboard => List.unmodifiable(_clipboard);
+
+  /// The one writer, so [Clipboard] can hold records without the list itself
+  /// being reachable for a surface to mutate behind the editor's back.
+  void setClipboard(List<Event> events) {
+    _clipboard
+      ..clear()
+      ..addAll(events);
+  }
+
+  final List<Event> _clipboard = [];
 
   /// Records a card is holding that NOBODY HAS AUTHORED YET (E1, 2026-08-28).
   /// Every transaction sees them, so a card's rows edit real records; a
@@ -143,7 +187,12 @@ class Editor extends ChangeNotifier with FrameSafeNotifier {
     if (opsFromMaps(snapshot, mapSnapshot(settled.document)).isEmpty) return;
     final ops = store.commit(label, touch(settled.document));
     engine.applyChange(ops);
-    _record((label: label, ops: ops, inverse: opsFromMaps(mapSnapshot(document), snapshot)));
+    _record((
+      label: label,
+      ops: ops,
+      inverse: opsFromMaps(mapSnapshot(document), snapshot),
+      settings: const [],
+    ));
     notifyListeners();
   }
 
@@ -156,6 +205,62 @@ class Editor extends ChangeNotifier with FrameSafeNotifier {
     }
   }
 
+  /// AUTHOR ONE SETTING, THROUGH THE ONE HISTORY.
+  ///
+  /// The card's door for both families -- [Settings] already knows which a key
+  /// is. Accepted: the value takes effect and one undo entry is pushed.
+  /// Refused: the reason comes back, nothing changes, and no entry exists,
+  /// because a refusal is not an edit.
+  String? setSetting(String key, String written) {
+    final store = settingsStore;
+    if (store == null) {
+      return 'No settings are open here, so "$key" has nowhere to be authored.';
+    }
+    final was = store.overrideOf(key);
+    if (was == written) return null;
+    final refusal = _writeSetting(store, key, written);
+    if (refusal != null) return refusal;
+    _record((
+      label: 'Set $key',
+      ops: const [],
+      inverse: const [],
+      settings: [(key: key, was: was, now: written)],
+    ));
+    notifyListeners();
+    return null;
+  }
+
+  /// UNAUTHOR ONE SETTING, through the same history. Resetting is a change a
+  /// person made like any other, and a change you cannot take back is the
+  /// complaint this whole door answers.
+  bool resetSetting(String key) {
+    final store = settingsStore;
+    if (store == null) return false;
+    final was = store.overrideOf(key);
+    if (was == null) return false;
+    store.reset(key);
+    _record((
+      label: 'Reset $key',
+      ops: const [],
+      inverse: const [],
+      settings: [(key: key, was: was, now: null)],
+    ));
+    notifyListeners();
+    return true;
+  }
+
+  String? _writeSetting(Settings store, String key, String? written) {
+    if (written == null) {
+      store.reset(key);
+      return null;
+    }
+    if (store.isText(key)) {
+      store.setText(key, written);
+      return null;
+    }
+    return store.set(key, written);
+  }
+
   bool undo() => _step(_undo, _redo, 'Undo', (edit) => edit.inverse);
 
   bool redo() => _step(_redo, _undo, 'Redo', (edit) => edit.ops);
@@ -163,11 +268,20 @@ class Editor extends ChangeNotifier with FrameSafeNotifier {
   bool _step(List<Edit> from, List<Edit> to, String verb, List<Op> Function(Edit) direction) {
     if (from.isEmpty) return false;
     final edit = from.removeLast();
+    // A settings entry and a record entry sit in ONE list, in the order they
+    // were made, so walking back crosses the boundary without noticing it.
+    final settings = settingsStore;
+    final backwards = verb == 'Undo';
+    for (final said in edit.settings) {
+      if (settings != null) _writeSetting(settings, said.key, backwards ? said.was : said.now);
+    }
     final ops = direction(edit);
-    // A forward journal entry, not a rewind: the store collects it and the
-    // engine is told exactly which records moved.
-    store.collect('$verb ${edit.label}', ops);
-    engine.applyChange(ops);
+    if (ops.isNotEmpty) {
+      // A forward journal entry, not a rewind: the store collects it and the
+      // engine is told exactly which records moved.
+      store.collect('$verb ${edit.label}', ops);
+      engine.applyChange(ops);
+    }
     to.add(edit);
     notifyListeners();
     return true;

@@ -156,22 +156,30 @@ void main() {
       expect(staples.staplesForObject(object), isNotEmpty);
     });
 
-    test('a kind carries derivation flags only', () {
-      // The registry answers what a kind DOES, never what it may join: there is
-      // no `connects` to read, and every name below is a flag a derivation asks
-      // for by name.
+    test('a kind carries wording, and the one series flag nobody has ruled', () {
+      // MELTED 9.3, and this test lost four assertions to it. `anchors` was the
+      // flag that answered "does this staple anchor a point of an object's
+      // extent", and answering it BY THE WORD is the defect
+      // `verb_law_test.dart` states as law: the same identification anchored
+      // spelled `anchor` and said nothing spelled anything else. The shape
+      // answers it now, so the flag has no reader and no longer exists, and the
+      // four expectations that pinned its values (`end` false, `anchor` true,
+      // `correspondence` false, `succession` false) are gone with it rather
+      // than loosened -- there is nothing left for them to be about.
+      //
+      // What is left is wording the cards read, plus `partitions` and
+      // `carriesRule`, which are still selected by the word ON PURPOSE: on a
+      // SERIES the shape `[series <-> frame instant]` is identical under `end`,
+      // `phase` and `inflection` and the three mean three different things, so
+      // melting them needs Don's answer to what that shape means.
       expect(stapleKind('end')!.partitions, isTrue);
-      expect(stapleKind('end')!.anchors, isFalse);
       expect(stapleKind('inflection')!.carriesRule, isTrue);
-      expect(stapleKind('anchor')!.anchors, isTrue);
-      expect(stapleKind('correspondence')!.anchors, isFalse);
       expect(stapleKind('correspondence')!.partitions, isFalse);
       // DISSOLVED (8.31): `succession` selects no derivation any more. Its ends
       // speak the point vocabulary every frame end now speaks, so the word is a
       // label a file may carry and nothing here reads it as a case.
       expect(stapleKind('succession')!.positions, isTrue);
       expect(stapleKind('succession')!.partitions, isFalse);
-      expect(stapleKind('succession')!.anchors, isFalse);
       expect(stapleKind('succession')!.carriesRule, isFalse);
       expect(stapleKind('not-a-kind'), isNull);
       expect(stapleKind(null), isNull);

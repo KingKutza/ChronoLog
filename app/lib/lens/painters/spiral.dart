@@ -76,6 +76,24 @@ class SpiralPainter extends CurvePainter {
     }
   }
 
+  /// ONE TRACK IS THE WHOLE REACH THERE IS. On a spiral the radius IS the
+  /// coordinate, so a ground cannot span outward the way Radial's does without
+  /// covering turns it has nothing to do with: its reach is the track's own
+  /// width, over its own stretch of the winding.
+  @override
+  Path groundArc(Rational start, Rational end) {
+    final first = start < cycle.start ? cycle.start : start;
+    final last = end > cycle.end ? cycle.end : end;
+    final middle = (progressOf(first) + progressOf(last)) / 2;
+    return arcBand(
+      centre,
+      radiusOf(0, middle),
+      bandWidth / 2,
+      daysToAngle(first),
+      daysToAngle(last),
+    );
+  }
+
   /// One track, so one band. Grouping is Radial's question, not this lens's.
   @override
   List<Band> bandsOf(List<Fact> facts) => facts.isEmpty ? const [] : [(title: '', facts: facts)];

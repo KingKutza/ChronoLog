@@ -33,7 +33,9 @@ import '../core/document.dart';
 import '../core/eras.dart';
 import '../core/exact.dart';
 import '../core/math.dart';
+import '../core/object_kinds.dart';
 import '../core/records.dart';
+import '../core/stapled_here.dart';
 import '../core/weight.dart';
 import '../edit/editor.dart';
 import '../lens/theme.dart';
@@ -44,20 +46,23 @@ import 'card_chrome.dart';
 import 'document_card.dart';
 import 'frames_browser.dart';
 import 'law_editor.dart';
+import 'sentence_rows.dart';
 import 'settings_card.dart';
+import 'stapled_browser.dart';
 import 'theme_card.dart';
 
-/// The group display properties a frame authors: what belonging to this frame
-/// does to a member. Data, so adding one is a row and not a branch -- and
-/// "inherit" is always the first word, because nothing here encodes a right way.
-const List<({String key, String label, Map<String, String> options})> frameHandling = [
-  (key: 'zone', label: 'Zone fill', options: {'auto': 'inherit', 'fill': 'fill', 'plain': 'plain'}),
-  (
-    key: 'strategic',
-    label: 'In Strategic',
-    options: {'auto': 'by weight', 'show': 'promote', 'hide': 'demote'},
-  ),
-];
+/// THE TRAIT THAT SAYS A FRAME'S MEMBERS DRAW AS A ZONE.
+///
+/// ISSUES 9.2 (Don): "'In Strategic -- by weight / promote / demote' is an ENUM
+/// deciding display where the weight formula already says everything it says --
+/// promote IS `w * <landmark>` and demote IS `w * 0` -- so it melts into the
+/// weight term and the three-way goes; Zone fill ... belongs in the frame's
+/// trait BUNDLE beside `busy`, not as a per-frame tri-state row."
+///
+/// So there are no handling rows here. Promotion is the weight term, and the
+/// zone is a word in the bundle: wearing it says these members draw as a band,
+/// taking it off says they do not, and saying nothing says nothing.
+const String zoneTrait = 'zone';
 
 /// The bundles this document ITSELF exhibits, commonest first, with what wears
 /// each one counted. Derived, never listed: the offers are what the workspace
@@ -120,12 +125,15 @@ class FrameCard extends StatefulWidget {
 class _FrameCardState extends State<FrameCard> {
   late String _title, _color, _basis, _weight, _half;
   late List<String> _traits;
-  final Map<String, String> _handling = {};
   Json? _coordinate, _period;
   bool _dirty = false;
   String? _refusal;
 
   bool _read = false;
+
+  /// How far the neighbourhood reaches, once a person has said. Null until
+  /// then, so the shipped distance is what speaks.
+  int? _distance;
 
   /// Held for `dispose`, where an inherited scope may no longer be asked. The
   /// draft contract has to be keepable at that moment: the tile going away is
@@ -155,12 +163,10 @@ class _FrameCardState extends State<FrameCard> {
     _color = declaredText(frame?.extra['color'] ?? display['color']);
     _basis = frame?.basis ?? '';
     _weight = declaredText(display['weight'] ?? _startingWeight()?.toJson());
-    _handling['zone'] = display['zone'] is bool
-        ? (display['zone'] == true ? 'fill' : 'plain')
-        : 'auto';
-    _handling['strategic'] = declaredText(display['strategic']).isEmpty
-        ? 'auto'
-        : declaredText(display['strategic']);
+    // A frame authored before the melt wears its zone as a display field. It
+    // reads as the trait it now is, so nothing authored is lost and nothing is
+    // said twice.
+    if (display['zone'] == true && !_traits.contains(zoneTrait)) _traits = [..._traits, zoneTrait];
     _half = declaredText(display['halfDistance']);
     _coordinate = frame?.coordinate;
     _period = obj(frame?.extra['period']);
@@ -229,8 +235,9 @@ class _FrameCardState extends State<FrameCard> {
   Json? get _display {
     final built = <String, dynamic>{
       'weight': resolveAuthoredWeight(_weight),
-      if (_handling['zone'] != 'auto') 'zone': _handling['zone'] == 'fill',
-      if (_handling['strategic'] != 'auto') 'strategic': _handling['strategic'],
+      // The word in the bundle is the claim; the field is how the rest of the
+      // program still reads it.
+      if (_traits.contains(zoneTrait)) 'zone': true,
       if (_half.trim().isNotEmpty) 'halfDistance': _half.trim(),
       // A COLOUR OR NOTHING. Text the one reader cannot read is refused at the
       // field, in words, and never written here as though it were a colour.
@@ -330,31 +337,125 @@ class _FrameCardState extends State<FrameCard> {
     );
   }
 
-  /// WHAT IS STAPLED HERE. A frame that could not show what it holds is why a
-  /// note attached to it could not be found again (ISSUES 9.1). Windowed, and
-  /// every name opens that record's own card.
-  Widget _stapledHere(BuildContext context, Editor editor, String frameId) {
-    final window = cardTunable(ChromeScope.of(context).settings, 'card.searchWindow').round().toInt();
-    final held = <String>[];
-    var more = 0;
-    for (final event in editor.document.events.values) {
-      if (!editor.engine.indexes.framesOf(event.id).contains(frameId)) continue;
-      held.length < window ? held.add(event.id) : more += 1;
+  /// WHAT IS STAPLED HERE (ISSUES 9.2, Don: "the frame for PTP shows nothing
+  /// stapled here when there are two events. And frames with a lot of events
+  /// are overflowing rather than showing staples. Perhaps a list of stapled
+  /// items by type.").
+  ///
+  /// The row asked the PLACEMENT index -- placed, not merely connected -- so an
+  /// affiliation, an anchor with no coordinate and a verb nobody registered
+  /// were all invisible in the region built to show them; it walked
+  /// `document.events` alone, so a frame stapled to a frame could never appear,
+  /// and eras are frames stapled together. It asks the neighbourhood query now,
+  /// which is one question on the one graph.
+  ///
+  /// A NEIGHBOURHOOD IS A DISTANCE, AND THE DISTANCE IS AUTHORED (ruled
+  /// 2026-09-03). One is the default and means the things stapled directly to
+  /// this; the row offers the number, so a person who wants two or eleven says
+  /// so rather than accepting the closure some query picked for them.
+  ///
+  /// A WINDOW BOUNDS WHAT IS LISTED AND NEVER WHAT IS COUNTED, and the overflow
+  /// is a DOOR rather than a note: "+N more." says what you cannot see and
+  /// offers no way to see it.
+  StapledHere _neighbourhood(Editor editor, String frameId, int distance) {
+    var found = stapledHere(editor.engine, frameId);
+    if (distance <= 1) return found;
+    final byKind = <String, ({String label, Set<String> ids})>{};
+    var frontier = <String>{frameId};
+    final seen = <String>{frameId};
+    for (var step = 0; step < distance; step += 1) {
+      final next = <String>{};
+      for (final id in frontier) {
+        for (final group in stapledHere(editor.engine, id).groups) {
+          final held = byKind.putIfAbsent(group.kind, () => (label: group.label, ids: <String>{}));
+          for (final member in group.window) {
+            if (member == frameId) continue;
+            held.ids.add(member);
+            if (seen.add(member)) next.add(member);
+          }
+        }
+      }
+      frontier = next;
+      if (frontier.isEmpty) break;
     }
+    final groups = [
+      for (final entry in byKind.entries)
+        (
+          kind: entry.key,
+          label: entry.value.label,
+          total: entry.value.ids.length,
+          window: entry.value.ids.toList()..sort(),
+        ),
+    ];
+    found = StapledHere(groups, groups.fold(0, (sum, group) => sum + group.total));
+    return found;
+  }
+
+  Widget _stapledHere(BuildContext context, Editor editor, String frameId) {
+    final settings = ChromeScope.of(context).settings;
+    final window = cardTunable(settings, 'card.searchWindow').round().toInt();
+    final distance = _distance ?? cardTunable(settings, 'card.stapledDistance').round().toInt();
+    final here = _neighbourhood(editor, frameId, distance);
+    String nameOf(String id) =>
+        editor.document.frames[id]?.title ??
+        str(editor.document.events[id]?.payload?['title']) ??
+        id;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         cardWrap(context, [
-          for (final id in held)
+          Text('within', style: labelStyle(context)),
+          CardField(
+            value: '$distance',
+            mono: true,
+            width: cardPx(context, 'card.narrowWidth'),
+            onChanged: (text) => setState(() => _distance = int.tryParse(text.trim()) ?? distance),
+          ),
+          Text(
+            distance == 1 ? 'staple of this' : 'staples of this',
+            style: labelStyle(context),
+          ),
+        ]),
+        for (final group in here.groups) ...[
+          Text('${group.label} — ${group.total}', style: labelStyle(context)),
+          cardWrap(context, [
+            for (final id in group.window.take(window))
+              cardLink(
+                context,
+                nameOf(id),
+                () => group.kind == stapledFrameKind
+                    ? CardHost.maybeOf(context)?.openFrame(id)
+                    : CardHost.maybeOf(context)?.openObject(id),
+              ),
+            // THE DOOR, not a truncation note: the whole list of this kind is
+            // one tap away, the way All frames already is.
             cardLink(
               context,
-              str(editor.document.events[id]?.payload?['title']) ?? id,
-              () => CardHost.maybeOf(context)?.openObject(id),
+              'All ${group.total}',
+              () => CardHost.maybeOf(context)?.factory.open(
+                CardHost.of(context).factory.stapledBrowser(frameId),
+              ),
             ),
-          if (held.isEmpty)
-            Text('Nothing is stapled here yet.', style: labelStyle(context)),
+          ]),
+        ],
+        if (here.groups.isEmpty) Text('Nothing is stapled here yet.', style: labelStyle(context)),
+        // MINTING FROM THE REGION SAYS THE SENTENCE (ISSUES 9.2, Don: "if I
+        // have a frame editor open and I click new event or todo under 'stapled
+        // here', the new window that opens should contain a prewritten staple
+        // for the frame I am coming from"). It is not the doors row: taking a
+        // door says nothing about this frame, and clicking HERE says one thing
+        // -- which the card that opens shows as a sentence, editable and
+        // deletable like any other.
+        cardWrap(context, [
+          for (final kind in objectKinds.entries)
+            cardLink(
+              context,
+              'New ${kind.value.label.toLowerCase()}',
+              () => CardHost.maybeOf(context)?.factory.open(
+                CardHost.of(context).factory.newObjectCard(kind.key, frameId: frameId),
+              ),
+            ),
         ]),
-        if (more > 0) cardNote(context, '+$more more.'),
       ],
     );
   }
@@ -453,6 +554,11 @@ class _FrameCardState extends State<FrameCard> {
         if (id != null) cardRow(context, 'Stapled here', _stapledHere(context, editor, id)),
         _doors(context),
         cardRule(context),
+        // THE FRAME SAYS SENTENCES TOO (ISSUES 9.2). One card class: the same
+        // region the object card wears, with this frame as the near end, so a
+        // correspondence -- "10:00 here is 9:30 on Wall Time" -- is authored by
+        // hand and read back as what it is.
+        if (id != null) StapleEditor(objectId: id, nearEnd: StapleEnd.frame(id)),
         cardRow(context, 'This frame is', _traitEditor(context, document)),
         cardRow(context, 'Color', colorField(context, _color, (t) => _touch(() => _color = t))),
         if (capabilities.basis) cardRow(context, 'Basis', _basisPicker(context, document)),
@@ -462,7 +568,7 @@ class _FrameCardState extends State<FrameCard> {
       fold: [
         Text('Handling — this frame is a group', style: labelStyle(context)),
         ExpressionField(
-          label: 'Display weight',
+          label: 'Members weigh',
           source: _weight,
           evaluate: (source) {
             final stored = resolveAuthoredWeight(source);
@@ -473,14 +579,6 @@ class _FrameCardState extends State<FrameCard> {
           },
           onChanged: (source) => _touch(() => _weight = source),
         ),
-        for (final row in frameHandling)
-          cardChoiceRow(
-            context,
-            row.label,
-            _handling[row.key] ?? 'auto',
-            row.options,
-            (value) => _touch(() => _handling[row.key] = value),
-          ),
         ExpressionField(
           label: 'Falloff half-distance (days)',
           source: _half,
@@ -552,8 +650,13 @@ Widget _frameBody(BuildContext context, CardRequest request) {
   );
 }
 
+/// The list of records: every frame in the document, or -- where the request
+/// names one -- everything stapled to that one. One class, two lists.
 Widget _framesBody(BuildContext context, CardRequest request) {
   final host = CardHost.of(context);
+  if (request.id case final String recordId) {
+    return StapledBrowser(recordId: recordId, onClose: host.close);
+  }
   return FramesBrowser(onClose: host.close, onOpen: host.openFrame);
 }
 

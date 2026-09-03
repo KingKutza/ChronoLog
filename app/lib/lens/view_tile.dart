@@ -137,6 +137,12 @@ abstract class ViewTileController {
   void pan(Rational days);
   void panPixels(Offset delta);
   void zoom(Rational factor);
+
+  /// GO THERE: the focus glides to that day ordinal on the ratified curve.
+  /// ONE derivation for every lens, since every lens already has a focus and a
+  /// law -- and [jumpToNow] is the case where the coordinate is now, not a
+  /// second mechanism beside it.
+  void jumpTo(Rational days);
   void jumpToNow();
   void resetLens();
   void select(String? identity);
@@ -807,11 +813,15 @@ class _ViewTileState extends State<ViewTile>
 
   void _grow(String key, Rational by) => _state.write(key, grownValue(key, by));
 
+  @override
+  void jumpTo(Rational days) => _glideTowards(days);
+
   /// A law that does not map to a clock HAS NO NOW, so this refuses rather than
-  /// inventing a place to jump to.
+  /// inventing a place to jump to. Where it does, now is a coordinate like any
+  /// other and this is [jumpTo] of it.
   @override
   void jumpToNow() {
-    if (_law?.mapsToClock == true) _glideTowards(nowDays());
+    if (_law?.mapsToClock == true) jumpTo(nowDays());
   }
 
   @override

@@ -6,6 +6,8 @@
 // nothing here encodes a right way, and an unfamiliar kind is data a later
 // surface may learn to render rather than a crash.
 
+import '../core/todo_shape.dart';
+
 /// One option of a choice control. The FIRST declared option is the default --
 /// no shipped ordinal, no default-option setting.
 typedef ControlOption = ({String value, String label});
@@ -80,11 +82,12 @@ class LensSpec {
   };
 }
 
-const List<ControlOption> _grouping = [
-  (value: 'state', label: 'State'),
-  (value: 'importance', label: 'Importance'),
-  (value: 'container', label: 'Container'),
-  (value: 'frame', label: 'Frame'),
+/// THE GROUPINGS ARE THE TODO LAYER'S OWN TABLE, read here rather than copied
+/// (ISSUES 9.2, the grouping melt): the catalog renders a declaration, and a
+/// grouping's word for itself is the grouping's to keep. The first option is the
+/// default, and the table's first row IS the default -- the unfiltered reading.
+final List<ControlOption> _grouping = [
+  for (final grouping in todoGroupings) (value: grouping.key, label: grouping.label),
 ];
 
 const ControlSpec _span = ControlSpec('number', 'span', 'Span', 'todo.spanDays', 'day');
@@ -92,7 +95,7 @@ const ControlSpec _span = ControlSpec('number', 'span', 'Span', 'todo.spanDays',
 /// The shipped lenses, in shipped order. Each lens builder fills its own spec.
 final Map<String, LensSpec> lensCatalog = {for (final spec in _shipped) spec.id: spec};
 
-const List<LensSpec> _shipped = [
+final List<LensSpec> _shipped = [
   LensSpec(
     'intimate',
     'Intimate',

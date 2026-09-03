@@ -64,10 +64,14 @@ Settings chronologSettings() => Settings(
     chromeTextDefaults,
     stageTextDefaults,
     frameCardTextDefaults,
+    cardTextDefaults,
     // THE POINTER CHORDS SIT BESIDE THE KEYBOARD'S (ISSUES 9.2, the keybindings
     // page): pan, menu, create, the marquee and the toggle are text settings,
     // because a chord is not arithmetic.
     pointerBindingDefaults,
+    // ...and the stage's own, in that same exclusive family: a chord means one
+    // thing across the whole surface, wherever the verb reading it lives.
+    stagePointerDefaults,
     // The ICS boundary's completed-frame: the one legitimate named frame in the
     // program, and it is authored rather than compiled.
     icsTextDefaults,

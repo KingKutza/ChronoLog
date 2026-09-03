@@ -148,3 +148,10 @@ const Map<String, String> lensTunableDefaults = {
   'lines.dotRadius': '4',
   'lines.sharedDotRadius': '6',
 };
+
+/// EVERY LENS SETTING WHOSE VALUE IS AN EQUATION rather than a number, composed
+/// as one name so the session adds a family and not a file. Kept apart from
+/// [lensTunableDefaults] because that map's promise -- every value evaluates, by
+/// itself, to a number -- is one these cannot keep and should not have to: their
+/// variables are bound by whoever asks, at the moment of asking.
+const Map<String, String> lensFormulaDefaults = {...minimapFormulaDefaults};

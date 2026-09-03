@@ -15,11 +15,13 @@
 
 import 'package:flutter/material.dart';
 
+import 'package:flutter/services.dart';
+
 import '../chrome/controls.dart';
-import '../chrome/menus.dart';
 import '../core/coordinate_entry.dart';
 import '../core/coordinate_law.dart';
 import '../core/eras.dart';
+import '../session/point_pick.dart';
 import 'card_chrome.dart';
 
 /// The coordinate with [level] set to [picked] and every deeper level dropped.
@@ -98,11 +100,55 @@ class _CoordinateFieldState extends State<CoordinateField> {
 
   String? _refusal;
 
+  /// Whether the ladder is showing. Pick opens it and arms the surfaces at
+  /// once: they are two doors onto one question, and a person who clicked Pick
+  /// asked the question, not the door.
+  bool _ladderOpen = false;
+
   @override
   void initState() {
     super.initState();
     _committed = _controller.text;
     _focus.addListener(_focusChanged);
+    // ESCAPE ENDS A MODE (butter navigation, ISSUES 9.2). The mode is the
+    // session's and it is global while it is armed, so the key that ends it is
+    // read globally rather than from whatever happens to hold focus -- a person
+    // who armed Pick and moved the pointer onto a lens has no focus in this
+    // field to press Escape into.
+    HardwareKeyboard.instance.addHandler(_escaped);
+  }
+
+  /// The pick mode this field arms, where there is a session holding one.
+  PointPick get _pick => ChromeScope.of(context).views.pick;
+
+  bool _escaped(KeyEvent event) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.escape) return false;
+    if (!mounted) return false;
+    final pick = _pick;
+    if (!pick.armed) return false;
+    pick.disarm();
+    return true;
+  }
+
+  /// PICK IS A CLICK ON THE PICTURE (ISSUES 9.2, Don: "when I click Pick I
+  /// should be able to click a point on an open lens or the minimap"). Arming
+  /// asks every open surface for a point; the ladder stays as the
+  /// keyboard-and-precision path, in the same act, because they answer one
+  /// question and a person should not have to choose the road first.
+  void _armPick() {
+    setState(() => _ladderOpen = !_ladderOpen);
+    _pick.toggle(
+      onPicked: (entry) {
+        final text = coordinateText(entry.coordinate, widget.law);
+        _controller.text = text;
+        _committed = text;
+        setState(() {
+          _refusal = null;
+          _ladderOpen = false;
+        });
+        widget.onChanged(entry.coordinate, entry.depth);
+      },
+    );
   }
 
   @override
@@ -122,6 +168,7 @@ class _CoordinateFieldState extends State<CoordinateField> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_escaped);
     _focus.removeListener(_focusChanged);
     _focus.dispose();
     _controller.dispose();
@@ -129,6 +176,9 @@ class _CoordinateFieldState extends State<CoordinateField> {
   }
 
   void _focusChanged() {
+    // The help is for the field that HAS the hand in it, so gaining focus is a
+    // redraw as much as losing it is.
+    setState(() {});
     if (_focus.hasFocus) return;
     _commit(_controller.text);
     // AND THEN CATCH UP. While the hand held the field, the record may have
@@ -183,7 +233,7 @@ class _CoordinateFieldState extends State<CoordinateField> {
   /// Writes a picked coordinate back THROUGH THE SAME TEXT the parser reads, so
   /// the picker and the field can never mean two different things. A pick is a
   /// deliberate act, so it commits where typing does not.
-  void _pick(Coordinate next) {
+  void _picked(Coordinate next) {
     final text = coordinateText(next, widget.law);
     _controller.text = text;
     _preview(text);
@@ -217,9 +267,20 @@ class _CoordinateFieldState extends State<CoordinateField> {
               ),
             ),
           ),
-          ChronoMenu(label: 'Pick', glyph: '⌖', body: (context, close) => _ladder(context)),
+          namedAction(
+            context,
+            'Pick',
+            hint: 'Arms every open surface for a click, and opens the ladder. '
+                'Escape, or Pick again, ends it.',
+            onTap: _armPick,
+          ),
         ]),
-        cardNote(context, _refusal ?? coordinateEntryHelp(widget.law), refusal: _refusal != null),
+        if (_ladderOpen) _ladder(context),
+        // HELP IS FOR THE FIELD THAT HAS THE HAND IN IT (ISSUES 9.2: five to
+        // eight lines per sentence at rest). A refusal is always said; the
+        // guidance waits until somebody is typing into this field.
+        if (_refusal != null || _focus.hasFocus)
+          cardNote(context, _refusal ?? coordinateEntryHelp(widget.law), refusal: _refusal != null),
       ],
     );
   }
@@ -257,7 +318,7 @@ class _CoordinateFieldState extends State<CoordinateField> {
                                 cardLink(
                                   context,
                                   option.value == rung.chosen ? '• ${option.label}' : option.label,
-                                  () => _pick(
+                                  () => _picked(
                                     coordinateAt(current, widget.law, rung.level, option.value),
                                   ),
                                 ),

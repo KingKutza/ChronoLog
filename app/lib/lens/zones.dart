@@ -25,6 +25,7 @@ import 'package:flutter/widgets.dart';
 import '../core/exact.dart';
 import '../core/projection.dart';
 import 'facts.dart';
+import 'lens_painter.dart';
 import 'marks.dart';
 import 'theme.dart';
 import 'tunables.dart';
@@ -34,10 +35,18 @@ import 'tunables.dart';
 const String zoneWhole = 'whole', zoneStart = 'start';
 const String zoneMiddle = 'middle', zoneEnd = 'end';
 
-String zoneSegment(Segment segment) {
-  if (!segment.continuation) return segment.continuesAfter ? zoneStart : zoneWhole;
-  return segment.continuesAfter ? zoneMiddle : zoneEnd;
-}
+/// The continuity grammar from the two facts it is made of: whether this day
+/// carries on from a previous one, and whether another follows. Said once, so a
+/// surface with minutes to consult and one whose unit IS the day cannot come to
+/// different answers about the same span.
+String zoneSegmentOf({required bool continuation, required bool continuesAfter}) => continuation
+    ? (continuesAfter ? zoneMiddle : zoneEnd)
+    : (continuesAfter ? zoneStart : zoneWhole);
+
+String zoneSegment(Segment segment) => zoneSegmentOf(
+  continuation: segment.continuation,
+  continuesAfter: segment.continuesAfter,
+);
 
 /// Does this fact draw as a zone? Read off the frames that bear on it -- its
 /// placement frame, the frames above that, and every group it belongs to -- so
@@ -61,6 +70,17 @@ bool zoneFill(ProjectionEngine engine, Fact fact, Tunable? read) =>
 
 /// The band a zone day paints: a wash of the object's own color, an edge rule,
 /// and corners rounded only where the band actually begins or ends.
+///
+/// FILL IS GROUND, AND A GROUND IS TRANSLUCENT (Don, ruled; ISSUES 9.3). The
+/// wash was `Color.lerp(theme.paper, color, zone.fill)`, and a lerp of two
+/// OPAQUE colours is opaque: a zone did not wash over what it covered, it erased
+/// it -- "the Code Freeze event is now covering the Labor Day event". It was also
+/// a third colour nobody authored, paper mixed into a hue the person chose, so a
+/// palette change moved every zone's colour.
+///
+/// The authored hue, at the alpha the setting states, is both answers at once:
+/// what is under the ground reads through it, and two grounds over one span read
+/// as two rather than one hiding the other. NOTHING DISAPPEARS SILENTLY.
 ({Paint fill, Paint edge, RRect shape}) zoneBand(
   Rect bounds,
   Color color,
@@ -78,7 +98,7 @@ bool zoneFill(ProjectionEngine engine, Fact fact, Tunable? read) =>
     bottomRight: segment == zoneMiddle || segment == zoneStart ? open : radius,
   );
   return (
-    fill: Paint()..color = Color.lerp(theme.paper, color, pixels(read, 'zone.fill'))!,
+    fill: Paint()..color = color.withValues(alpha: pixels(read, 'zone.fill')),
     edge: Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = pixels(read, 'zone.rule')
@@ -91,3 +111,30 @@ bool zoneFill(ProjectionEngine engine, Fact fact, Tunable? read) =>
 /// The clock reading belongs to that segment and to no other; the NAME belongs
 /// to every segment (ISSUES 9.2).
 bool zoneTitled(String segment) => segment == zoneStart || segment == zoneWhole;
+
+/// THE ONE ZONE PASS EVERY TIMED LENS SHARES (ISSUES 9.2, Don: "zone is working
+/// on Intimate but not on Strategic -- or Tactical or Wall").
+///
+/// A lens supplies only its own projection -- the region this ground covers on
+/// this surface -- and this draws it and records it. Recording here is what
+/// makes the list and the picture ONE derivation: a lens cannot paint a ground
+/// it does not report, nor report one it did not paint.
+///
+/// A GROUND SPANS BY NATURE. The [bounds] handed in are the region the ground
+/// COVERS on this surface -- a whole cell, a whole column of a day, the whole
+/// arc of its interval -- never a chip box and never a lane, because a ground
+/// that lanes has been treated as a mark.
+void paintGround(
+  Canvas canvas,
+  LensPainter lens,
+  Fact fact,
+  Rect bounds,
+  String segment,
+  Color color,
+) {
+  final grammar = zoneBand(bounds, color, segment, lens.scene.theme, lens.scene.tunable);
+  canvas.drawRRect(grammar.shape, grammar.fill);
+  canvas.drawRRect(grammar.shape, grammar.edge);
+  lens.zones.add((fact: fact, bounds: bounds));
+}
+
