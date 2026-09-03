@@ -1,55 +1,60 @@
 # ChronoLog
 
-ChronoLog is a local-first, pre-alpha timeline instrument. Timelines are
-first-class objects — events staple onto them, sometimes onto more than one
-at once — and one `chronolog/1` document is the whole workspace. Seven
-lenses (Intimate, Tactical, Strategic, Wall, Lines, Spiral, Radial) look at
-that same document from different scales and shapes; none of them owns the
-data.
+A local-first timeline instrument, pre-alpha. Timelines are first-class
+objects and events staple onto them, sometimes onto more than one at once.
+One document is the whole workspace; seven lenses — Intimate, Tactical,
+Strategic, Wall, Lines, Spiral, Radial — look at that same document at
+different scales and shapes, and none of them owns the data.
 
-## Quick start
+Nothing in the model encodes a right way to read time. A staple says n
+points are one point; what a connection means, what a colour means, and
+which unit a coordinate speaks are authored, not inferred.
+
+## Build and run
+
+The app is a Flutter application in `app/`. Windows is the primary target;
+arm64 Linux (Wayland) and Android follow.
 
 ```sh
-npm start        # run the installed/portable launcher
-npm run dev       # run a source checkout at http://127.0.0.1:4173
-npm test          # run the test suite
-npm run check     # syntax-check every source file
+cd app
+flutter run -d windows     # run it
+flutter test               # the suite
+flutter analyze            # the analyzer
+flutter build windows      # a release build
 ```
 
-`npm run build:portable` builds a self-contained bundle (embedded Node
-runtime, no install step) for the current platform: `chronolog-linux-x64` or
-`chronolog-windows-x64`.
+Node 20 is required for one test: `test/lens/geometry_diff_test.dart` runs
+`tool/lens_diff_gen.mjs` as a differential oracle against the previous
+JavaScript implementation in `src/`, proving the Dart geometry matches it
+case for case. That is what `src/`, `fixtures/` and the root `package.json`
+are still here for.
 
-`chronolog --help` lists launcher options, including `--data-dir` and
-`--no-open`.
+Generative tests take a seed from `CHRONOLOG_SEED`; a failure prints the
+seed it ran with.
 
 ## Where data lives
 
-ChronoLog is dependency-free ES modules served locally on `127.0.0.1` only;
-no cloud service, account, or network connection is required. By default the
-data directory *is* the application's own directory — dev mode and an
-installed/portable bundle behave identically. `--data-dir` (or the
-`CHRONOLOG_DATA_DIR` environment variable) relocates it. Deleting a portable
-bundle deletes its data with it; keep the folder, or move data out with
-`--data-dir` first.
+The document, the layout, the settings and the view are written beside the
+application itself — no user-profile directory, no cloud service, no
+account, no network connection. `document.saveAt` relocates the document.
+A first run starts empty: structural frames only, nothing pre-populated.
 
-The workspace document is `chronolog.chronolog`, saved by atomic temp file
-and rename. A first run starts from an empty document — structural frames
-only, nothing pre-populated.
+Two-way sync with Outlook goes through ICS semantics rather than provider
+APIs. ICS is a deliberately lossy boundary: Gregorian and RSCALE come in,
+rules and projections go out as materialized instants, and no private
+`X-` dialect is minted.
 
-## Calendar and task sync
+## Documents
 
-Use **Document → Sync web calendars** for explicit, read-only refreshes from
-a published HTTPS ICS address (the private feed URL that Outlook, Google
-Calendar, Apple Calendar, and most other calendar services can publish).
-Write-back is disabled: a sync only ever pulls. ICS file import/export is
-also supported for one-off transfers. Feed addresses are stored in an
-owner-only dot-file in the data directory — never inside the portable
-document — protected by owner-only file permissions on POSIX and by NTFS
-ACLs on Windows.
-
-## Further reading
-
-- [ROADMAP.md](ROADMAP.md) — the work list, in priority order
+- [ROADMAP.md](ROADMAP.md) — the work, in priority order
+- [ISSUES.md](ISSUES.md) — the living tracker: field reports, verdicts, rulings
+- [RULINGS.md](RULINGS.md) — open questions, most blocking first
 - [AGENTS.md](AGENTS.md) — architecture map and engineering contracts
+- [SENTENCES.md](SENTENCES.md) — the sentences the edit card speaks
 - [LEXICON.md](LEXICON.md) — vocabulary and founding ideas
+- [WHAT_RIDES.md](WHAT_RIDES.md) — what carries forward, and its cost
+- [GUI_Mockup/](GUI_Mockup) — live design references
+
+## License
+
+MIT. See [LICENSE](LICENSE).
