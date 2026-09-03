@@ -22,6 +22,19 @@
 // keeps a stack's strip when it thins to one tab (shipped off). Whether a
 // nested row is a field on the record `MenuRow` or a second class is the
 // implementer's; what is pinned is the menu a person opens.
+//
+// CLOSE IS THE TILE'S OWN (ISSUES 8.28, Don: "Closing a tile does not use that
+// tile's own X but a hover-to-reveal close box"). The 8.28 wording asked for an
+// always-visible strip with the X "in the corner every other app uses"; that
+// half was SUPERSEDED by 9.1 ("a window wears no resting chrome") and 9.2 ("the
+// revealed handle carries the close mark beside the grip"). What stands from
+// 8.28 is the claim underneath: the close a hand reaches for belongs to THAT
+// tile, and pressing it closes that tile and nothing else. The last test below
+// is that claim, over a tile chosen by seed rather than by name -- set
+// CHRONOLOG_SEED to reproduce a red.
+
+import 'dart:io';
+import 'dart:math';
 
 import 'package:chronolog/cards/card_factory.dart';
 import 'package:chronolog/chrome/controls.dart';
@@ -42,6 +55,12 @@ import 'package:flutter_test/flutter_test.dart';
 import '../edit/harness.dart';
 
 const Size _surface = Size(1600, 1000);
+
+/// The run's seed: `CHRONOLOG_SEED` when set, else the clock, and every reason
+/// below names it so a red is reproducible.
+final int runSeed =
+    int.tryParse(Platform.environment['CHRONOLOG_SEED'] ?? '') ??
+    DateTime.now().microsecondsSinceEpoch;
 
 TileSpec _body(String id, String type, String klass, String title) => TileSpec(
   id: id,
@@ -217,6 +236,53 @@ void main() {
       reason:
           'ISSUES 9.2: whether the strip stays when a stack thins to one tab is a setting, '
           'default off (the no-resting-chrome ruling), on for people who want the ✕ visible.',
+    );
+  });
+
+  testWidgets('the close mark on a tile\'s revealed handle closes that tile, and only that tile', (
+    tester,
+  ) async {
+    // ISSUES 8.28: "Closing a tile does not use that tile's own X but a
+    // hover-to-reveal close box." As amended by 9.1 (nothing rests) and 9.2 (the
+    // revealed handle carries the close mark): the mark rides on the handle the
+    // pointer brings out over THIS tile, and pressing it closes THIS tile.
+    final bench = await pumpStage(tester);
+    final stage = bench.chrome.stage;
+    final random = Random(runSeed);
+    // Any lone tile with a body the harness can find the band of -- chosen by
+    // seed, so the claim is about a tile and not about view:1.
+    final candidates = [
+      for (final leaf in stage.leaves)
+        if (find.byKey(ValueKey('body-${leaf.id}')).evaluate().isNotEmpty) leaf.id,
+    ];
+    expect(candidates, isNotEmpty, reason: 'the default stage has tiles with bodies');
+    final chosen = candidates[random.nextInt(candidates.length)];
+    final others = {for (final leaf in stage.leaves) leaf.id}..remove(chosen);
+    expect(
+      find.text(closeMark),
+      findsNothing,
+      reason: 'seed $runSeed: nothing rests -- no close mark shows before the pointer asks',
+    );
+    await hoverBand(tester, bench.chrome, chosen);
+    final mark = find.text(closeMark);
+    expect(
+      mark,
+      findsWidgets,
+      reason:
+          'seed $runSeed: ISSUES 8.28/9.2 -- the handle revealed over $chosen carries no close '
+          'mark. Close belongs to the tile it closes: one hover and one click, no menu.',
+    );
+    await tester.tap(mark.first, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(
+      stage.tiles.containsKey(chosen),
+      isFalse,
+      reason: 'seed $runSeed: the close mark on $chosen\'s handle did not close $chosen',
+    );
+    expect(
+      {for (final leaf in stage.leaves) leaf.id},
+      equals(others),
+      reason: 'seed $runSeed: closing $chosen through its own mark touched another tile',
     );
   });
 

@@ -96,3 +96,24 @@ and refuses for another is a surface that lies about what it knows.
 
 **Answer:**
 Language is important Staples not anchors. Further Staples don't have names, only the things the attach do. Here there is a difference between derived and authored values, If a staple is attached to a frame with time that is when all things attached by that staple happen, if it connects more than one frame with time then that is when all things attached happen in each frame. If one object is stapled at multiple points to one time berring frame than its duration is the distance between the staples. either as a single differentce or as a peicewise distance. That applies to each time bearing frame that an object has multiple staples to. If an object has multiple time berring frames that it has one staple to each then there is no way to compute duration and that is fine. we can honestly say in a graph we know this is connected to that via the other, without claming a onemath projection. All of the above deal with a derived value wich is calculated at projection time. Additionaly events and time berring frames can have duration, This is recorded in the save file and in the precense of a single staple or one per time berring frame (for an object) can be used to project the object on any attached frame and to creat a onemath projectable path between two time berring frames that each single staple to an object. The value would also display on an unstapled object. For a n>1 stappled object where the authored and computed time agree, all is good, where they disagree, It depends on projection, if you porject the object and time relative to it, time warps to the difference, if you project the Frame and the object on it, then it is the staple derived time, and if you project the frame and the object relative to it the object warps to around the frame. Also for n>2 staples the excess or missing duration should be distributed equaly along the length of the object so that each peicewise part gets an amount proportional to the fraction of the total computed duration that that part represents. Finaly for two time berring frames joined by n>1 staples where the duration calculated along fram f1, f2, fn differ on the same basis, the frame being projected as primary wins and all other frames and there objects if carried into the projection warp according to that difference, as projected to the full length of the frame. For n>2 staples this is done peicewise for each segement and the tails per continuing projection of the last segment. For frames with a disimilar basis, the staples bridge creating a onemath rout to projecting one onto the other, if n=2 staples the frames are scaled to match per a continous projection if n>3 and all staples don't agree then the non-primary frame is scaled peicwise with the tails obeying a projection of the last segment.
+
+---
+
+## 12. Right-clicking a reading that names several frames
+
+A frame's verbs belong on every surface that names that frame -- one
+`frameMenu`, never a per-surface list. That much is settled by the trinity.
+
+What is not settled is the joined case. The view bar's projection reading can
+say `A or B or C`, and a right-click on it has two honest answers: rows for
+each frame it names, or the verbs of the reading itself -- the drop, the
+expression field, negate-the-whole.
+
+The pull each way: per-frame rows are what the hand expects when it right-clicks
+a word it can see, but a reading is one sentence and its terms are not
+separately clickable when the expression is `not (A and B)`. Offering per-frame
+rows there would be the surface inventing a decomposition the math does not
+have.
+
+**Answer:**
+

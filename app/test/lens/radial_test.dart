@@ -5,17 +5,20 @@
 // ribbon's two ends are flat cuts colinear with the ray it starts and stops on.
 // Swapping those treatments is the bug; these are what catch the swap.
 
+import 'dart:io';
 import 'dart:math';
 
 import 'package:chronolog/core/coordinate_law.dart';
 import 'package:chronolog/core/exact.dart';
 import 'package:chronolog/core/records.dart';
 import 'package:chronolog/lens/radial/cycles.dart';
+import 'package:chronolog/lens/painters/radial.dart';
 import 'package:chronolog/lens/radial/geometry.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../helpers/projection_scene.dart';
+import 'painters/grid_scene.dart';
 
 /// Angles compare through atan2 of the difference, never by raw subtraction: a
 /// wrap at pi is not a disagreement.
@@ -300,6 +303,116 @@ void main() {
       expect(cyclePeriodHint(magnitude('month', '1'), gregorianLaw), isNull);
       expect(cyclePeriodHint(magnitude('day', 'not a number'), gregorianLaw), isNull);
       expect(cyclePeriodHint(null, gregorianLaw), isNull);
+    });
+  });
+
+  // PROJECT AND UNPROJECT ARE INVERSES OVER THE WHOLE TURN (ISSUES 9.3, the
+  // fifth geometry defect, found after the four in `geometry.dart`).
+  //
+  // `CurvePainter.unproject` feeds a raw `atan2` -- range (-pi, pi] -- into
+  // `angleToDays`, whose zero is `startRay = -pi/2`, with no wrap. Every angle in
+  // (-pi, -pi/2), the upper-left quadrant, therefore reads as NEGATIVE progress:
+  // a day before `cycle.start`, which `project` then refuses. A pointer landing
+  // in one quadrant of a curve lens round-trips to a coordinate the same lens
+  // will not accept -- a drop there creates nothing, a menu there says "nothing
+  // projected", and nothing says why.
+  //
+  // The property is the strongest one available and is stated as such, so it
+  // catches this defect and any other quadrant or wrap error in one assertion:
+  //
+  //   Over a one-turn window, `project` and `unproject` are inverses. Every day
+  //   in [cycle.start, cycle.end) projects to a point that unprojects to the
+  //   same day; every point on the track, at ANY angle round the full turn,
+  //   unprojects to a day inside the window that projects back onto the ray it
+  //   came from.
+  //
+  // Pure double arithmetic on coordinates under a thousand pixels: the `1e-9`
+  // regime of `radial_geometry_test.dart`, scaled by the span for the day and
+  // used directly for the angle. The Spiral's multi-turn window is a separate
+  // question -- an angle alone cannot name a turn, so its `unproject` must read
+  // the radius too -- and is noted, not asserted, here.
+  group('project and unproject are inverses over the whole turn (ISSUES 9.3)', () {
+    final int runSeed =
+        int.tryParse(Platform.environment['CHRONOLOG_SEED'] ?? '') ??
+        DateTime.now().microsecondsSinceEpoch;
+    String seeded(String message) => '$message  (set CHRONOLOG_SEED=$runSeed to reproduce)';
+    const int cases = 200;
+
+    RadialPainter painted() {
+      final scene = Scene()..calendar('calendar:a');
+      scene.place('calendar:a', civil(2026, 9, 3, 9), title: 'One mark');
+      final lens = sceneOf(
+        scene.document,
+        const ['calendar:a'],
+        focus: civilDays(2026, 9, 3),
+        now: civilDays(2026, 9, 3),
+      );
+      final painter = RadialPainter(lens);
+      render(painter, lens.size);
+      expect(painter.cycle.refusal, isNull, reason: seeded('the premise: the cycle resolves'));
+      expect(painter.cycle.turns, 1, reason: seeded('the premise: Radial draws one turn'));
+      return painter;
+    }
+
+    test('every day in the window projects, and its point unprojects to the same day', () {
+      // ignore: avoid_print
+      print('CURVE ROUND TRIP RUN SEED: $runSeed  (set CHRONOLOG_SEED=$runSeed to reproduce)');
+      final random = Random(runSeed);
+      final painter = painted();
+      final span = painter.cycle.end - painter.cycle.start;
+      final tolerance = span.toDouble() * 1e-9;
+      var checked = 0;
+      for (var index = 0; index < cases; index += 1) {
+        final day = painter.cycle.start + span * Rational.parse('${random.nextDouble()}');
+        final point = painter.project(day);
+        expect(point, isNotNull, reason: seeded('$day is inside the window and must project'));
+        final back = painter.unproject(point!);
+        expect(back, isNotNull, reason: seeded('the projected point of $day is on the surface'));
+        expect(
+          (back! - day).abs().toDouble(),
+          lessThan(tolerance),
+          reason: seeded('ISSUES 9.3 (5): $day projected to $point and unprojected to $back'),
+        );
+        checked += 1;
+      }
+      expect(checked, greaterThan(0), reason: seeded('at least one day was asked'));
+    });
+
+    test('every angle round the full turn unprojects INTO the window and projects back onto its ray', () {
+      final random = Random(runSeed + 1);
+      final painter = painted();
+      var checked = 0;
+      for (var index = 0; index < cases; index += 1) {
+        // The whole turn, both conventions: (-pi, pi] as atan2 answers, and
+        // [startRay, startRay + 2pi) as the lens counts.
+        final angle = index.isEven ? -pi + random.nextDouble() * 2 * pi : startRay + random.nextDouble() * 2 * pi;
+        final radius = (painter.inner + painter.outer) / 2;
+        final at = polar(painter.centre, radius, angle);
+        final day = painter.unproject(at);
+        expect(day, isNotNull, reason: seeded('a point on the track at angle $angle is on the surface'));
+        expect(
+          day! >= painter.cycle.start && day < painter.cycle.end,
+          isTrue,
+          reason: seeded(
+            'ISSUES 9.3 (5): the point at angle $angle unprojected to $day, outside '
+            '[${painter.cycle.start}, ${painter.cycle.end}). A raw atan2 in (-pi, pi] was read against '
+            'a start ray of -pi/2 with no wrap: the upper-left quadrant is a day before the window.',
+          ),
+        );
+        final back = painter.project(day);
+        expect(
+          back,
+          isNotNull,
+          reason: seeded('ISSUES 9.3 (5): the lens refuses the very day it just answered for angle $angle'),
+        );
+        expect(
+          normalize(angleOf(back!, painter.centre) - angle).abs(),
+          lessThan(1e-6),
+          reason: seeded('the day at angle $angle projected back onto a different ray'),
+        );
+        checked += 1;
+      }
+      expect(checked, greaterThan(0), reason: seeded('at least one angle was asked'));
     });
   });
 }

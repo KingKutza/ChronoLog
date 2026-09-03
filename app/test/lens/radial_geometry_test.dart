@@ -537,4 +537,184 @@ void main() {
       expect(checked, greaterThan(0), reason: seeded('at least one case was asked'));
     });
   });
+
+  // THE DOMAIN IS SAID, NEVER SILENT (ISSUES 9.3, from the geometry rewrite:
+  // "FOUR DEFECTS IN `app/lib/lens/radial/geometry.dart`, found while asserting
+  // its properties, none fixed").
+  //
+  // Each of the four is a place where the function accepts an argument it
+  // cannot draw and answers with garbage instead of a refusal. The entry's own
+  // framing is kept: each case is "a refusal, or a spelled behaviour" -- what
+  // is asserted is that the silence ends. A throw of any kind is the refusal
+  // branch; otherwise the spelled behaviour is checked.
+  //
+  //   (1) `turns`. The entry reads "documented whole and nothing enforcing it".
+  //       STALE AS WRITTEN: `turns` is `int` in `spiralRibbon` and `spiralAt`
+  //       and at every call site (`past + future + 1`), so a fraction cannot be
+  //       expressed. What the type does NOT enforce is the sign: zero turns
+  //       collapses both edges onto the start ray (a zero-area sliver) and a
+  //       negative count winds the radius inward through the centre. The
+  //       contract: a turn count below one is refused.
+  //   (2) `samples == 0` divides by zero (`index / samples`) and every vertex is
+  //       NaN. REFUSAL ONLY, and the reason is what the first draft of this test
+  //       found: the engine DROPS non-finite geometry, so a NaN outline measures
+  //       as no contour with finite empty bounds -- exactly what an authored
+  //       "draws nothing" would measure as. The two cannot be told apart from
+  //       outside, so the silence can only end as a refusal. (A negative count
+  //       already throws, by accident of `outer.first` on an empty list; the
+  //       contract makes it deliberate and includes zero.)
+  //   (3) `arcPath` promises "one circular arc" with no stated domain, and the
+  //       engine special-cases a sweep at or past a full turn (an oval, or the
+  //       sweep modulo a turn). The contract: a sweep of a full turn or more is
+  //       refused, or draws the whole circle -- a closed path of length 2*pi*r
+  //       -- which is the only "one circular arc" such a sweep can mean.
+  //   (4) The inner radius clamps at zero, so a ribbon whose half-width exceeds
+  //       its inner radius is silently pinched to the centre and is not two
+  //       half-widths wide there. REFUSAL ONLY: the entry's alternative ("spell
+  //       what it draws there") is a documentation act a test cannot tell from
+  //       today's silence, and the corner walk's own step derivation goes
+  //       negative below the clamp -- there is no ribbon to observe.
+  //
+  // Seeded like everything above; every reason names the seed.
+  group('the domain is said, never silent (ISSUES 9.3)', () {
+    /// Runs [call]; the thrown object if it refused, else null.
+    Object? refusalOf(void Function() call) {
+      try {
+        call();
+        return null;
+      } on Object catch (thrown) {
+        return thrown;
+      }
+    }
+
+    test('(1) a turn count below one is refused: nothing winds zero times or inward', () {
+      final random = math.Random(runSeed + 13);
+      var checked = 0;
+      for (var index = 0; index < ribbonCases; index += 1) {
+        final halfWidth = between(random, 1, 12);
+        final turns = -random.nextInt(4); // 0, -1, -2, -3
+        final refusal = refusalOf(
+          () => spiralRibbon(
+            anyCentre(random),
+            inner: halfWidth + between(random, 20, 120),
+            spacing: between(random, 1, 40),
+            turns: turns,
+            samples: 24 + random.nextInt(137),
+            halfWidth: halfWidth,
+          ),
+        );
+        expect(
+          refusal,
+          isNotNull,
+          reason: seeded(
+            'ISSUES 9.3 (1): spiralRibbon accepted turns = $turns and drew something. A ribbon '
+            'winds a whole POSITIVE number of turns; below one there is no ribbon, and the flat '
+            'cut it exists to guard is either the whole figure or a reflection through the centre.',
+          ),
+        );
+        checked += 1;
+      }
+      expect(checked, greaterThan(0), reason: seeded('at least one case was asked'));
+    });
+
+    test('(2) a ribbon of no samples is refused: the NaN it would draw is indistinguishable from nothing', () {
+      final random = math.Random(runSeed + 14);
+      var checked = 0;
+      for (var index = 0; index < ribbonCases; index += 1) {
+        final halfWidth = between(random, 1, 12);
+        final samples = -random.nextInt(3); // 0, -1, -2
+        final refusal = refusalOf(
+          () => spiralRibbon(
+            anyCentre(random),
+            inner: halfWidth + between(random, 20, 120),
+            spacing: between(random, 1, 40),
+            turns: 1 + random.nextInt(4),
+            samples: samples,
+            halfWidth: halfWidth,
+          ),
+        );
+        expect(
+          refusal,
+          isNotNull,
+          reason: seeded(
+            'ISSUES 9.3 (2): spiralRibbon accepted samples = $samples. With no samples index / '
+            'samples is NaN and every vertex is NaN; the engine drops the outline silently. '
+            'A ribbon of no samples is refused.',
+          ),
+        );
+        checked += 1;
+      }
+      expect(checked, greaterThan(0), reason: seeded('at least one case was asked'));
+    });
+
+    test('(3) a sweep of a full turn or more is refused or is the whole circle', () {
+      final random = math.Random(runSeed + 15);
+      var checked = 0;
+      for (var index = 0; index < arcCases; index += 1) {
+        final centre = anyCentre(random), radius = anyRadius(random), from = anyAngle(random);
+        // Exactly a turn, and anything up to two: both signs.
+        final magnitude = index % 4 == 0 ? 2 * math.pi : between(random, 2 * math.pi, 4 * math.pi);
+        final sweep = random.nextBool() ? magnitude : -magnitude;
+        Path? path;
+        final refusal = refusalOf(() => path = arcPath(centre, radius, from, from + sweep));
+        if (refusal != null) {
+          checked += 1;
+          continue;
+        }
+        final metrics = path!.computeMetrics().toList();
+        final total = metrics.fold(0.0, (sum, metric) => sum + metric.length);
+        final circle = 2 * math.pi * radius;
+        expect(
+          total,
+          closeTo(circle, chordShortfall * 2 * math.pi + engine),
+          reason: seeded(
+            'ISSUES 9.3 (3): arcPath promised one circular arc; a sweep of $sweep at radius '
+            '$radius measured $total px, not the whole circle ($circle). The engine drew the '
+            'sweep modulo a turn, or an oval, and the signature said neither.',
+          ),
+        );
+        for (final metric in metrics) {
+          final start = metric.getTangentForOffset(0)!.position;
+          final end = metric.getTangentForOffset(metric.length)!.position;
+          expect(
+            (end - start).distance,
+            closeTo(0, engine),
+            reason: seeded('a full turn closes: the arc ends at $end, not back at $start'),
+          );
+        }
+        checked += 1;
+      }
+      expect(checked, greaterThan(0), reason: seeded('at least one case was asked'));
+    });
+
+    test('(4) a half-width wider than the inner radius is refused, never pinched to the centre', () {
+      final random = math.Random(runSeed + 16);
+      var checked = 0;
+      for (var index = 0; index < ribbonCases; index += 1) {
+        final inner = between(random, 5, 60);
+        final halfWidth = inner + between(random, 0.5, 40);
+        final refusal = refusalOf(
+          () => spiralRibbon(
+            anyCentre(random),
+            inner: inner,
+            spacing: between(random, 1, 40),
+            turns: 1 + random.nextInt(4),
+            samples: 24 + random.nextInt(137),
+            halfWidth: halfWidth,
+          ),
+        );
+        expect(
+          refusal,
+          isNotNull,
+          reason: seeded(
+            'ISSUES 9.3 (4): inner = $inner, halfWidth = $halfWidth: the inner edge is clamped '
+            'at the centre and the ribbon is not two half-widths wide on its first rays. '
+            'A ribbon that cannot be a ribbon is refused, not drawn thinner in silence.',
+          ),
+        );
+        checked += 1;
+      }
+      expect(checked, greaterThan(0), reason: seeded('at least one case was asked'));
+    });
+  });
 }
