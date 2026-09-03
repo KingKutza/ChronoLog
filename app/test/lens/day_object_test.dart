@@ -55,7 +55,9 @@ List<double> drawnWidths(Scene world, {String? objectId}) {
   final scene = sceneOf(
     world.document,
     const ['calendar:a'],
-    view: const {'back': 0, 'forward': 0, 'hourPixels': 24},
+    // THE SPAN IS ONE NUMBER SAID ONCE (ruled 2026-09-02): one day on screen,
+    // said once, where `back: 0, forward: 0` said it twice.
+    view: const {'span': 1, 'hourPixels': 24},
   );
   final painter = IntimatePainter(scene);
   render(painter, const Size(960, 720));
@@ -144,12 +146,21 @@ void main() {
         reason: 'the day zone spans the column it names',
       );
     }
-    expect(
-      drawnWidths(world, objectId: morning),
-      alone,
-      reason:
-          'ISSUES (8.31): authoring the day cost the day\'s own events their width — '
-          'the zone took a lane instead of being the region it is.',
-    );
+    final after = drawnWidths(world, objectId: morning);
+    expect(after, hasLength(alone.length), reason: 'the same marks are drawn');
+    for (var lane = 0; lane < alone.length; lane += 1) {
+      expect(
+        after[lane],
+        // TO THE LAST BIT, AND NOT A DIGIT WIDER. At a fractional column width the
+        // same width is computed from two different `left`s, and two subtractions
+        // equal in exact arithmetic differ in the final bit of a double. A test that
+        // pins a double to its final bit is a test that will lie later; one ulp is
+        // the whole of the licence, so a lane actually lost still fails here.
+        closeTo(alone[lane], alone[lane].abs() * 2.220446049250313e-16),
+        reason:
+            'ISSUES (8.31): authoring the day cost the day\'s own events their width — '
+            'the zone took a lane instead of being the region it is.',
+      );
+    }
   });
 }

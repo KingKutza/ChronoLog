@@ -125,9 +125,11 @@ Rational startOf(Bed bed, String id) {
 double columnWidth(Bed bed, WidgetTester tester) {
   final state = bed.views.of(tileId);
   final settings = livePainter(tester).scene;
-  final count = state.number('back', (viewTileControllers[tileId]!).settings) +
-      state.number('forward', (viewTileControllers[tileId]!).settings) +
-      Rational.one;
+  // THE SPAN IS ONE NUMBER SAID ONCE (ruled 2026-09-02). Days behind plus days
+  // ahead plus one was the count before the view key `span` replaced the pair;
+  // asked for the withdrawn keys, the view answered nothing and this read one
+  // column where the surface draws three.
+  final count = state.number('span', (viewTileControllers[tileId]!).settings);
   return (tileSize.width - settings.px('intimate.rail')) / count.toDouble();
 }
 

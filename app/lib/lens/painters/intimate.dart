@@ -396,6 +396,31 @@ class IntimatePainter extends LensPainter implements ManyPositions {
   double _y(int column, Rational days) =>
       ((days - _columnTop(column)) / law.dayDays * dayPixels).toDouble();
 
+  /// WHAT AN INTIMATE CLICK CAN HONESTLY NAME (ISSUES 9.2: "a click on Strategic
+  /// gives a day because a Strategic cell IS a day; a click on Intimate gives the
+  /// instant it can resolve").
+  ///
+  /// Not the law's base level: this surface gives a whole day a column's height,
+  /// so it resolves far finer than a day and saying "day" would throw away the
+  /// part of the pointer's position it actually knows. Nor a fixed "minute",
+  /// which is a claim about a law that may have none. It is the finest level of
+  /// THIS law whose unit still spans a pixel on this rail -- below that the
+  /// surface cannot tell two of them apart, and naming one would be inventing a
+  /// digit. Zoom in and it deepens on its own, which is what "the instant it can
+  /// resolve" means.
+  @override
+  String get precision {
+    var finest = super.precision;
+    if (dayPixels <= Rational.zero || law.dayDays <= Rational.zero) return finest;
+    for (final name in scene.law.levelNames()) {
+      final unit = scene.law.unitDays(name) ?? scene.law.meanUnitDays(name);
+      if (unit == null || unit <= Rational.zero) continue;
+      if ((unit / law.dayDays * dayPixels).toDouble() < 1) break;
+      finest = name;
+    }
+    return finest;
+  }
+
   /// THE ONE RULE LADDER, run in BOTH directions and TWO-TIER at every rung:
   /// what a major rule spans and what a minor one does, in the hours of this
   /// law. The function is `lens/ladder.dart`'s -- the same one every surface

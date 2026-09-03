@@ -200,12 +200,6 @@ const List<SettingFamily> settingFamilies = [
     high: '1',
   ),
   SettingFamily(
-    'weekend.#',
-    'Weekend day',
-    'One day the month grid washes as weekend, counted from the first day of '
-        'the week the calendar itself declares.',
-  ),
-  SettingFamily(
     'curve.x#',
     'Motion curve handle, across',
     'One horizontal handle of the easing curve every change of ground follows. '

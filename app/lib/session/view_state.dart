@@ -169,7 +169,31 @@ class ViewState {
     if (source.isNotEmpty) 'source': source,
     'focus': focusDays.toJson(),
     'sharedFocus': sharedFocus,
-    'view': view,
+    'view': _copied(view),
+  };
+
+  /// A SAVED VIEW IS NOT THE LIVE ONE.
+  ///
+  /// `toJson` handed out the `view` map ITSELF, so a preset saved from a card
+  /// went on tracking the tile it was saved from: every later edit to that
+  /// tile's lens keys silently rewrote the already-saved layout, and only a
+  /// restart's JSON round trip froze it -- which is exactly why no test that
+  /// serialises between writing and reading could ever see it.
+  ///
+  /// The copy belongs HERE, where the internal map is handed out, and not at
+  /// each call site: a caller that has to remember to copy is a caller the next
+  /// one forgets. It goes all the way down, because a view value is whatever a
+  /// control wrote and nothing says that is a scalar.
+  static Map<String, Object?> _copied(Map<String, Object?> map) => {
+    for (final entry in map.entries) entry.key: _copiedValue(entry.value),
+  };
+
+  static Object? _copiedValue(Object? value) => switch (value) {
+    final Map<Object?, Object?> map => {
+      for (final entry in map.entries) '${entry.key}': _copiedValue(entry.value),
+    },
+    final List<Object?> list => [for (final item in list) _copiedValue(item)],
+    _ => value,
   };
 
   static ViewState fromJson(Object? source) {
@@ -181,7 +205,12 @@ class ViewState {
       source: '${map['source'] ?? ''}',
       focusDays: rationalOrZero('${map['focus'] ?? 0}'),
       sharedFocus: map['sharedFocus'] != false,
-      view: map['view'] is Map ? Map<String, Object?>.from(map['view'] as Map) : null,
+      // BOTH DIRECTIONS, or the seam is only half closed: a preset applied to a
+      // tile must not hand that tile the preset's own nested maps to edit in
+      // place. `Map.from` copied the top level and nothing under it.
+      view: map['view'] is Map
+          ? _copied(Map<String, Object?>.from(map['view'] as Map))
+          : null,
     );
   }
 }

@@ -16,8 +16,11 @@ import '../core/exact.dart';
 import '../core/math.dart';
 import 'minimap/tunables.dart';
 
-/// Reads one setting by dotted lowercase key. Total by contract: the composer
-/// falls back to the shipped default, so a lens never handles a miss.
+/// Reads one setting by dotted lowercase key. The composer falls back to the
+/// shipped default, so a lens never handles a miss -- and a key NO map declares
+/// is a refusal naming it, raised here and at [Settings.value] alike, rather
+/// than a zero the surface would draw with. A lens still handles no miss; what
+/// changed is that a composer's omission says so instead of rendering wrong.
 typedef Tunable = Rational Function(String key);
 
 /// The value of [key]: from [read] when a session supplies one, otherwise the
@@ -88,6 +91,12 @@ const Map<String, String> lensTunableDefaults = {
   'mark.overflowScale': '0.9',
 
   // --- Zones ----------------------------------------------------------------
+  // HOW FAR INSIDE THE SURFACE THE ARMED PICK'S READOUT SITS (ISSUES 9.2). Its
+  // own key: the readout was borrowing `pointer.refusalPad`, which is how far a
+  // refusal sits from an edge, and two things that happen to want the same
+  // number are still two things -- move one and the other moves with it for no
+  // reason anybody could state.
+  'pick.readoutInset': '12',
   'zone.default': '0',
   'zone.fill': '0.24',
   'zone.edge': '0.42',

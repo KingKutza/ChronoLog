@@ -999,6 +999,42 @@ resolution, there is a state, and there is a staple" (LEXICON.md,
   COMPLETED reads and writes through the derivation; new ICS todo mapping (DUE,
   STATUS, PRIORITY) is held until the model settles.
 
+### Projection
+
+Every projection has a PRIMARY. The primary never warps; everything else warps
+to it. Project an object and time bends around it. Project a frame with the
+object on it and the staples win. Project a frame with the object relative to
+it and the object bends. Frame against frame is the same sentence again.
+
+Everything that projects around the primary is reached in order of its GRAPH
+DISTANCE from it. This is the same ordering as the one math's application
+order, and it is general: any surface that composes several things around one
+thing composes them nearest-first.
+
+Which thing is primary is surface-local, and each surface says so plainly.
+Intimate's primary is the frame at the point that is the centre of the view.
+The board's is the frame on the column. The same object may therefore head
+under one thing in Intimate and another on the board with neither reading
+wrong, because they are answers to two different projections.
+
+A derived value is computed at projection time; an authored value is recorded
+in the file. Where the two disagree the projection decides which yields —
+never a precedence rule in the model.
+
+A frame is TIME-BEARING if it has a time rule, or a basis with a time rule.
+That is answered at projection time like every other projection question: no
+type, no flag, no stored predicate, and a frame carries a basis or an authored
+time rule, never both.
+
+A neighbourhood is a distance, and the distance is authored: what is stapled
+here means every record reachable within it, one by default — direct staples
+only — and a surface offers the horizon as a control rather than choosing a
+closure on the person's behalf.
+
+Two places already read distance under their own names: the weight chain
+orders modifying frames by increasing graph distance, and the neighbourhood
+query bounds its walk. Both are this law seen from inside one derivation.
+
 ### Display weight
 
 A frame's weight handling is a **formula** in the one math

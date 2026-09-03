@@ -49,6 +49,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 
+import '../../core/coordinate_entry.dart';
+import '../../core/coordinate_law.dart';
+import '../../core/eras.dart' show LawRefusal;
 import '../../core/exact.dart';
 import '../law_context.dart';
 import '../now.dart';
@@ -121,6 +124,62 @@ class MinimapPainter extends CustomPainter {
     if (_length <= 0) return field.range.start;
     final fraction = Rational.parse((along(at) / _length).clamp(0.0, 1.0).toStringAsFixed(12));
     return field.range.start + _width * fraction;
+  }
+
+  /// WHICH LEVEL OF THE LAW THIS BAND CAN HONESTLY NAME.
+  ///
+  /// The minimap is not a lens and does not extend [LensPainter], so it says
+  /// this for itself -- but it is the same question, answered the same way: a
+  /// surface names the unit it can actually resolve, never a finer one it would
+  /// have to invent digits for. Here that is decided by the BIN: one bin is the
+  /// smallest thing the band draws, so a level whose unit is narrower than a bin
+  /// is a level this picture cannot distinguish, and claiming it would hand back
+  /// an instant nobody could have pointed at.
+  ///
+  /// It is never finer than the level the focused lens declared either: the
+  /// minimap describes that tile, and describing it more precisely than it
+  /// labels itself is the same false precision from the other side.
+  ///
+  /// MELT PENDING: [pickAt] below is `LensPainter.pickAt` written out. The
+  /// derivation belongs in one free function over a law, a day and a level,
+  /// which both the class and this band call.
+  String get precision {
+    final names = law.law.levelNames();
+    if (names.isEmpty) return granularity;
+    final bins = field.bins;
+    final width = bins < 1 ? _width : _width / Rational.fromInt(bins);
+    final stop = names.indexOf(granularity);
+    var coarsest = names.first;
+    for (final (index, name) in names.indexed) {
+      if (stop >= 0 && index > stop) break;
+      final unit = law.law.unitDays(name) ?? law.law.meanUnitDays(name);
+      if (unit == null || unit < width) break;
+      coarsest = name;
+    }
+    return coarsest;
+  }
+
+  /// THE COORDINATE UNDER A POINT, AT THIS BAND'S OWN PRECISION. The scrub reads
+  /// [unproject]; this is what a click on the band MEANS, stopped at the level
+  /// [precision] names and stored exactly that deep -- a coarse pick is a coarse
+  /// coordinate, never zero-filled down to an instant nobody chose.
+  CoordinateEntry? pickAt(Offset at) {
+    final days = unproject(at);
+    final names = law.law.levelNames();
+    final stop = names.indexOf(precision);
+    if (stop < 0) return null;
+    Coordinate whole;
+    try {
+      whole = law.law.fromDays(days);
+    } on LawRefusal {
+      return null;
+    }
+    return (
+      coordinate: Coordinate([
+        for (final name in names.take(stop + 1)) (level: name, value: whole.value(name)),
+      ]),
+      depth: precision,
+    );
   }
 
   double? project(Rational days) {

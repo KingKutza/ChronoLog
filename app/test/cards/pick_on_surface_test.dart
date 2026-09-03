@@ -26,12 +26,14 @@
 //   and the painter's declared `precision`, so a surface that says which level
 //   it can name gets the whole of picking for free.
 
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui' show PictureRecorder;
 
 import 'package:chronolog/app.dart';
 import 'package:chronolog/cards/coordinate_field.dart';
 import 'package:chronolog/chrome/controls.dart';
+import 'package:chronolog/chrome/keyboard.dart';
 import 'package:chronolog/chrome/shell.dart';
 import 'package:chronolog/core/coordinate_entry.dart';
 import 'package:chronolog/core/coordinate_law.dart';
@@ -47,7 +49,6 @@ import 'package:chronolog/lens/minimap/painter.dart';
 import 'package:chronolog/lens/theme.dart';
 import 'package:chronolog/lens/view_tile.dart';
 import 'package:chronolog/session/lens_catalog.dart';
-import 'package:chronolog/session/point_pick.dart';
 import 'package:chronolog/session/view_state.dart';
 import 'package:chronolog/stage/tile.dart';
 import 'package:chronolog/store/document_store.dart';
@@ -67,6 +68,16 @@ const String frameId = 'calendar:a';
 const String tileId = 'view:1';
 const String wallTime = 'frame:wall-time';
 const Size tileSize = Size(1000, 640);
+
+/// The run's seed: `CHRONOLOG_SEED` when set, else the clock; every reason
+/// that varies with it names it.
+final int runSeed =
+    int.tryParse(Platform.environment['CHRONOLOG_SEED'] ?? '') ??
+    DateTime.now().microsecondsSinceEpoch;
+
+/// The key the `keys.escape` SETTING names right now -- never a literal key.
+LogicalKeyboardKey escapeKeyOf(Chrome chrome) =>
+    activatorFor(chrome.settings.binding('keys.escape'))!.trigger;
 
 /// A world with something on it, so the surfaces have a window worth picking in.
 Scene busyWorld() {
@@ -220,10 +231,14 @@ void main() {
     ) async {
       final chrome = cardChrome(null);
       final law = lawsUnderTest().first;
+      // UNDER THE ONE KEYBOARD. Escape is not a handler a field installs; it is
+      // the surface-wide `ChromeKeyboard` reading the `keys.escape` SETTING, so
+      // the field is pumped under that scope exactly as the surface hosts it --
+      // the least tree that walks the real binding path, and nothing beside it.
       await pumpCard(
         tester,
         chrome,
-        CoordinateField(law: law, value: null, onChanged: (_, _) {}),
+        ChromeKeyboard(child: CoordinateField(law: law, value: null, onChanged: (_, _) {})),
       );
       expect(chrome.views.pick.armed, isFalse, reason: 'nothing is armed at rest');
       await tapText(tester, 'Pick');
@@ -236,13 +251,41 @@ void main() {
       // still offered.
       final root = coordinatePickerLadder(law, Coordinate.empty).first;
       expect(find.text(root.label), findsWidgets, reason: 'the ladder stays as the keyboard path');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      final shipped = escapeKeyOf(chrome);
+      await tester.sendKeyEvent(shipped);
       await tester.pumpAndSettle();
       expect(chrome.views.pick.armed, isFalse, reason: 'a mode takes Escape (butter navigation)');
       await tapText(tester, 'Pick');
       expect(chrome.views.pick.armed, isTrue);
       await tapText(tester, 'Pick');
       expect(chrome.views.pick.armed, isFalse, reason: 'a second Pick disarms');
+      // AND THE SETTING GOVERNS IT. Rebound to a seeded letter no shipped chord
+      // claims (a contested chord binds neither, by the keyboard page's own
+      // law), the shipped key no longer speaks for the mode and the new one does.
+      final taken = chromeKeyDefaults.values.toSet();
+      final letters = [
+        for (var code = 'a'.codeUnitAt(0); code <= 'z'.codeUnitAt(0); code += 1)
+          if (!taken.contains(String.fromCharCode(code))) String.fromCharCode(code),
+      ];
+      final letter = letters[Random(runSeed).nextInt(letters.length)];
+      chrome.settings.setText('keys.escape', letter);
+      await tester.pumpAndSettle();
+      await tapText(tester, 'Pick');
+      expect(chrome.views.pick.armed, isTrue);
+      await tester.sendKeyEvent(shipped);
+      await tester.pumpAndSettle();
+      expect(
+        chrome.views.pick.armed,
+        isTrue,
+        reason: 'seed $runSeed: `keys.escape` now says "$letter"; the shipped key is not the binding',
+      );
+      await tester.sendKeyEvent(escapeKeyOf(chrome));
+      await tester.pumpAndSettle();
+      expect(
+        chrome.views.pick.armed,
+        isFalse,
+        reason: 'seed $runSeed: the key the SETTING names ("$letter") is what disarms the mode',
+      );
     });
 
     testWidgets('an armed surface wears the ⌖ with a live readout, and a click commits then disarms', (

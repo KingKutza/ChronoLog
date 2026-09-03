@@ -205,9 +205,9 @@ Rational busyOf(ProjectionEngine engine, Projection projection, Fact fact) {
 double magnitudeOf(
   ProjectionEngine engine,
   Projection projection,
-  Fact fact,
+  Fact fact, {
   Tunable? read,
-) {
+}) {
   final staples = engine.indexes
       .staplesOf(fact.event.id)
       .where((staple) => !isPlacement(staple, fact.event.id))
@@ -245,15 +245,17 @@ MinimapField accumulate(
   final cap = count(read, 'minimap.countable') + 1;
   final width = range.end - range.start;
   if (width > Rational.zero) {
-    // THE SAME WINDOWED PROJECTION THE LENSES READ, occurrences included. The
-    // budget comes from the field's own shape: a bin already holding more than
-    // it can count is dense whatever else arrives, so there is nothing past one
-    // countable bin's worth per bin for the field to learn.
+    // THE SAME WINDOWED PROJECTION THE LENSES READ, occurrences included, AND
+    // ALL OF IT. A cap here would be a cap over the whole range rather than per
+    // bin, so at scale the engine would answer the first N in walk order and the
+    // rest of the range would go dark with nothing said -- a map that stops
+    // halfway and does not admit it. Overscale is met by what the field DOES
+    // with a fact (one add per bin it spans, motes capped per bin), never by
+    // refusing to hear about it.
     final query = engine.queryFacts(
       projection,
       start: range.start,
       end: range.end,
-      limit: bins * cap,
       includeOverlaps: true,
     );
     for (final fact in query.facts) {
@@ -300,7 +302,7 @@ void _spread(
   final from = _bin((fact.day - range.start) / width, bins);
   final to = _bin((end - range.start) / width, bins);
   final occupied = to - from + 1;
-  final share = magnitudeOf(engine, projection, fact, read) / occupied;
+  final share = magnitudeOf(engine, projection, fact, read: read) / occupied;
   // The mote goes where the fact is PLACED, once: a span is one thing that
   // happened, so counting its bins would be counting it seven times.
   present[from] += 1;

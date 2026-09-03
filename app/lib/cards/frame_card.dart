@@ -64,6 +64,17 @@ import 'theme_card.dart';
 /// taking it off says they do not, and saying nothing says nothing.
 const String zoneTrait = 'zone';
 
+/// THE HANDLING KEYS THIS CARD AUTHORS. Everything else a frame's display
+/// bundle holds is somebody else's writing, and this card rebuilds the bundle
+/// from scratch on every save -- so what it does not author, it must carry.
+///
+/// `display.strategic` is the live case: the three-way melted into the weight
+/// term (ISSUES 9.2), and whether an existing `show` becomes `w * <landmark>`
+/// and `hide` becomes `w * 0` is a CONVERSION nobody has ruled. Dropping the
+/// value while waiting is not the ruling, it is data loss -- so it rides
+/// through untouched and the card says it is carrying it.
+const Set<String> authoredHandling = {'weight', 'zone', 'halfDistance', 'color'};
+
 /// The bundles this document ITSELF exhibits, commonest first, with what wears
 /// each one counted. Derived, never listed: the offers are what the workspace
 /// is already made of, so an authored bundle nobody in this file imagined is
@@ -126,6 +137,10 @@ class _FrameCardState extends State<FrameCard> {
   late String _title, _color, _basis, _weight, _half;
   late List<String> _traits;
   Json? _coordinate, _period;
+
+  /// The frame's display bundle as it was READ, so the keys this card does not
+  /// author survive a save it did not intend to make about them.
+  Json _handlingWas = const {};
   bool _dirty = false;
   String? _refusal;
 
@@ -167,6 +182,7 @@ class _FrameCardState extends State<FrameCard> {
     // reads as the trait it now is, so nothing authored is lost and nothing is
     // said twice.
     if (display['zone'] == true && !_traits.contains(zoneTrait)) _traits = [..._traits, zoneTrait];
+    _handlingWas = display;
     _half = declaredText(display['halfDistance']);
     _coordinate = frame?.coordinate;
     _period = obj(frame?.extra['period']);
@@ -234,6 +250,9 @@ class _FrameCardState extends State<FrameCard> {
 
   Json? get _display {
     final built = <String, dynamic>{
+      // WHAT THIS CARD DOES NOT AUTHOR, IT CARRIES.
+      for (final entry in _handlingWas.entries)
+        if (!authoredHandling.contains(entry.key)) entry.key: entry.value,
       'weight': resolveAuthoredWeight(_weight),
       // The word in the bundle is the claim; the field is how the rest of the
       // program still reads it.
@@ -567,6 +586,16 @@ class _FrameCardState extends State<FrameCard> {
       ],
       fold: [
         Text('Handling — this frame is a group', style: labelStyle(context)),
+        // SAID, NEVER SILENT: a value this card is keeping but cannot author is
+        // a fact the person is entitled to see, not a thing that quietly
+        // survives (or quietly does not).
+        if (_handlingWas.keys.any((key) => !authoredHandling.contains(key)))
+          cardNote(
+            context,
+            'This frame also says '
+            '${[for (final key in _handlingWas.keys.where((key) => !authoredHandling.contains(key))) '$key: ${declaredText(_handlingWas[key])}'].join(', ')}. '
+            'No row here authors that yet, so it is kept exactly as written.',
+          ),
         ExpressionField(
           label: 'Members weigh',
           source: _weight,

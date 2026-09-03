@@ -8,6 +8,7 @@ import 'package:chronolog/core/document.dart';
 import 'package:chronolog/core/exact.dart';
 import 'package:chronolog/core/frame_selection.dart';
 import 'package:chronolog/core/projection.dart';
+import 'package:chronolog/lens/painters/intimate.dart';
 import 'package:chronolog/session/lens_catalog.dart';
 import 'package:chronolog/session/settings.dart';
 import 'package:chronolog/session/view_state.dart';
@@ -15,7 +16,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../core/corpus.dart' show seeds;
 
-Settings _settings() => Settings(defaults: const [sessionTunableDefaults]);
+// EVERY MAP A LENS SPEC POINTS AT. A control REFERENCES the settings key that
+// holds its default, and Intimate's lives in the painter's own map, so a
+// harness composing only the session's would read a key in no map at all --
+// which now refuses by name rather than answering zero.
+Settings _settings() =>
+    Settings(defaults: const [sessionTunableDefaults, intimateTunableDefaults]);
 
 CoordinateLaw _wallLaw() =>
     ProjectionEngine(createEmptyWorkspaceDocument()).lawOf('frame:wall-time');
@@ -77,7 +83,10 @@ void main() {
     final intimate = ViewState(lensId: 'intimate');
     expect(
       intimate.spanDays(law, settings),
-      settings.value('intimate.back') + settings.value('intimate.forward') + Rational.one,
+      // THE SPAN IS ONE NUMBER SAID ONCE (ruled 2026-09-02): `intimate.span`
+      // is the whole of it, where days behind plus days ahead plus one said the
+      // same number three ways.
+      settings.value('intimate.span'),
     );
   });
 

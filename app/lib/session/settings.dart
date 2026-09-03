@@ -150,18 +150,37 @@ class Settings extends ChangeNotifier with FrameSafeNotifier {
     }
   }
 
-  /// A truth value reads as zero or one, so one accessor serves every tunable.
-  Rational value(String key) => switch (raw(key)) {
-    final Rational number => number,
-    true => Rational.one,
-    _ => Rational.zero,
-  };
+  /// Whether ANYTHING declares [key] -- a composed shipped default, or an
+  /// override written over one. The question a reader asks before reading.
+  bool declares(String key) => _overrides.containsKey(key) || shipped.containsKey(key);
 
-  bool flag(String key) => switch (raw(key)) {
-    final bool truth => truth,
-    final Rational number => !number.isZero,
-    _ => false,
-  };
+  /// A truth value reads as zero or one, so one accessor serves every tunable.
+  ///
+  /// A KEY IN NO MAP AT ALL IS A REFUSAL NAMING IT (ISSUES 9.3), in the words
+  /// `lens/tunables.dart` already states the law in: "silently substituting a
+  /// zero is how a surface renders wrong instead of saying so." A composer that
+  /// left an area's map out used to be invisible -- every key of that area read
+  /// as nothing, and the surface drew a wrong picture confidently. The throw
+  /// carries the key, so the miss names itself the first time it is read. No
+  /// note is pushed here: a refusal raised mid-paint that also marked listeners
+  /// dirty would raise a second error over the top of the real one.
+  Rational value(String key) {
+    if (!declares(key)) throw MathRefusal('No setting named $key');
+    return switch (raw(key)) {
+      final Rational number => number,
+      true => Rational.one,
+      _ => Rational.zero,
+    };
+  }
+
+  bool flag(String key) {
+    if (!declares(key)) throw MathRefusal('No setting named $key');
+    return switch (raw(key)) {
+      final bool truth => truth,
+      final Rational number => !number.isZero,
+      _ => false,
+    };
+  }
 
   Tunable get tunable => value;
 

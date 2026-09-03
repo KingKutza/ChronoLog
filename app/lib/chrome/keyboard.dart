@@ -45,12 +45,18 @@ const Map<String, String> chromeKeyDefaults = {
   'keys.alignSeams': 'ctrl',
 };
 
-/// Is a modifiers-only chord held right now? A chord naming no modifier is
-/// never held -- an empty setting turns the mode off rather than leaving it
+/// Is a modifiers-only chord held right now?
+///
+/// THE ONE READER of a held chord, for keyboard modes and for the pointer
+/// chords that change what a DROP MEANS -- a drag already owns the button, so
+/// those name modifiers alone and there is no second press to name. Alternatives
+/// are separated by `|` exactly as every other chord is written, and the word
+/// `drag` is the shape of the gesture rather than a key, so it is read past.
+///
+/// A chord naming no modifier is never held -- an empty setting, or one naming
+/// a button this reader cannot see, turns the mode off rather than leaving it
 /// always on.
 bool chordHeld(String binding) {
-  final parts = binding.toLowerCase().split('+').where((part) => part.isNotEmpty).toSet();
-  if (parts.isEmpty) return false;
   final keys = HardwareKeyboard.instance;
   const held = {
     'ctrl': _isControl,
@@ -58,11 +64,20 @@ bool chordHeld(String binding) {
     'alt': _isAlt,
     'meta': _isMeta,
   };
-  for (final part in parts) {
-    final reads = held[part];
-    if (reads == null || !reads(keys)) return false;
+  for (final alternative in binding.toLowerCase().split('|')) {
+    final parts = {
+      for (final part in alternative.split('+'))
+        if (part.trim().isNotEmpty && part.trim() != 'drag') part.trim(),
+    };
+    if (parts.isEmpty) continue;
+    var down = true;
+    for (final part in parts) {
+      final reads = held[part];
+      down &= reads != null && reads(keys);
+    }
+    if (down) return true;
   }
-  return true;
+  return false;
 }
 
 bool _isControl(HardwareKeyboard keys) => keys.isControlPressed;
@@ -155,13 +170,84 @@ class ChromeAction extends Action<ChromeIntent> {
 }
 
 /// Wraps the surface in the one map. Nothing below binds a key of its own.
-class ChromeKeyboard extends StatelessWidget {
+class ChromeKeyboard extends StatefulWidget {
   const ChromeKeyboard({super.key, required this.child});
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
+  State<ChromeKeyboard> createState() => _ChromeKeyboardState();
+}
+
+class _ChromeKeyboardState extends State<ChromeKeyboard> {
+  Chrome? _chrome;
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_escaped);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _chrome = ChromeScope.of(context);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_escaped);
+    super.dispose();
+  }
+
+  /// ESCAPE REACHES A MODE WHEREVER THE FOCUS IS.
+  ///
+  /// A mode is a state of the whole surface -- Pick is armed while the pointer
+  /// is out over a lens, with the field that armed it still holding the
+  /// keyboard -- and the ordinary map cannot reach it, because [typingNow]
+  /// rightly declines a BARE key to whatever is being typed into. Escape is not
+  /// a character anyone types, so this rung reads it straight off the hardware.
+  ///
+  /// It is ONE handler for the whole surface, and the chord is the `keys.escape`
+  /// SETTING like every other. A handler per field instance made the order of
+  /// disarm depend on which field was built last, and a literal key in it made
+  /// one binding in the program unrebindable.
+  ///
+  /// It claims the key only while a mode is actually standing: with nothing
+  /// armed the press belongs to the ordinary map, and to the menu rung in it.
+  bool _escaped(KeyEvent event) {
+    final chrome = _chrome;
+    if (event is! KeyDownEvent || chrome == null || !mounted) return false;
+    final activator = activatorFor(chrome.settings.binding('keys.escape'));
+    if (activator == null || !activator.accepts(event, HardwareKeyboard.instance)) return false;
+    if (!chrome.views.pick.armed) return false;
+    // ONE STATEMENT of what Escape does, shared with the ordinary map: this
+    // rung only decides that the press has REACHED the surface.
+    _run(chrome, 'escape');
+    return true;
+  }
+
+  /// A BINDING THAT DOES NOT TAKE EFFECT IS A SETTING THAT LIES. The map below
+  /// is read out of the settings, so it is rebuilt when the settings say
+  /// something new -- otherwise a rebind sat there doing nothing until some
+  /// unrelated widget happened to rebuild this dispatcher, and the chord the
+  /// keyboard page showed was not the chord the surface obeyed. Every other
+  /// tunable in the program is live on the same pulse; this was the one place
+  /// that promise broke.
+  ///
+  /// THE MAP AND THE HANDLER HAVE DIFFERENT LIFETIMES, deliberately. The
+  /// listener rebuilds only the widgets below it; the single surface-wide
+  /// `HardwareKeyboard` handler is installed in [initState] and removed in
+  /// [dispose], and a rebuild never touches it. Reinstalling a global handler
+  /// on every settings pulse is exactly the per-instance churn that moving it
+  /// here got rid of.
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: ChromeScope.of(context).pulse,
+    builder: (context, _) => _map(context),
+  );
+
+  Widget _map(BuildContext context) {
     final chrome = ChromeScope.of(context);
     final shortcuts = <ShortcutActivator, Intent>{};
     for (final key in chromeKeyDefaults.keys) {
@@ -187,7 +273,7 @@ class ChromeKeyboard extends StatelessWidget {
         // the focus has to land back INSIDE this dispatcher, or the surface
         // would be left with the shortcuts above the primary focus and every
         // bare binding silently dead until something else was clicked.
-        child: FocusScope(autofocus: true, child: child),
+        child: FocusScope(autofocus: true, child: widget.child),
       ),
     );
   }
@@ -224,7 +310,12 @@ class ChromeKeyboard extends StatelessWidget {
       case 'zoomTile':
         if (focused != null) stage.toggleZoom(focused);
       case 'escape':
-        closeOpenMenu();
+        // THE ESCAPE CASCADE, most urgent first. A menu that is merely open is
+        // the top rung and closes on its own; below it, a MODE the hand is
+        // standing in ends. Both are "get me out of what I am in", which is why
+        // they are rungs of one binding rather than two keys.
+        if (closeOpenMenu()) return null;
+        chrome.views.pick.disarm();
       case 'delete' || 'zoomIn' || 'zoomOut':
         if (view != null) chrome.onAction?.call(view, action);
       case 'panBack' || 'panForward':

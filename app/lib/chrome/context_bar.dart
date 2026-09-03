@@ -162,7 +162,7 @@ BarItem _jump(BuildContext c, String tile, CoordinateLaw law) {
             value: law.fromDays(chrome.views.focusOf(tile)),
             onChanged: (value, _) {
               if (value == null) return;
-              viewTileControllers[tile]?.jumpTo(law.toDays(value));
+              _goTo(chrome, tile, law.toDays(value));
             },
           ),
         );
@@ -173,13 +173,27 @@ BarItem _jump(BuildContext c, String tile, CoordinateLaw law) {
   return (label: 'Jump to a date', full: door('Jump to…'), compact: door('⇥'));
 }
 
+/// GO THERE, THROUGH THE ONE DOOR. A step and a jump and Today are the same
+/// verb at three destinations, so they take the same road: the view tile's own
+/// glide. A bar that wrote the focus itself would be a second mechanism beside
+/// the glide, and the two would drift -- Today gliding while the arrow beside
+/// it snapped is exactly that, and it is what this closes.
+///
+/// With no view tile mounted there is nothing to animate, so the focus is
+/// simply where it is set. That is the ABSENCE of a surface, not a second way
+/// of moving one.
+void _goTo(Chrome chrome, String tile, Rational days) {
+  final controller = viewTileControllers[tile];
+  controller == null ? chrome.views.setFocus(tile, days) : controller.jumpTo(days);
+}
+
 BarItem _step(BuildContext c, String glyph, String label, Rational by, String tile) {
   final chrome = ChromeScope.of(c);
   return barAction(
     c,
     label,
     glyph: glyph,
-    onTap: () => chrome.views.setFocus(tile, chrome.views.focusOf(tile) + by),
+    onTap: () => _goTo(chrome, tile, chrome.views.focusOf(tile) + by),
   );
 }
 

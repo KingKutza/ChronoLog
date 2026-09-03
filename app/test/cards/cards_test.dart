@@ -1,8 +1,10 @@
 // The document, settings, theme, boundary and frames-browser cards.
 //
-// Generation is seeded from the spec seed, so nothing here asserts an arbitrary
-// fact: the counts are the generator's own and the properties hold for any of
-// them.
+// Generation is seeded, so nothing here asserts an arbitrary fact: the counts
+// are the generator's own and the properties hold for any of them. Most cases
+// take the spec seed; the two newest take `runSeed`, a fresh seed each run that
+// the failure prints back, so a shape only some arrangements have is found
+// rather than merely never generated.
 
 import 'dart:convert';
 import 'dart:io';
@@ -19,6 +21,7 @@ import 'package:chronolog/core/eras.dart';
 import 'package:chronolog/core/records.dart';
 import 'package:chronolog/lens/theme.dart';
 import 'package:chronolog/session/files.dart';
+import 'package:chronolog/session/lens_catalog.dart';
 import 'package:chronolog/store/data_dir.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -51,6 +54,17 @@ Document _withWorkFrame() => createEmptyWorkspaceDocument().put(
   'frame:work',
   const Frame(id: 'frame:work', title: 'Work', traits: ['set', 'calendar']),
 );
+
+/// The run's seed: `CHRONOLOG_SEED` when set, else the clock; every reason
+/// that varies with it names it.
+final int runSeed =
+    int.tryParse(Platform.environment['CHRONOLOG_SEED'] ?? '') ??
+    DateTime.now().microsecondsSinceEpoch;
+
+/// A widget wearing exactly these words as its label -- the action row and
+/// never the text field a person typed them into.
+Finder labelled(String words) =>
+    find.byWidgetPredicate((widget) => widget is Text && widget.data == words);
 
 void main() {
   group('the document card', () {
@@ -225,6 +239,143 @@ void main() {
         ['a.ics', 'b.ics'],
       );
       expect(icsFilesIn(storePath(root.path, 'a.ics')), isEmpty);
+    });
+
+    // THE DOOR, NOT THE API (found 9.3). Named views and layout presets are one
+    // record kind, and `Stage.savePreset` / `applyPreset` carry the view state
+    // only when the book is handed in. session/named_views_test.dart drives
+    // that API and hands `views:` in EXPLICITLY, so a caller that omits the
+    // optional parameter is invisible to it -- and this card did exactly that:
+    // a preset saved here came back as the boxes with every projection silently
+    // dropped. So this case walks the door the hand walks -- author a tile, save
+    // from the card, scramble, apply from the card -- and asks for what the tile
+    // SAID, never where the boxes went. The lens, the projection and the lens's
+    // own key are drawn from the seed: the property is that WHATEVER was said
+    // comes back, not that one remembered arrangement does.
+    testWidgets('a layout saved from the card brings back what its tile looked through', (
+      tester,
+    ) async {
+      final random = Random(runSeed);
+      final bench = await openCards(_withWorkFrame());
+      final chrome = cardChrome(bench.editor);
+      final lenses = lensCatalog.keys.toList();
+      final authoredLens = lenses[random.nextInt(lenses.length)];
+      final otherLens = lenses[(lenses.indexOf(authoredLens) + 1 + random.nextInt(lenses.length - 1)) %
+          lenses.length];
+      final days = '${1 + random.nextInt(60)}';
+      final tile = chrome.views.of('view:1');
+      tile.lensId = authoredLens;
+      tile.selection.toggle('frame:work');
+      tile.source = 'Work';
+      tile.write('days', days);
+      // The snapshot is a COPY, as a file would hold it: `said` hands out live
+      // maps, and a snapshot that aliases the tile proves nothing about it.
+      final said = jsonDecode(jsonEncode(tile.said));
+      final name = 'desk-${runSeed.toRadixString(36)}';
+
+      await pumpCard(tester, chrome, const DocumentCard(root: 'nowhere'));
+      await tapPart(tester, 'Storage, boundary and layouts');
+      await tester.enterText(fieldHinted('name this arrangement'), name);
+      await tester.pumpAndSettle();
+      await tapText(tester, 'Save layout');
+      expect(
+        chrome.stage.presets.keys,
+        contains(name),
+        reason: 'seed $runSeed: the card saved the arrangement under the name typed',
+      );
+
+      // Scramble the lens and the projection, so nothing comes back by accident.
+      tile.lensId = otherLens;
+      tile.selection.toggle('frame:work');
+      tile.source = '';
+      expect(
+        tile.said,
+        isNot(equals(said)),
+        reason: 'seed $runSeed: the scramble changed what the tile said, or the case proves nothing',
+      );
+      await tester.pumpAndSettle();
+
+      // Apply FROM THE CARD: its own row for the preset, not the Stage API.
+      final row = labelled(name);
+      expect(row, findsOneWidget, reason: 'seed $runSeed: the saved layout is offered as a row in the fold');
+      await tester.ensureVisible(row);
+      await tester.pumpAndSettle();
+      await tester.tap(row, warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      final shown = chrome.views.of('view:1');
+      expect(
+        shown.lensId,
+        equals(authoredLens),
+        reason:
+            'seed $runSeed: found 9.3 -- the card called savePreset/applyPreset without the book, so '
+            'the tile stayed on "$otherLens" while the boxes came back',
+      );
+      expect(
+        shown.source,
+        equals('Work'),
+        reason: 'seed $runSeed: the projection is view state and rides with the arrangement',
+      );
+      expect(
+        shown.said,
+        equals(said),
+        reason: 'seed $runSeed: everything the tile said, byte for byte, and not merely the layout boxes',
+      );
+    });
+
+    // A SAVED LAYOUT IS A RECORD, NOT A WINDOW ONTO THE LIVE TILE (found 9.3,
+    // writing the case above). `ViewState.toJson` hands out `'view': view` --
+    // the tile's own map, not a copy -- and `Stage.savePreset` stores that
+    // `said` as the preset. So until a restart's JSON round trip happens to
+    // freeze it, every later edit to the tile's lens keys edits the saved
+    // preset too, and applying it brings back what the tile says NOW rather
+    // than what it said when the person saved. session/named_views_test.dart
+    // cannot see this: `reloaded()` round-trips the stage through JSON between
+    // save and apply. This is the in-session road -- save, change, apply -- and
+    // it stays red until a preset is written as a copy.
+    testWidgets('a layout saved from the card is not rewritten by later edits to the tile', (
+      tester,
+    ) async {
+      final random = Random(runSeed);
+      final bench = await openCards(_withWorkFrame());
+      final chrome = cardChrome(bench.editor);
+      final lenses = lensCatalog.keys.toList();
+      final tile = chrome.views.of('view:1');
+      tile.lensId = lenses[random.nextInt(lenses.length)];
+      final savedDays = '${1 + random.nextInt(60)}';
+      final laterDays = '${61 + random.nextInt(60)}';
+      tile.write('days', savedDays);
+      final name = 'desk-${runSeed.toRadixString(36)}';
+
+      await pumpCard(tester, chrome, const DocumentCard(root: 'nowhere'));
+      await tapPart(tester, 'Storage, boundary and layouts');
+      await tester.enterText(fieldHinted('name this arrangement'), name);
+      await tester.pumpAndSettle();
+      await tapText(tester, 'Save layout');
+      final record = jsonDecode(jsonEncode(chrome.stage.presets[name]!.views['view:1']));
+      expect(record, isNotNull, reason: 'seed $runSeed: the preset carries the tile\'s view state');
+
+      // A person keeps working: the tile's lens key changes after the save.
+      tile.write('days', laterDays);
+      expect(
+        chrome.stage.presets[name]!.views['view:1'],
+        equals(record),
+        reason:
+            'seed $runSeed: found 9.3 -- the saved preset changed when the tile did. '
+            '`ViewState.toJson` hands out the live `view` map and `savePreset` keeps it, so '
+            'the record aliases the tile until a JSON round trip copies it.',
+      );
+      await tester.pumpAndSettle();
+      final row = labelled(name);
+      await tester.ensureVisible(row);
+      await tester.pumpAndSettle();
+      await tester.tap(row, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(
+        chrome.views.of('view:1').view['days'],
+        equals(savedDays),
+        reason: 'seed $runSeed: applying brings back what was SAVED ($savedDays), not what the tile says now',
+      );
     });
   });
 

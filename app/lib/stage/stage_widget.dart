@@ -122,6 +122,12 @@ const Map<String, String> stagePointerDefaults = {
   // targets the app layer; alt-drag (a settings key) drops INTO a container's
   // inner tree; the drop preview outlines which."
   'pointer.dropInto': 'alt+drag',
+  // SWAP ON DROP, rather than tab or reorder: what a drop onto a HANDLE means
+  // when the chord is held. Shipped as the two modifiers the verb answered to
+  // when it was spelled in code, so nothing changes for a person who already
+  // knows it -- and now it is a line in the settings file like every other
+  // chord instead of a branch nobody can rebind.
+  'pointer.swapOnDrop': 'ctrl | alt',
 };
 
 class StageView extends StatelessWidget {
@@ -720,9 +726,9 @@ Future<void> openTileMenu(BuildContext context, TileLeaf leaf, Offset at) {
 /// A drop onto a handle: SWAP under a modifier, reorder within the stack,
 /// otherwise tab into it. One rule, wherever a handle is.
 void dropOnHandle(BuildContext context, TileLeaf leaf, String from, {Branch? stack}) {
-  final stage = ChromeScope.of(context).stage;
-  final keys = HardwareKeyboard.instance;
-  if (keys.isControlPressed || keys.isAltPressed) return stage.swap(from, leaf.id);
+  final chrome = ChromeScope.of(context);
+  final stage = chrome.stage;
+  if (chordHeld(chrome.settings.text('pointer.swapOnDrop'))) return stage.swap(from, leaf.id);
   final at = stack?.children.indexWhere((child) => edgeLeaf(child, false)?.id == from) ?? -1;
   if (stack != null && at >= 0) {
     reorderChild(stack, at, stack.children.indexWhere((c) => edgeLeaf(c, false)?.id == leaf.id));
@@ -741,37 +747,6 @@ void dropOnHandle(BuildContext context, TileLeaf leaf, String from, {Branch? sta
 /// above the desk this tile sits on, so a palette that authors ground and paper
 /// alike still shows a tile on a desk instead of one flat wall.
 Color tileSheet(ChronoTheme theme) => theme.step(theme.ground);
-
-/// Whether a MODIFIER-ONLY chord is held right now.
-///
-/// A drag already owns the button, so a chord that changes what a DROP MEANS
-/// names modifiers alone -- there is no second press to name. Alternatives are
-/// separated by `|` exactly as every other pointer chord writes them, and a
-/// `drag` word is the shape of the gesture rather than a key, so it is read
-/// past. An alternative naming no modifier at all matches nothing: an
-/// unreadable line turns the chord off rather than arming it on every drop.
-bool modifiersHeld(String chord) {
-  final keys = HardwareKeyboard.instance;
-  for (final alternative in chord.toLowerCase().split('|')) {
-    final parts = [
-      for (final part in alternative.split('+'))
-        if (part.trim().isNotEmpty && part.trim() != 'drag') part.trim(),
-    ];
-    if (parts.isEmpty) continue;
-    var held = true;
-    for (final part in parts) {
-      held &= switch (part) {
-        'ctrl' => keys.isControlPressed,
-        'shift' => keys.isShiftPressed,
-        'alt' => keys.isAltPressed,
-        'meta' => keys.isMetaPressed,
-        _ => false,
-      };
-    }
-    if (held) return true;
-  }
-  return false;
-}
 
 /// The two marks the stage draws: the close on a tab, and the handle a window
 /// or a bar is dragged by.
@@ -1135,7 +1110,7 @@ class _TileState extends State<_Tile> {
     // inner tree; the drop preview outlines which." It is not an edge, because
     // it is not a direction -- it is a different LAYER, so the chord says it
     // and the whole box means it.
-    if (modifiersHeld(chrome.settings.text('pointer.dropInto'))) return 'into';
+    if (chordHeld(chrome.settings.text('pointer.dropInto'))) return 'into';
     final edge = chrome.px('stage.edgeZone');
     if (local.dx < box.size.width * edge) return 'left';
     if (local.dx > box.size.width * (1 - edge)) return 'right';

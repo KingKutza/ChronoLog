@@ -15,7 +15,6 @@
 
 import 'package:flutter/material.dart';
 
-import 'package:flutter/services.dart';
 
 import '../chrome/controls.dart';
 import '../core/coordinate_entry.dart';
@@ -110,25 +109,15 @@ class _CoordinateFieldState extends State<CoordinateField> {
     super.initState();
     _committed = _controller.text;
     _focus.addListener(_focusChanged);
-    // ESCAPE ENDS A MODE (butter navigation, ISSUES 9.2). The mode is the
-    // session's and it is global while it is armed, so the key that ends it is
-    // read globally rather than from whatever happens to hold focus -- a person
-    // who armed Pick and moved the pointer onto a lens has no focus in this
-    // field to press Escape into.
-    HardwareKeyboard.instance.addHandler(_escaped);
+    // ESCAPE ENDS A MODE (butter navigation, ISSUES 9.2), and the rung that
+    // does it lives in the ONE keyboard map -- `chrome/keyboard.dart`, on the
+    // `keys.escape` binding like every other chord. A handler per field
+    // instance made the order of disarm depend on which field was built last,
+    // and a literal key in it made one binding unrebindable.
   }
 
   /// The pick mode this field arms, where there is a session holding one.
   PointPick get _pick => ChromeScope.of(context).views.pick;
-
-  bool _escaped(KeyEvent event) {
-    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.escape) return false;
-    if (!mounted) return false;
-    final pick = _pick;
-    if (!pick.armed) return false;
-    pick.disarm();
-    return true;
-  }
 
   /// PICK IS A CLICK ON THE PICTURE (ISSUES 9.2, Don: "when I click Pick I
   /// should be able to click a point on an open lens or the minimap"). Arming
@@ -168,7 +157,6 @@ class _CoordinateFieldState extends State<CoordinateField> {
 
   @override
   void dispose() {
-    HardwareKeyboard.instance.removeHandler(_escaped);
     _focus.removeListener(_focusChanged);
     _focus.dispose();
     _controller.dispose();

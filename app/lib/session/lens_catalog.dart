@@ -102,13 +102,18 @@ final List<LensSpec> _shipped = [
     'Hour-by-hour continuous scroll — the closest view, a day or a week at a time.',
     isTimeSurface: true,
     spanUnit: 'day',
-    spanFormula: 'back + forward + 1',
+    spanFormula: 'span',
     scaleKey: 'hourPixels',
     controls: [
       ControlSpec('action', 'zoomOut', 'Zoom out', null, null, [], true),
       ControlSpec('action', 'zoomIn', 'Zoom in', null, null, [], true),
-      ControlSpec('number', 'back', 'Days behind', 'intimate.back', 'day'),
-      ControlSpec('number', 'forward', 'Days ahead', 'intimate.forward', 'day'),
+      // THE SPAN IS ONE NUMBER SAID ONCE (ruled 2026-09-02). Days behind and
+      // days ahead were two ways to say how many days are on screen, which the
+      // trinity forbids -- and their sum was a total nobody authored. The
+      // control REFERENCES `intimate.span`, which the painter's own defaults
+      // map ships: restating it here would be a second declaration, and
+      // `shipped.addAll` is last-wins, so the two would drift silently.
+      ControlSpec('number', 'span', 'Days on screen', 'intimate.span', 'day'),
       ControlSpec('number', 'grain', 'Grain', 'intimate.grain', 'minute'),
       // NO DAY-START / DAY-END PICKER (ruled 2026-08-31): "seems like a good
       // setting but I think it is a bad one." The day is an AUTHORED OBJECT --
@@ -243,8 +248,6 @@ const Map<String, String> sessionTunableDefaults = {
   // as a rounded 16.
   'perf.frameMillis': '1000 / 60',
   'perf.paintMillis': '250',
-  'intimate.back': '0',
-  'intimate.forward': '2',
   'intimate.grain': '15',
   'intimate.hourPixels': '42',
   'tactical.rows': '5',

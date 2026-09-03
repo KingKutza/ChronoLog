@@ -270,6 +270,19 @@ class _DocumentCardState extends State<DocumentCard> {
 
   @override
   Widget build(BuildContext context) {
+    // A CARD THAT READS LIVE STATE OWNS ITS LISTENING. This one reads the
+    // store's status, the document's calendars, the settings' paths AND the
+    // stage's presets, and it listened to none of them: a preset saved from
+    // this very card did not appear in this very card's own list until
+    // something else happened to rebuild it. `pulse` is the one thing the
+    // chrome already composes for exactly this.
+    return ListenableBuilder(
+      listenable: ChromeScope.of(context).pulse,
+      builder: (context, _) => _card(context),
+    );
+  }
+
+  Widget _card(BuildContext context) {
     final chrome = ChromeScope.of(context);
     final theme = ChronoTheme.of(context);
     final editor = chrome.editor;
@@ -575,13 +588,24 @@ class _DocumentCardState extends State<DocumentCard> {
             namedAction(
               context,
               'Save layout',
-              onTap: _preset.trim().isEmpty ? null : () => chrome.stage.savePreset(_preset.trim()),
+              // THE VIEW STATE RIDES WITH THE ARRANGEMENT. Named views and
+              // layout presets are one record kind, so a preset saved without
+              // the book is an arrangement with its projections silently
+              // dropped -- a person saves a board and gets back the boxes with
+              // nothing in them, and nothing says so.
+              onTap: _preset.trim().isEmpty
+                  ? null
+                  : () => chrome.stage.savePreset(_preset.trim(), views: chrome.views),
             ),
           ]),
         ),
         cardWrap(context, [
           for (final name in chrome.stage.presets.keys)
-            namedAction(context, name, onTap: () => chrome.stage.applyPreset(name)),
+            namedAction(
+              context,
+              name,
+              onTap: () => chrome.stage.applyPreset(name, views: chrome.views),
+            ),
         ]),
       ],
     );

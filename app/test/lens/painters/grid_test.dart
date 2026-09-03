@@ -211,7 +211,9 @@ void main() {
     final scene = sceneOf(
       randomWorld(specSeed, count: 40).document,
       const ['calendar:a'],
-      view: const {'back': 1, 'forward': 2},
+      // THE SPAN IS ONE NUMBER SAID ONCE (ruled 2026-09-02): the view key is
+      // `span`, and the pair of counts it replaced said the same number twice.
+      view: const {'span': 4},
     );
     final painter = IntimatePainter(scene);
     render(painter, surface);
@@ -241,7 +243,9 @@ void main() {
     final scene = sceneOf(
       world.document,
       const ['calendar:a'],
-      view: const {'back': 1, 'forward': 1, 'hourPixels': 8},
+      // THE SPAN IS ONE NUMBER SAID ONCE (ruled 2026-09-02): three columns,
+      // said once, where one behind and one ahead said it twice.
+      view: const {'span': 3, 'hourPixels': 8},
     );
     final painter = IntimatePainter(scene);
     render(painter, surface);

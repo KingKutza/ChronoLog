@@ -26,7 +26,7 @@ Gregorian hardcode that cannot survive an 8×8×8 calendar.
 guess cost one glance instead of a wrong record.
 
 **Answer:**
-
+awnser number A.
 ---
 
 **What the tests found, 9.3 — this question cannot be answered by shape.**

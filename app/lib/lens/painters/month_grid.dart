@@ -761,6 +761,25 @@ abstract class DayGridPainter extends LensPainter {
         fact: fact,
         identity: fact.identity,
       ));
+      // AND EVERY VISIBLE SEGMENT NAMES ITSELF (ISSUES 9.2, Don: "if I can't see
+      // the start I have no way to know what it is"). A ground taking no chip
+      // row must not thereby become an anonymous wash: the name goes on the
+      // ground, at ground weight, on every day it covers.
+      final title = '${fact.event.payload?['title'] ?? ''}';
+      if (title.isEmpty) continue;
+      final pad = scene.px('grid.pad');
+      _text(
+        canvas,
+        title,
+        Rect.fromLTWH(
+          cell.left + pad,
+          cell.bottom - scene.px('grid.labelSize') - pad,
+          cell.width - pad * 2,
+          scene.px('grid.labelSize'),
+        ),
+        scene.theme.ink.withValues(alpha: scene.px('zone.edge')),
+        'grid.labelSize',
+      );
     }
   }
 

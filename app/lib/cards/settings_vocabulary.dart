@@ -620,26 +620,8 @@ const Map<String, SettingSaid> settingVocabulary = {
     low: '0',
     high: '1',
   ),
-  'grid.washWeekend': SettingSaid(
-    'Wash over a weekend day',
-    'How strongly a weekend cell is tinted, from clear to solid.',
-    low: '0',
-    high: '1',
-  ),
-  'grid.weekendCount': SettingSaid(
-    'How many weekend days',
-    'How many of the weekend-day settings below the grid actually reads.',
-    low: '0',
-    high: '7',
-  ),
 
   // --- The Intimate lens ----------------------------------------------------
-  'intimate.back': SettingSaid(
-    'Columns kept behind',
-    'How many columns before the one you are looking at stay on screen.',
-    low: '0',
-    high: '10',
-  ),
   'intimate.bleedViewports': SettingSaid(
     'Windows painted past each edge',
     'How much surface is drawn beyond the window on every side, counted in '
@@ -673,12 +655,6 @@ const Map<String, SettingSaid> settingVocabulary = {
     'How wide a block with nothing beside it runs, in pixels.',
     low: '40',
     high: '400',
-  ),
-  'intimate.forward': SettingSaid(
-    'Columns kept ahead',
-    'How many columns past the one you are looking at stay on screen.',
-    low: '0',
-    high: '10',
   ),
   'intimate.grab': SettingSaid(
     'Width of the move strip',
@@ -1463,6 +1439,13 @@ const Map<String, SettingSaid> settingVocabulary = {
   // THE POINTER CHORDS (ISSUES 9.2, the keybindings page). Said in the same
   // words the keyboard chords are said in, because they belong on the same page
   // and answer the same question: what does this press mean?
+  'pick.readoutInset': SettingSaid(
+    'How far the pick readout sits from the pointer',
+    'While Pick is armed the pointer carries a readout of the coordinate under '
+        'it; this is how far that reading sits from the edge, in pixels.',
+    low: '0',
+    high: '60',
+  ),
   'perf.frameMillis': SettingSaid(
     'How long a frame may take',
     'What a surface already up must keep to for motion to read as butter, in '
@@ -1519,6 +1502,13 @@ const Map<String, SettingSaid> settingVocabulary = {
         'milliseconds.',
     low: '100',
     high: '800',
+  ),
+  'pointer.swapOnDrop': SettingSaid(
+    'Swap places on a drop',
+    'Which modifier, held while a window is dropped onto the handle of '
+        'another, makes the two TRADE PLACES instead of tabbing together. '
+        'Neither window changes size: swapping moves what is in the boxes, not '
+        'the boxes.',
   ),
   'pointer.dropInto': SettingSaid(
     'Drop inside a container',

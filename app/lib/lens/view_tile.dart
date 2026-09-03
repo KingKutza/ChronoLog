@@ -458,7 +458,11 @@ class _ViewTileState extends State<ViewTile>
     if (!pick.armed) return null;
     final theme = ChronoTheme.of(context);
     final here = pick.readout;
-    final inset = _px('pointer.refusalPad');
+    // THE READOUT'S OWN INSET (ISSUES 9.2). It borrowed `pointer.refusalPad`,
+    // which is how far a REFUSAL sits from an edge; two things that happen to
+    // want the same number are still two things, and moving one moved the other
+    // for no reason anybody could state.
+    final inset = _px('pick.readoutInset');
     return Positioned(
       left: inset,
       top: inset,

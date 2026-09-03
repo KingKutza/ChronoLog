@@ -46,6 +46,13 @@ import 'view_bar.dart';
 Settings chronologSettings() => Settings(
   defaults: const [
     lensTunableDefaults,
+    // THE LENS SETTINGS WHOSE VALUE IS AN EQUATION, in the same composition as
+    // the ones whose value is a number (ISSUES 9.3). A formula setting is a
+    // setting: `minimap.busy` is re-authored in `chronolog.settings` like every
+    // other key, and `expressionOf` is how a reader that wants the equation
+    // rather than a number asks. Left out, the key was in no map at all and the
+    // question came back empty.
+    lensFormulaDefaults,
     sessionTunableDefaults,
     stageTunableDefaults,
     chromeTunableDefaults,
