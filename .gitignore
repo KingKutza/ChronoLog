@@ -3,6 +3,10 @@
 *.chronolog
 *.journal
 .chronolog-*
+# The session the app writes beside itself -- layout, settings, view, and any
+# theme a person authored. Generated, and it carries local paths.
+chronolog.*
+themes/
 
 # Free space — anything under local/ never enters the repo
 local/
