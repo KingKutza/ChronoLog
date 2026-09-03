@@ -1,9 +1,0 @@
-{
-  "description": "A finite, explicitly observed calendar series used by the Frames editor.",
-  "frame": "measure:earth-days",
-  "boundaries": [
-    { "id": "new-moon-1", "label": "New moon 1", "at": "0" },
-    { "id": "new-moon-2", "label": "New moon 2", "at": "29.31" },
-    { "id": "new-moon-3", "label": "New moon 3", "at": "58.92" }
-  ]
-}

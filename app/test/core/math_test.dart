@@ -10,10 +10,7 @@
 //
 // What this covers: the one math (`lib/core/math.dart`), display weight and
 // the blessed composition chain (`lib/core/weight.dart`), and falloff
-// (`lib/core/falloff.dart`). The rulings of the JS suites it replaces --
-// formula.test.js, formula-limits.test.js, formula-expression.test.js,
-// weight-formula.test.js, todo-falloff.test.js -- are re-expressed here as
-// properties rather than ported as cases.
+// (`lib/core/falloff.dart`), each as properties rather than pinned cases.
 
 import 'dart:math';
 
@@ -181,7 +178,7 @@ void main() {
       }
     });
 
-    test('unary minus binds tighter than ^, as the JS parser did', () {
+    test('unary minus binds tighter than ^', () {
       final r = Random(specSeed + 4);
       for (var i = 0; i < iterations; i++) {
         final a = 1 + r.nextInt(9);

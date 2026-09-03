@@ -34,10 +34,8 @@
 // without destroying the series' identity, and without there being only one way
 // to author the same outcome.
 //
-// WHERE A JAVASCRIPT BEAT ASSERTED THROUGH THE OLD ENGINE'S SHAPES it is
-// re-expressed against the Dart API without weakening the claim, and where one
-// pinned behaviour a ruling has since killed it is adapted and marked `// RULED:`
-// with the ruling named.
+// Every beat asserts through the Dart API. Where a ruling has killed a pinned
+// behaviour, the beat is adapted and marked `// RULED:` with the ruling named.
 
 import 'package:chronolog/core/coordinate_law.dart';
 import 'package:chronolog/core/document.dart';
@@ -97,11 +95,11 @@ Json thursdayRule() => {
 /// John's Monday 6:15-6:30 standing meeting, indefinite (no COUNT, no UNTIL),
 /// plus a separate frame the meeting will be told to skip.
 ///
-/// Built by hand rather than through a real ICS import: `src/ics.js` is not
-/// ported, so the fields the importer would give each record are STATED here
-/// instead of read out of an importer this build does not have -- the ICS the
-/// JavaScript fed itself was `DTSTART:20260105T061500Z`, `RRULE:FREQ=WEEKLY`,
-/// `DURATION:PT15M`, `SUMMARY:Monday check-in`, and those are the values below.
+/// Built by hand rather than through an ICS import: this is the series stack's
+/// acceptance, not the ICS boundary's, so the fields a record carries are
+/// STATED here directly rather than produced by any importer -- the meeting is
+/// `DTSTART:20260105T061500Z`, `RRULE:FREQ=WEEKLY`, `DURATION:PT15M`,
+/// `SUMMARY:Monday check-in`, spelled out below.
 class World {
   World() {
     _document = createEmptyWorkspaceDocument(now: DateTime.utc(2026))

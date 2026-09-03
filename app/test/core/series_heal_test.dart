@@ -52,9 +52,10 @@ typedef Slot = ({String key, Json coordinate, Rational day});
 
 /// A weekly standing series, its template, and the generator that projects it.
 ///
-/// Built by hand rather than imported from ICS: `src/ics.js` is not ported, so
-/// the fields a materialized occurrence carries are stated here instead of read
-/// out of an importer this build does not have. Stated, not implied.
+/// Built by hand rather than imported from ICS: the properties above drive
+/// random slot, title and duration spellings directly, so the fields a
+/// materialized occurrence carries are stated here rather than produced by any
+/// one import path. Stated, not implied.
 class Series {
   Series({bool withGroup = false, String title = 'Standing meeting', String duration = '3600'}) {
     final world = World();
@@ -184,10 +185,9 @@ class Series {
 
   SeriesHeal get heal => healFor(document);
 
-  /// What the JavaScript's `prepareMaterialization` builds: a clone of the
-  /// projected occurrence with fresh ids, "generated" stripped, explicit
-  /// provenance, the template's group attachments copied, and a suppressing
-  /// override pointing at it.
+  /// A clone of the projected occurrence with fresh ids, "generated" stripped,
+  /// explicit provenance, the template's group attachments copied, and a
+  /// suppressing override pointing at it.
   ({String event, String relation, String override, List<String> groups}) materialize(
     Slot slot, {
     Json? coordinate,

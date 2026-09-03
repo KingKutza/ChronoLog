@@ -1,8 +1,8 @@
 // The quick-capture grammar: text in, a parsed line and an exact day out.
 //
-// PURE DART. Nothing here reaches a document, an editor or a host API, which is
-// what lets the differential harness (`tool/capture_diff_check.dart`) replay it
-// against the shipped `src/ui/todo-capture.js` on the Dart VM.
+// PURE DART. Nothing here reaches a document, an editor or a host API, so the
+// parse is a plain function of the typed text -- testable on its own and safe
+// to call from any surface that takes a capture line.
 //
 // The grammar is order-free and first-token-wins, and it is PROVISIONAL pending
 // the owner's delimiter vocabulary. `#group` names a group frame, `@date` names

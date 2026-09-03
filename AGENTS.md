@@ -49,7 +49,7 @@ capabilities go through `dart:ffi` (`host/`).
   ONE reader for a group display property (`authoredHandling`) that zone fill,
   sigil and falloff half-distance all go through. See "Frames are groups".
 - `indexes.dart`, `staples.dart`, `frame_projection.dart` — the index layer, the
-  staple substrate (a staple is a two-ended connection; nothing else may
+  staple substrate (a staple says n points are one point; nothing else may
   hand-read one), and the ruling that cross-frame projection exists only through
   staples. See "Staples".
 - `weight.dart`, `falloff.dart`, `strategic_density.dart` — `composeWeight` in
@@ -211,156 +211,27 @@ capabilities go through `dart:ffi` (`host/`).
 
 #### `app/tool/` and `app/test/`
 
-`tool/` holds the differential harnesses that prove the Dart against the
-JavaScript it was ported from (see its README) — load-bearing with no callers.
-`test/` is the spec: generative properties at `specSeed = 20260827`, widget tests
-over in-memory fakes (`test/store/harness.dart`), never real file I/O inside
-`testWidgets`.
+`tool/` holds `screenshot.ps1`, which captures the running window to a PNG.
+Nothing under `lib/` imports anything there and nothing there ships in a build.
+`test/` is the spec: generative properties at `specSeed = 20260827` over the
+seeded record graphs in `test/core/corpus.dart`, documents authored through the
+builders in `test/helpers/` (`Scene` for a lens or projection spec, `World` for
+cross-law staples and era chains — both seeded from
+`createEmptyWorkspaceDocument`, so a test and a first run start from identical
+bytes), and widget tests over in-memory fakes (`test/store/harness.dart`), never
+real file I/O inside `testWidgets`.
 
-### `src/` — the JavaScript reference build (retiring)
+`core/` and `store/` were proven against the reference build at the 2026-08-27
+boundary; the 2026-08-31 record melt then moved the model past what that build
+expressed, and the polar geometry that comparison still covered is carried by
+affirmative properties in `test/lens/radial_geometry_test.dart`.
 
-The web renderer was ruled dead 2026-08-27 ("exit two"). `src/`, `tools/`,
-`test/` remain only as the differential oracle for
-`app/tool/` and as the reference for WHAT the old surface displayed — never for
-how. They are deleted when the harnesses no longer need them. The map below
-describes them as they stand.
-
-- `coordinate-law.js` — the single coordinate-arithmetic engine: the transition
-  registry, the registered CLDR calendar families, and the `CoordinateLaw` that
-  answers every unit question from a frame's own declaration. See the
-  "Coordinate law" contract.
-- `eras.js` — the era table: ordered named eras with per-era numbering direction,
-  converting an era-qualified year to the proper year the year ladder counts in,
-  and refusing a table it cannot resolve. Pure and document-free.
-- `calendar-structure.js` — the authoring side of that declaration: the regular
-  fixed-hierarchy builder, the editable level/cycle/era rows, and the one parser
-  and one count check for every authored name list.
-- `coordinate-entry.js` — the variable-precision coordinate field's substrate:
-  one text entry parsed and formatted at whatever depth the author typed, plus
-  the zoomable picker's rung ladder. Every level name, order, radix and value
-  name comes from the governing frame's law, so a custom calendar's field parses
-  in its own units. Entry depth is **precision, never uncertainty** — fuzziness
-  is authored separately, on the staple.
-- `app.js` — the bootstrap: constructs the document/session/store/history,
-  wires every `src/ui/` module onto the shared `app` object, and kicks the
-  first render.
-- `ui/` — the UI modules `app.js` wires together, each receiving `app`
-  explicitly and reading its current fields at call time:
-  - `inspector.js` — the Inspector panel: open/close chrome, the
-    provisional-draft lifecycle, the event/object-kind form, and
-    generated-fact materialization.
-  - `frames-panel.js` — the Frames workspace: frame/group/pattern authoring
-    forms and the Frames/pattern browsers that share an "object browser"
-    shell.
-  - `toolbar.js` — the lens bar, document menu, history controls, create
-    menu, theme editor, and lens-workspace configuration dialog.
-  - `drag.js` — pointer/wheel/drag mapping onto the lens surfaces: pan/zoom,
-    drag-to-move, drag-to-create, Intimate rail rebasing, minimap scrubbing.
-  - `calendar-sync-panel.js` — the ICS feed UI: file import/export, staple
-    suggestions, and the read-only HTTPS calendar-feed subscription panel.
-  - `dock.js` — the dock: the handle rail, the transform-only card pager, the
-    width drag and the side swap. It holds no rules of its own — it measures,
-    asks `src/dock-layout.js`, and applies the answer — because it is the part
-    that cannot run outside a browser.
-  - `roster.js` — the ToDo and Notes dock cards: every object of one kind plus a
-    "new" affordance that anchors to now, and the state toggle
-    (`toggleStateAffiliation`) that writes a state-frame membership plus the
-    terminal end staple. The todo lifecycle model is ROADMAP #2 and ruled —
-    see "ToDo state and containment" below.
-  - `workspace.js` — the render loop and minimap wiring.
-  - `transactions.js` — document-mutation-with-undo helpers shared by the
-    inspector and Frames panel.
-  - `dom-helpers.js` — `byId`/`escapeHTML`, the two DOM utilities shared
-    across the `ui/` modules.
-- `model.js` — the `chronolog/1` document shape, validation, and mutation
-  helpers.
-- `engine.js` — queries over the document (facts, occurrences, indices).
-- `store.js` — the autosave/revision client: talks to the server's document
-  API, tracks dirty/saving/conflict state.
-- `session.js` — `LENS_CATALOG`, lens defaults, and other view-only state
-  (`ViewSession`).
-- `projections.js` — rendering for every lens; the shared sigil/mark
-  application lives here.
-- `lines.js`, `radial.js`, `minimap.js`, `strategic-density.js` — per-lens
-  math (topology layout, spiral/concentric geometry, minimap magnitude,
-  density budgeting). `minimap.js` owns the whole dot-field contract —
-  magnitude, the coarse scale ladder that keeps busy/free contrast readable at
-  every document density, field geometry, and per-lens label granularity — so
-  `renderMinimap` only draws what it decides.
-- `intimate-pan.js` — the Intimate rail's free two-axis pan arithmetic.
-  Horizontal motion spends the rail's own scroll slack first and becomes
-  whole-day window steps once it is pinned, which is the only thing that works
-  on a window wide enough that `1fr` day columns leave no horizontal overflow
-  at all.
-- `calendar-structure.js`, `calendar-projection.js`, `event-cycle.js` — the
-  frame model: fixed nested-calendar authoring/validation, read-only
-  projection helpers for that schema, and event-defined (observed-boundary)
-  cycle resolution.
-- `dock-layout.js` — the dock's DOM-free logic: width clamping and snap points,
-  the pager's retarget-don't-queue state machine, and the append-only card order
-  that only a user drag reorders.
-- `panel-flip.js` — where a dropdown panel goes so it stays inside the window.
-  Panels are placed from measurement; pinning one to an edge in CSS is what sent
-  the lens Options panel off-screen once the context bar became the left third.
-- `recurrence-end.js` — how an RRULE stops: COUNT/UNTIL mode detection, their
-  mutual exclusion, and the UNTIL values for "ends on this date" (inclusive of
-  the whole day) and "stop repeating here" (inclusive of that occurrence).
-- `staples.js` — the staple substrate: a staple is a two-ended **connection**,
-  and this holds the open `STAPLE_KINDS` registry, the end accessors every other
-  module reads structure through, and every derivation over the connections a
-  thing participates in (anchoring and derived magnitudes, event-to-event chains,
-  frame-to-frame correspondence, series rule segments, per-staple fuzziness,
-  occurrence phase, live exclusion references). DOM-free and pure over
-  `{document, engine}`, so the whole substrate is a testable contract. Nothing
-  else may hand-read a staple's fields. See "Staples" below.
-- `weight-formula.js` — a frame's display-weight handling as a formula over the
-  incoming weight `w`, plus the canonical order contributing frames apply in.
-  See "Display weight" below.
-- `object-kinds.js` — trait bundles for Event/ToDo/Note-shaped objects.
-- `visual-language.js` — the sigil vocabulary, theme fields, and the 4-step
-  color cascade; contains no DOM code so it is testable as a pure contract.
-- `ics.js` — ICS parsing and serialization.
-- `calendar-sync.js` — reconciles an imported ICS source's frame/events into
-  the document across repeated pulls (stable keys, source-owned records,
-  reference rewrites).
-- `exact.js` — exact rational/BigInt math; no `Date` arithmetic in domain
-  code.
-- `formula.js` — a thin barrel re-exporting the sandboxed
-  `chronolog-formula/1` pattern language (no `eval`/`Function`, no ambient
-  host access) from `formula/`: `tokenizer.js` (lexer), `parser.js` (AST),
-  `runtime.js` (sandboxed evaluator + builtins). Preserves the historical
-  import path for callers (`src/engine.js`, tests).
-- `frame-edit.js` — frame-kind trait rules and authoring-capability flags
-  used by the Frames editor.
-
-### `tools/`
-
-- `serve.js` — the local, localhost-only (`127.0.0.1`) HTTP server: static
-  assets plus the ETag-CAS document API (`GET`/`PUT` with
-  `If-Match`/`If-None-Match`, `409` on stale writes) and the calendar-feed
-  API surface.
-- `calendar-feed-service.js` — the HTTPS ICS subscription adapter: fetch
-  with redirect/size limits, DNS pinning, and blocked private/reserved
-  targets; owner-only connection-secrets file.
-- `build-portable.js` — builds the self-contained Linux/Windows bundles
-  (embedded runtime + app tree + launcher script).
-- `test.js` — the test runner (imports every `test/*.test.js`).
-- `check.js` — recursively syntax-checks every `.js` file under `bin/`,
-  `src/`, `tools/`, `fixtures/`, and `test/` with `node --check`.
-
-### Other entry points
-
-- `bin/chronolog.js` — the CLI launcher: argument parsing, data-directory
-  resolution (`--data-dir` / `CHRONOLOG_DATA_DIR`, defaulting to the app's
-  own directory), spawns `tools/serve.js`, opens the browser, writes
-  `logs/launch.log`.
-
-### `test/` and `fixtures/`
+### `fixtures/`
 
 Fixtures are acceptance anchors, not scratch data:
 
 - `time-travel-taxonomy.chronolog.json` is the structural counterpart to
-  `GUI_Mockup/bak.png` — a deliberately small graph that makes
+  `local/GUI_Mockup/bak.png` — a deliberately small graph that makes
   the model's unusual claims executable rather than tracing every film in
   the image. It asserts: a fork is a terminator stapled to an interior point
   of another line (lines never branch internally); one event can attach
@@ -380,14 +251,19 @@ Fixtures are acceptance anchors, not scratch data:
   acceptance fixture: an 8×8×8 named non-Gregorian hierarchy and a
   discontinuous, forward mapping of five Earth hours to nine Skyland days,
   using authored Skyland units rather than terrestrial weekday assumptions.
-- `frames-panel-scale.json` and its generator exercise Frames-panel scale
-  behavior.
-- `test/helpers/sample-document.js` is the standard test document. Tests
-  must never depend on personal or local data (`src/celestial.js` and any
-  personal `*.ics` file are untracked and machine-specific; the sample
-  document exists so the suite never needs them).
+- `irregular-event-cycle.json` is the observed-boundary acceptance fixture: a
+  lunar-like series whose every gap is a different exact observation, so no mean
+  synodic month can stand in for any one of them and an authored interval cannot
+  be mistaken for a computed one.
 
-GUI_Mockup images are live design references — never delete them.
+`app/test/core/fixtures_test.dart` reads the first two and
+`app/test/core/event_cycle_test.dart` the third. Nothing else in the suite reads
+a fixture: tests must never depend on
+personal or local data, so a spec authors its own document through the
+`app/test/helpers/` builders or the seeded graphs in `app/test/core/corpus.dart`,
+and an untracked machine-specific file is never something the suite needs.
+
+The design references in `local/GUI_Mockup/` (untracked, not in the repo) are live — never delete them.
 
 ## Engineering contracts
 
@@ -397,54 +273,64 @@ Journal + snapshot. `chronolog.chronolog` is a snapshot loaded at boot;
 `chronolog.journal` is JSONL, one line per committed edit:
 `{seq, ts, label, ops:[{op:"put"|"del", map, id, value?}]}`. Ops are
 record-level and idempotent across all seven maps (`meta`/`foreign` keyed
-by top-level property), so the server applies and compacts them with zero
-domain knowledge. `src/ops.js` holds the one shared `applyOps` — client
-rebase and server replay must never diverge. The server
-(`tools/journal.js`, wired in `tools/serve.js`) keeps the materialized
-document in memory with a lazily invalidated response buffer;
-`.chronolog-journal-state.json` carries `currentSeq` across compaction,
-and a truncated final journal line is discarded with a warning, never
-fatal.
+by top-level property), so a journal folds into a snapshot with zero domain
+knowledge. `applyOps` in `app/lib/core/ops.dart` is THE one, and it is also the
+gate: `journal.dart` replays an entry through it before the
+entry reaches the file, so an op this build cannot replay is refused rather than
+persisted as a poison line.
 
-API: `GET /api/document` returns the materialized document.
-`POST /api/journal` `{baseSeq, entries}` appends and returns `{seq}`; a
-stale `baseSeq` gets `409 {currentSeq, missed, truncated}` — the client
-rebases missed ops (record-level last-writer-wins) and reposts.
-`GET /api/journal?since=N` serves the tail. `PUT /api/snapshot` is the
-deliberate whole-document upload (first run, opening a different file) —
-seq advances so lagging windows reload. `GET/PUT /api/settings` carries
-`snapshotPeriodMinutes` (default 10) from `.chronolog-settings.json`.
-Compaction (apply journal, atomic snapshot rewrite, truncate) runs at
-boot, on the periodic timer, and on shutdown — SIGINT/SIGTERM on POSIX,
-stdin-close on Windows, where signals cannot be delivered.
+**Saves are updates, not overwrites.** Ordinary editing never rewrites the
+document, it appends the ops that changed it. The whole document is written on
+exactly three occasions — establishing a file that does not exist yet,
+compaction, and the owner deliberately replacing the document, which is also how
+a move to a chosen location writes its first snapshot — and none of them is
+autosave. Compaction folds the journal back into the snapshot and empties it;
+`.chronolog-journal-state.json` carries the sequence number across it. Both
+sources are authoritative in different crash windows — the sidecar survives a
+truncated journal and the journal survives a lost sidecar — so a torn final line
+is discarded into the load's report, never fatal.
+
+**Single writer.** One master isolate owns the document and the journal, so
+there is no sequence CAS, no conflict type, no rebase loop and no multi-window
+merge. `SaveState` is five states (`loading`, `clean`, `dirty`, `saving`,
+`error`) and the words a person reads are the chrome's to write.
+
+`document_store.dart` is the autosave flow: a 350 ms debounce batches a burst of
+edits into one write, one entry per commit, so the journal keeps every edit's own
+label. Three behaviours there are load-bearing. Refcounted deferral — N open
+drafts hold autosave off exactly N times, and the count cannot be driven below
+zero, so a `finally` that runs twice is harmless and one that runs once can never
+leave autosave stuck off. In-flight coalescing that carries force forward — if
+any caller piled up behind one in-flight save asked for a forced save, the
+follow-up carries that force rather than quietly downgrading it. And a failed
+write hands the ops back, so a failure costs a retry and never an edit.
+
+**A load reports.** Migrations are dead by ruling: nothing on the load path
+rewrites the file to suit this build. Loading is snapshot plus replay, and
+`validateDocument`'s findings, the refusals a replay met and a torn tail all come
+back as reports the owner is shown — what a load owes the owner is the findings,
+not a document that declines to open.
 
 Referential cascades are the edit's job, not the loader's. An override names the
-occurrence it acts on by a virtual id (`${patternId}/${encodedKey}`), so an
-override belongs to its pattern the way a relation belongs to an event: deleting
-a pattern must delete its overrides in the same undoable transaction. That
-invariant lives in the bundle helpers (`src/ui/transactions.js` —
-`executePatternChange` plus the event/event-set/frame bundles) and in the sync
-reconciler, so undo restores pattern and overrides together and the journal
-carries every removal. `removeOverridesForPatterns` and `overridePatternId` in
-`src/model.js` are the single derivation every consumer shares.
+occurrence it acts on by a virtual id (`patternId/encodedKey`), so an override
+belongs to its pattern the way a relation belongs to an event: deleting a pattern
+must delete its overrides in the same undoable transaction. `overridePatternId`
+in `app/lib/core/document.dart` is the single derivation every consumer shares.
 
-Because validation runs only at load, a document journaled into an invalid state
-fails long after the edit that caused it — and one bad pointer rejects the whole
-file. So `compactDocument` repairs what it can before validation, counting each
-repair into an optional caller-supplied report that `parseDocument` threads
-through (never a field on the document, which would end up serialized). The
-recoveries are siblings: legacy recurrence constraints, dangling override
-replacements, and overrides orphaned from a deleted pattern. `validateDocument`
-itself stays strict; repair belongs to the parse path alone.
-
-Client: edits are captured as ops at the `src/ui/transactions.js` helpers
-and the converted direct-delta sites; the store batches ops on the 350 ms
-debounce into one journal post. Undo/redo post inverse ops. The File
-System Access path (local file handle) still writes whole documents.
-There is no recovery copy and no download/reload conflict flow — recovery
-is journal replay, conflicts are per-op sequence collisions.
-`calendar-sync.js`'s reconciler assigns or deletes whole records, never
-mutates in place — the sync diff relies on that invariant.
+**One reference graph, asked in one direction.** `app/lib/edit/reach.dart` asks
+it — which records name this id (`namedBy`) — and that is the only place the
+graph is declared for edits, so no caller writes a sweep of its own.
+`unsupported` collects the records that are pure pointer and say nothing once
+what they name is gone (`relations`, `overrides`, `patterns`); events and frames
+are CONTENT and are never removed by a cascade, because deleting a magnitude
+frame must not delete the objects measured in it. `dangling` refuses outright an
+edit that would leave a reference pointing at nothing. `settle` in
+`app/lib/edit/cascades.dart` runs both plus the series convergence heal on every
+transaction, so an edit and everything that could not survive it are one
+document, one undo entry and one journal entry. Undo needs no captured bundle at
+all: an immutable document's identity diff reports the forward ops and the same
+diff read backwards reports the inverse, which is why undo and redo are FORWARD
+entries — a journal is a history and history does not rewind.
 
 ### Frame model
 
@@ -475,14 +361,14 @@ computed.
 ### Coordinate law
 
 A frame's `coordinate` declaration is the **executed law**, not documentation of
-one. `src/coordinate-law.js` is the single coordinate-arithmetic engine: every
-unit relationship in the program — how many hours are in a day, how long a month
-is, what a duration magnitude is worth, how a nested coordinate becomes a day
-ordinal — is computed from the governing frame's own declared ladder. Nothing
-else may carry a unit relationship as a literal. Setting hours-per-day to 23 on a
-frame changes engine occurrence math, projection layout, minimap strides,
-duration magnitudes, drag snapping, and the editor's own fields, because all of
-them ask the same object.
+one. `app/lib/core/coordinate_law.dart` is the single coordinate-arithmetic
+engine: every unit relationship in the program — how many hours are in a day,
+how long a month is, what a duration magnitude is worth, how a nested coordinate
+becomes a day ordinal — is computed from the governing frame's own declared
+ladder. Nothing else may carry a unit relationship as a literal. Setting
+hours-per-day to 23 on a frame changes engine occurrence math, projection
+layout, minimap strides, duration magnitudes, drag snapping, and the editor's
+own fields, because all of them ask the same object.
 
 A declaration is a list of **levels** plus optional **cycles**:
 
@@ -491,7 +377,7 @@ coordinate: {
   kind: "gregorian" | "nested",
   levels: [ { name, within?, radix? | transition?, names? } ],
   cycles: [ { name, radix, offset?, names? } ],
-  fixed?: { ... }          // src/calendar-structure.js's regular-hierarchy builder
+  fixed?: { ... }          // calendar_structure.dart's regular-hierarchy builder
 }
 ```
 
@@ -501,7 +387,9 @@ early is a partial coordinate — the author said `1973` and nothing finer.
 returns every level filled in, at which point the result is indistinguishable
 from an authored January 1st midnight: the depth was supplied by the law, not by
 the author. So depth is never inferred back out of a resolved instant. It is read
-from the **source** coordinate — `coordinateEntryDepth` — and travels on the fact
+from the **source** coordinate — `authoredDepth` in
+`app/lib/core/coordinate_entry.dart`, injected into the engine as `precisionOf`
+so a projection asks without importing the entry layer — and travels on the fact
 as `precision`, so display can honour what was actually said. Precision is
 **never** fuzziness: entry depth says how finely the author spoke, a spread says
 how uncertain they were, and only the second is a claim about the world.
@@ -566,7 +454,8 @@ era's span were corrected, because the label is derived and the number is not.
 **Direction:** an era may number its years DESCENDING — higher number is older —
 and no single continuous axis can hold both conventions at once, since 2500 BCE
 is older than 44 BCE while 44 CE is newer than 1 CE. Descending numbering is
-first-class in `src/eras.js`, not a rendering trick over negative numbers.
+first-class in `app/lib/core/eras.dart`, not a rendering trick over negative
+numbers.
 
 An era table is **opt-in per frame declaration**. A declaration without `eras`
 behaves exactly as before — the plain proleptic year axis remains the default.
@@ -660,10 +549,10 @@ seven Gregorian ones invents a fact. `hasMonths()` / `hasWeekdays()` ask
 directly; a surface that draws a month grid must handle null by not drawing one.
 
 **A broken frame must not blank the stage, and must not take down a query
-either.** `displayLaw` already catches for that reason; `coordinateDaysOrNull` is
-the query path's counterpart, returning null so a caller skips the record and
-collects the reason instead of aborting. `coordinateLawError` (per frame) and
-`coordinateValueError` (per coordinate) are how validation asks — the
+either.** `CoordinateLaws.display` falls back to the registered standard for that
+reason; `daysOrNull` is the query path's counterpart, returning null so a caller
+skips the record and collects the reason instead of aborting. `lawError` (per
+frame) and `valueError` (per coordinate) are how validation asks — the
 refuse-before-store discipline extends to `validateDocument`, because a document
 whose coordinates only fail at query time is not a valid document.
 
@@ -678,7 +567,7 @@ Three claims, separate, and none implying another:
 | --- | --- | --- |
 | units are comparable in LENGTH | `law.sharesStandardAtom()` | a Tamrielic hour and an Earth hour are both hours |
 | the frame has a now at all | `law.mapsToClock()` | a Now line may be drawn |
-| positions CORRESPOND | a staple path (`src/frame-projection.js`) | one frame may be drawn on the other's axis |
+| positions CORRESPOND | a staple path (`app/lib/core/frame_projection.dart`) | one frame may be drawn on the other's axis |
 
 An authored `origin` is **chain-internal**: it anchors a calendar's own eras
 relative to each other so the chain resolves exact internal ordinals, and it
@@ -689,7 +578,7 @@ ordinals; dropping Tamriel's Third Era beside 1970 because both count from an
 internal zero is a correspondence nobody authored, which is the class of error
 this program refuses everywhere else.
 
-`framesProject(document, from, onto)` answers it: same frame, same coordinate
+`FrameProjection.framesProject(from, onto)` answers it: same frame, same coordinate
 space (every era frame of one calendar), or a chain of frame-to-frame staples.
 `projectableFrames` returns the drawable set plus the refusals, and a refusal is
 reported rather than dropped — a frame that renders nothing because nothing
@@ -712,43 +601,53 @@ now-mapping.
 `registerTransition`; a transition belongs to a **calendar family**, which is
 also a CLDR calendar scale, and a family owns the closed-form conversion for the
 whole-unit part of its ladder. `daysFromCivil`/`civilFromDays`/`daysInMonth`/
-`isLeapYear` in `src/exact.js` are the registered Gregorian family's whole-day
-kernel. **Coordinate conversion reaches them only through the family** — never as
-a bypass. The remaining direct importers are the places that still walk Gregorian
-month/year *boundaries* rather than convert coordinates (the minimap's label
-strides, Radial's month windows, the toolbar's date fields) plus RFC 5545's own
-recurrence machinery in the engine; each carries a comment saying so, and the
-first group is what ROADMAP #6's positional-conversion stage removes. Gregorian
-is the first entry, not a privileged branch: adding
-Hebrew, Islamic, Indian or any other CLDR calendar is one
-`registerCalendarFamily` call plus its transitions, and nothing else in the
-program changes.
+`isLeapYear` in `app/lib/core/exact.dart` are the registered Gregorian family's
+whole-day kernel. **Coordinate conversion reaches them only through the family**
+— never as a bypass. The remaining direct importers are the places that still
+walk Gregorian month/year *boundaries* rather than convert coordinates (the
+minimap's label strides in `app/lib/lens/minimap/labels.dart` and Radial's month
+windows in `app/lib/lens/radial/cycles.dart`) plus RFC 5545's own recurrence
+machinery in `app/lib/core/rrule.dart`; each carries a comment saying so, and
+the first group is what ROADMAP #6's positional-conversion stage removes.
+Gregorian is the first entry, not a privileged branch: adding Hebrew, Islamic,
+Indian or any other CLDR calendar is one `registerCalendarFamily` call plus its
+transitions, and nothing else in the program changes.
 
 **An unresolvable declaration is an error surfaced to the author.** A transition
 string nothing implements, a radix that is not a positive whole number, a level
 nesting inside a level that does not exist, a ladder no family can execute — each
-throws with the frame and the offending name in the message. `coordinateLawError`
-is how a surface asks; `app.js` reports it on reconcile and the frame editor shows
-it in place. A law that quietly means something other than what is written is
-unauditable, and silence is what let a dead ladder look alive.
+throws with the frame and the offending name in the message. `lawError`
+is how a surface asks, and `app/lib/cards/law_editor.dart` shows a refused
+declaration in place rather than letting it fail silently at render time. A law
+that quietly means something other than what is written is unauditable, and
+silence is what let a dead ladder look alive.
 
 **How a call site asks for arithmetic.**
 
-- `coordinateLaw(document, frameId)` — the law governing that frame, memoized per
-  document. Resolution follows `coordinateDefinition`, then the `gregorian`
+`CoordinateLaws` in `app/lib/core/coordinate_law.dart` is the seam every call
+site goes through.
+
+- `CoordinateLaws.of(document, frameId)` — the law governing that frame, memoized
+  per document. Resolution follows `coordinateDefinition`, then the `gregorian`
   kind/trait, then `basis`: a calendar whose basis is Wall Time inherits Wall
   Time's law, including a radix edited there, without restating the ladder.
-- `displayLaw(document, session)` — the **primary** frame's law (see the frame
-  model: the explicit primary marker owns axis, labels, and coordinate law).
-  `session.law` carries it, assigned on every reconcile; a render pass reads that
-  rather than re-deriving per helper.
+- `CoordinateLaws.display(document, frameId)` — the **primary** frame's law (see
+  the frame model: the explicit primary marker owns axis, labels, and coordinate
+  law). `LawContext` in `app/lib/lens/law_context.dart` holds it as a value for
+  one paint and every lens helper reads it from there rather than re-deriving
+  per helper.
 - `law.unitDays(name)` for an exact unit length, `null` when it varies;
-  `law.meanUnitDays(name)` for the exact mean, defined for every level;
-  `law.unitsPerDay(name)` for "how many minutes in a day". The named
-  conveniences — `hoursPerDay`, `minutesPerDay`, `secondsPerDay`,
-  `minutesPerHour`, `secondsPerMinute`, `daysPerWeek`, `meanMonthDays` — resolve
-  through the declaration and fall back to the registered standard only for a
-  level this calendar never authored.
+  `law.meanUnitDays(name)` for the exact mean, defined for every level; and ONE
+  ratio accessor, `law.unitsPer(name, [per])`, for "how many minutes in a day"
+  or in an hour. There are no named per-unit wrappers: one uniform policy
+  resolves through the declaration and falls back to the registered standard
+  table only for a level this calendar never authored, and it differs from a
+  wrapper in exactly the place that matters — a law whose base unit has no
+  constant length answers with that unit's exact mean, where a retired
+  `daysPerWeek` substituted the atom and reported seconds per week as days per
+  week. `law.meanMonthDays()` is the one that stays named, because a month is
+  the level that has no constant length to ask for. A lens reads these once per
+  paint through `LawContext`, never per helper.
 - `law.magnitudeDays(magnitude)` / `durationMagnitudeDays(magnitude, governing)`
   for a duration's worth in days. `governing` is a document (the magnitude's own
   `frame` names the law) or a law. **A call site that has the document passes
@@ -760,17 +659,20 @@ unauditable, and silence is what let a dead ladder look alive.
 
 Everything is exact (`Rational`, BigInt). Pixels and layout may be floats; unit
 law may not. A memoized law is dropped when its declaration changes — by object
-identity on every lookup, and by the explicit `invalidateCoordinateLaws` the edit
-path calls, because identity alone misses an in-place mutation and the explicit
+identity on every lookup, and by the explicit `CoordinateLaws.invalidate` the
+edit path calls on every committed change, because identity alone misses an
+in-place mutation and the explicit
 call alone misses an undo that swaps whole records. Both together are what make
 an applied ladder edit live on the next render.
 
-**Boundaries that deliberately stay civil.** Three things speak the outside
+**Boundaries that deliberately stay civil.** Two things speak the outside
 world's standard civil Gregorian and convert once, at the edge:
-`nowDays`'s host `Date` read; RFC 5545's own wire units and RRULE evaluation; and
-`setCivilFocus`'s "go to this calendar date" entry. Each carries a comment saying
-so. `civilCoordinateToDays`/`daysToCivilCoordinate` are the named aliases for the
-registered-standard conversion, and the name is the assertion.
+`nowDays`'s host clock read and RFC 5545's own wire units and RRULE evaluation.
+Each carries a comment saying so.
+`civilCoordinateToDays`/`daysToCivilCoordinate` are the named aliases for the
+registered-standard conversion, and the name is the assertion. `formatCivil` is
+display and not arithmetic — nothing in the model may read a value back out of
+that string.
 
 **ICS is an explicitly lossy boundary.** The contract:
 
@@ -811,10 +713,10 @@ level's value as a count of days, which is what a measure frame means.
 
 ### Staples
 
-**A staple is an edge, not an attribute.** It connects exactly two things at one
-point: `{type: "staple", kind, ends: [endA, endB], spread?, payload?}`. An end
-names one thing plus where on that thing the touch point is, and is exactly one
-of:
+**A staple is an edge, not an attribute.** It says n points are one point, and
+the two-ended shape below is that at n = 2:
+`{type: "staple", kind, ends: [endA, endB], spread?, payload?}`. An end names one
+thing plus where on that thing the touch point is, and is exactly one of:
 
 - `{frame, <position>, parameters?}` — a **position in a coordinate space**. The
   frame's own declared law is what makes the position mean anything, so the frame
@@ -883,20 +785,25 @@ A frame and a series never interchange — the same discipline that keeps a
 staple reaches at most one series, because a series' rules are cut by instants
 rather than by another object's extent.
 
-`kind` is validated against `STAPLE_KINDS` in `src/staples.js`, not hardcoded.
-Adding a kind is one registry entry plus its interpretation. This is
-deliberately stricter than frame traits, which stay valid data when
-unfamiliar: a trait is a capability claim a renderer may ignore harmlessly,
-while a kind *selects a derivation*, and a kind nothing honours would silently
-move things on screen — or silently fail to. A kind declares `connects`: the
-canonical sorted end-scope pairs it may join, which is the whole of what it is
-allowed to connect. Registered kinds are `end` and `inflection`
-(`frame+series`, both partition a series' rules; only `inflection` may carry a
-following rule), `phase` (`frame+series`), `anchor` (`frame+object`,
-`object+object`, `frame+series`), and `correspondence` (`frame+frame`).
-Constraint bounds ("can't go later than 7:30") are deliberately **not**
-registered — LEXICON.md marks them unruled, and registering a kind whose
-semantics nobody has decided would be inventing meaning.
+`kind` is validated against `stapleKinds` in `app/lib/core/staples.dart`, not
+hardcoded. Adding a kind is one registry entry plus its interpretation. This is
+deliberately stricter than frame traits, which stay valid data when unfamiliar:
+a trait is a capability claim a renderer may ignore harmlessly, while a kind
+*selects a derivation*, and a kind nothing honours would silently move things on
+screen — or silently fail to. What a kind declares is what its own derivation
+needs and nothing more: `partitions` (it cuts a series' rules), `carriesRule`
+(its segment may open with a rule of its own), and `anchors` (it may place an
+extent). There is **no scope gate** — nothing decides which things a connection
+may join, because a staple says n points are one point and that is true of any
+two things that can name a point. Registered kinds are `end` and `inflection`
+(both partition; only `inflection` may carry a following rule), `phase`,
+`anchor` (the only one that places), `correspondence`, and `succession`, which
+is a LABEL and not a case: an era boundary is a plain point staple, so nothing
+selects a derivation from the word and an existing record spelled `succession`
+keeps its meaning and round-trips byte for byte. Constraint bounds ("can't go
+later than 7:30") are deliberately **not** registered — LEXICON.md marks them
+unruled, and registering a kind whose semantics nobody has decided would be
+inventing meaning.
 
 **Placement is not a property an object has.** It is derived from the
 connections the object participates in, and the start-time-plus-duration shape
@@ -905,9 +812,7 @@ attachment relation IS an implicit start connection to the frame it is attached
 to, so a document authored before connections existed is governed by them with
 no record moving — `effectiveObjectStaples` exposes that same reading to an
 authoring surface, which is why "Start time" is one row in the staple list and
-not a control of its own. `src/store.js`'s `compactDocument` restates a legacy
-flat staple as a connection on load; the conversion preserves the instant, the
-point name, and a named point's offset exactly, and is idempotent.
+not a control of its own.
 
 A coordinate-less attachment relation is bare **membership** — "this object
 belongs to this frame" — and membership alone has never placed anything. The
@@ -933,8 +838,8 @@ and direction, and may be read across its own span, while a correspondence stapl
 declares one bare touch point and claims nothing about the space beside it. The
 four frame concepts must not collapse into each other, and this is the seam.
 
-`src/staples.js` holds every derivation, DOM-free and pure over
-`{document, engine}`:
+`Staples` in `app/lib/core/staples.dart` holds every derivation, pure over the
+document and an optional engine:
 
 1. **Anchoring.** `resolveObjectExtent` retires start-time-plus-duration as the
    only shape. Role precedence is fixed — `start` > `end` > `midpoint` >
@@ -965,10 +870,11 @@ four frame concepts must not collapse into each other, and this is the seam.
    **precision-aware**: a partitioning staple closes at the end of the unit the
    author *named*, so a bare date closes at that day's last instant, a bare month
    at that month's, and a coordinate carrying clock levels closes exactly where it
-   says. This is the same ruling `recurrence-end.js` states for "ends on a date"
+   says. This is the same ruling `recurrence_end.dart` states for "ends on a date"
    ("the last second of the date, not its midnight… the kind of off-by-one a user
    reads as a bug"), applied one layer up, and it is generic rather than
-   kind-special: the line falls where `recurrenceUntilForCoordinate` already puts
+   kind-special: the line falls where `recurrenceUntilForCoordinate`
+   (`app/lib/core/recurrence_end.dart`) already puts
    it — at or above the base unit names a **period**, below it names an
    **instant**. The end-of-unit boundary is computed by incrementing the authored
    level and carrying through each level's own declared child count, so the day
@@ -999,60 +905,54 @@ four frame concepts must not collapse into each other, and this is the seam.
    no edit to the series.
 
 The rule keeps saying what it says. A staple is never written into
-`rrule.UNTIL`; `seriesEffectiveUntilDays` intersects the rule's own written
-extent with the staple at read time, which is what makes removing a staple
-restore the full projection for free. Every comparison is exact `Rational`
-days through `coordinateDays` — never string equality, because ICS writes
-month `"01"` where the generator writes `"1"`.
+`rrule.UNTIL`; a segment carries its `untilDays` and the projector and the
+serializer each intersect it with the rule's own written extent at read time,
+which is what makes removing a staple restore the full projection for free.
+Every comparison is exact `Rational` days through `coordinateDays` — never
+string equality, because ICS writes month `"01"` where the generator writes
+`"1"`.
 
-Staples cascade like overrides, and **both ends count**: `stapleTouchesAny` is
-the one predicate every sweep asks, because a connection between two events is as
-much the downstream event's record as the upstream one's, and a connection into a
-frame must not outlive that frame. `removeStaplesForPatterns` and
-`removeStaplesForObjects` (both `removeStaplesReferencing`) run inside the same
-undoable transaction as the record they belong to, so undo restores a deleted
-event, pattern or frame together with its staples and the journal carries every
-removal. Every bundle helper in `src/ui/transactions.js` that can delete an event,
-a pattern or a frame sweeps staples, and so do `calendar-sync.js`'s
-`removeDanglingEventReferences` and `removeSourceOwnedRecords` — the reconciler
-can delete records too, so it needs the same sweep rather than a loader-side
-repair.
+Staples cascade like overrides, and **both ends count**: a connection between two
+events is as much the downstream event's record as the upstream one's, and a
+connection into a frame must not outlive that frame. No sweep is written per
+caller. `namedBy` in `app/lib/edit/reach.dart` reports both ends as ids this
+record names, so `unsupported` carries a staple out with whichever end died, and
+`settle` runs inside the same transaction as the record it belongs to — undo
+restores a deleted event, pattern or frame together with its staples, and the
+journal carries every removal.
 
 Overscale doctrine: `resolveObjectExtent` runs once per event during fact
 indexing and follows connection chains, so the engine builds
-`staplesByObject`/`staplesBySeries`/`staplesByFrame` in its own reindex — where
-every other index lives — and `src/staples.js` reads them when handed the engine,
-falling back to a document scan only for a law-free or direct-test caller.
+one id-keyed `Indexes.staplesOf` in its own reindex — where every other index
+lives — and `Staples` reads it when handed the engine, falling back to a document
+scan only for a law-free or direct-test caller.
 
 Staples cross the ICS boundary like this:
 
 - **Segment 0** exports as one VEVENT with UNTIL (or a truncated COUNT) derived
-  at serialization from `seriesEffectiveUntilDays`. The staple is never written
-  into the rule. The gate is `seriesSegments(...)[0].untilDays != null`, not
+  at serialization from the segment's own `untilDays`. The staple is never
+  written into the rule. The gate is `seriesSegments(...)[0].untilDays != null`, not
   `seriesIsSegmented` — a lone end-staple leaves exactly one segment, so the
   broader guard would silently stop truncating end-staples.
-- **Following segments** export as sibling VEVENTs with a deterministic UID
-  (`<baseUid>.chronolog-segment-<n>`, byte-identical on re-export) carrying
-  `X-CHRONOLOG-SERIES`, `X-CHRONOLOG-SEGMENT-INDEX`, and
-  `X-CHRONOLOG-INFLECTION` (the partitioning staple's own coordinate, which is
-  authored separately from the following rule's first occurrence). Import
-  rejoins them into one `inflection` staple on the base pattern — one identity,
-  not a second series. A calendar that has never heard of ChronoLog still sees
-  the real meetings, which is why the later segments are exported at all rather
-  than hidden.
-- **Anchors and spreads** are ChronoLog-native. The *derived* extent exports as
-  ordinary DTSTART/DTEND so every other calendar shows correct times, and the
-  intent rides as one `X-CHRONOLOG-ANCHOR` / optional `X-CHRONOLOG-SPREAD` pair
-  per staple, correlated by an `ID` parameter. Magnitudes are exact `Rational`
-  day-fraction text (`"1/24"`), never a float. ICS has no nested-level
-  magnitudes, so a spread round-trips as an exact value collapsed to one level
-  rather than its authored level shape — a stated limitation, not a rounding.
-- An unanchored object exports byte-identically to before staples existed, and a
-  foreign ICS with none of these properties invents no staples. Meaning is
-  authored: an anchor role is never guessed from a title, category, or duration.
-- On reimport, staples resolve against the reimporting document's **own** frame,
-  because a fresh import always mints a new frame id; the exported `FRAME`
-  parameter is informational only.
+- **Following segments** export as plain sibling VEVENTs with correct times.
+  Any calendar sees the real meetings; the series IDENTITY is not emitted, so a
+  reimport reads them as separate events rather than rejoining them.
+- **Anchors and spreads have no ICS carrier at all** and are not emitted. The
+  *derived* extent still rides as ordinary DTSTART/DTEND, so every other
+  calendar shows correct times.
+- A fresh import of an exported file therefore gets correct times and ZERO
+  staples. Meaning is authored: a foreign calendar invents no connections, and
+  an anchor role is never guessed from a title, category, or duration.
+- **There is no X-CHRONOLOG dialect in either direction.** A foreign `X-`
+  property is somebody else's dialect and rides through verbatim, which is the
+  opposite of emitting our own. Round-trip fidelity is residual retention, not
+  re-derivation: every property the export regenerates from the model is
+  stripped on the way in, and everything else is kept as that event's
+  irreducible delta, once per source in a shared bucket, with each event
+  carrying only `{source, key}`.
+- **VTODO is not mapped** — that mapping is ruled on hold, so a VTODO component
+  is retained verbatim exactly as VJOURNAL, VFREEBUSY, VALARM and VTIMEZONE
+  are: it survives a round trip untouched and is never turned into an object.
 
 ### ToDo state and containment
 
@@ -1069,8 +969,9 @@ resolution, there is a state, and there is a staple" (LEXICON.md,
   staple — the object's `end` point abutting a frame coordinate. Backdating
   edits that coordinate; a membership with no staple is legal ("done, instant
   unstated"). The `end` kind is `anchors: false`: it never relocates the
-  object. `stateAffiliations`/`doneAffiliation` in `src/object-kinds.js` are
-  the one derivation; nothing else may read state.
+  object. `ObjectFacts.stateAffiliations`/`doneAffiliation` in
+  `app/lib/core/object_kinds.dart` are the one derivation; nothing else may
+  read state.
 - **Staples stay directional, not typed.** No "due" kind exists. A staple
   ahead of the view's now reads as due, behind it as past — the reading comes
   from the arrow of time at projection, never from a kind string. Reconciling
@@ -1081,22 +982,22 @@ resolution, there is a state, and there is a staple" (LEXICON.md,
   are cycle-safe (`containsSummary` reports `cyclic`, never throws) and a
   parent's state is never inferred from its children. Rank is not stored. A
   list or project is a container object, never a group frame.
-- **Apparent magnitude, not keep-range.** `src/falloff.js` is pure:
-  `objectHome` (the day range an object's staples span), `distanceFromHome`,
-  `apparentMagnitude(base, distance, {halfDistanceDays})` = base·h/(h+|d|).
+- **Apparent magnitude, not keep-range.** `app/lib/core/falloff.dart` is pure:
+  `objectHome` (the day range an object's resolvable staples span, null when
+  nothing resolves), `distanceFromHome` (zero anywhere inside that range), and
+  `apparentMagnitude(base, distance, {halfDistance})` = base·h/(h+|d|).
   Lenses fade unresolved todos by distance from home; done/closed objects
   never fade. Data never changes — falloff is projection only.
-- **Migration.** `migrateCompletedRelations` in `compactDocument` restates
-  every legacy `role:"completed"` attachment as membership + end staple,
-  idempotently, minting the Done frame only when legacy records exist. ICS
-  VTODO COMPLETED reads and writes through the derivation; new ICS todo
-  mapping (DUE, STATUS, PRIORITY) is held until the model settles.
+- **No migration.** Nothing rewrites a record to suit this build. ICS VTODO
+  COMPLETED reads and writes through the derivation; new ICS todo mapping (DUE,
+  STATUS, PRIORITY) is held until the model settles.
 
 ### Display weight
 
-A frame's weight handling is a **formula** in `chronolog-formula/1`, evaluated
-with the incoming weight bound to `w` — "if I can describe with basic algebra
-how membership should alter a member, then I should be able to do that". A
+A frame's weight handling is a **formula** in the one math
+(`app/lib/core/math.dart`), evaluated with the incoming weight bound to `w` —
+"if I can describe with basic algebra how membership should alter a member, then
+I should be able to do that". A
 plain number `n` is sugar for `w * n`, which is what migrates every shipped
 `display.weight` number with no record rewriting and no change in what it
 means. An absent, unparseable, or non-finite-result formula contributes
@@ -1104,67 +1005,87 @@ nothing and acts as identity: a broken knob must never silently change what
 renders.
 
 Because mixed `+` and `×` do not commute, the fold order is part of the
-contract. Contributing frames apply in this order, folded left from the base
-weight: ascending `display.weightOrder` (absent = 0), then **group size
-descending** so the narrowest, most specific affiliation has the last word,
-then frame id as the final deterministic tie-break. Group size is already the
-color cascade's ordering signal, which is why it is reused here rather than a
-new one being invented.
+contract. `composeWeight` in `app/lib/core/weight.dart` owns it — THE BLESSED
+CHAIN, nesting inside out: the object's own authored math; then the connected
+modifying frames by **increasing graph distance**, nearest first, ties at equal
+distance broken on stable id; then the projecting frame or expression **last**
+among frames, because uniform monotone math applied last cannot reorder the view,
+which is exactly what "matters least" requires; then apparent-magnitude falloff
+as the projector's own closing step, multiplicatively. Weight is
+projection-relative by design: the same object weighs differently seen from
+different projectors, and that is the point. No graph is walked there —
+`composeWeight` takes rings that already know their distance and owns the sort,
+the fold and the closing step, so a caller supplies distances and never order.
 
-`factImportanceWeight` composes the weight and `factImportance` thresholds it;
-`explainFactWeight` returns the whole derivation (base, one step per
-contributing frame, final, verdict) so the editor can *show* how a weight was
-reached. Promotion thresholds are **per lens**, visible and editable on each
-lens's row in the lens workspace, defaulting to the 2 and 4 that were
-previously hardcoded so an untouched document renders identically.
-`IMPORTANCE_WEIGHT_THRESHOLD` in `src/visual-language.js` stays the one place
-those numbers live.
+`factDisplayWeight` in `app/lib/lens/display_weight.dart` composes the weight for
+a fact and `promotionOf` thresholds it into `standard`/`important`/`landmark`;
+`Editor.explainWeight` (`app/lib/edit/weight_explain.dart`) returns the whole
+derivation, one row per ring, so the card can *show* how a weight was reached.
+Promotion thresholds are **settings, per lens** — `<lens>.importantAt` and
+`<lens>.landmarkAt`, falling back to `weight.importantAt` and `weight.landmarkAt`
+— so a lens that wants a busier landmark bar says so in the settings file instead
+of in code.
 
-Newly created **groups** default to a `w * 1.5` boost so an event crossing more
-frames is more prominent by default. Calendars do not, and imported calendar
-frames do not: every event has a calendar, so a uniform calendar boost promotes
-nothing relative to anything while pushing everything toward the landmark
-threshold. Existing records are never migrated.
+`defaultWeightForNewFrame` gives newly created **group** and **importance**
+frames a `w * 1.5` boost so an object crossing more frames reads as more
+prominent. Calendars do not, and imported calendar frames do not: every event has
+a calendar, so a uniform calendar boost promotes nothing relative to anything
+while pushing everything toward the landmark threshold. It is a blank authoring
+form's initial value only — never applied to, or migrated onto, a frame that
+already exists.
 
 ### Visual grammar
 
-One fixed sigil vocabulary (point/diamond/repeat/ring/square/split-diamond/
-span — see `src/visual-language.js`) applies across all nine lenses
-(Intimate, Tactical, Strategic, Wall, Lines, Spiral, Radial, List, Board);
-a lens may
-omit a mark it cannot render at scale, but must not repurpose one to mean
-something else. Color identifies an authored frame/group/context; it is
-never the sole carrier of an event's structural role — that is always paired
-with sigil shape, so a theme or grayscale display does not erase meaning.
-Themes are an 8-field palette (ground, surface, paper, ink, muted ink,
-primary, secondary, accent); only primary/secondary/accent are authored,
-everything else derives via `color-mix`.
+One fixed sigil vocabulary — `point`, `milestone`, `repeat`, `task`, `note`,
+`terminator`, `celestial`, `span`, in `sigilGlyphs` in `app/lib/lens/marks.dart`,
+plus `overflowSigil` for a budget that ran out, which is a LOWER BOUND drawn as
+its own mark rather than a truncated list — applies across every lens in the
+catalog. A lens may omit a mark it cannot render at scale, but must not repurpose
+one to mean something else. The sigil an object shows is derived from what its
+author actually wrote (`sigilFor`): an authored `display.sigil` on the object or
+its frame names one outright, and otherwise a mark covering a whole day under
+this law is a span, a succession end is a terminator, the authored kind gives
+task and note, a generated occurrence repeats, a promoted weight is a milestone,
+and everything else is a point.
 
-Object color inheritance is a 4-step cascade, implemented once in
-`src/visual-language.js` — lens renderers must not choose colors
+Color identifies an authored frame/group/context; it is never the sole carrier
+of an event's structural role — that is always paired with sigil shape, so a
+theme or grayscale display does not erase meaning.
+Themes are an 8-field palette, all eight authored (`themeFields` in
+`app/lib/lens/theme.dart`: ground, surface, paper, ink, muted, primary,
+secondary, accent). The three surfaces are ELEVATION, not decoration — `ground`
+is the desk the stage sits on and shows between tiles, `surface` is what chrome
+is made of, `paper` is the sheet a lens or a card is drawn on. Three tones derive
+from them — the hairline, the tone secondary text reads in, and the faintest —
+each carried from paper toward ink until it holds its own CONTRAST RATIO, not a
+fixed mix, because a fixed mix on a light ground and the same mix on a dark one
+are not the same legibility.
+
+Object color inheritance is a 4-step cascade, implemented once in `ColorCascade`
+in `app/lib/lens/color.dart` — lens renderers must not choose colors
 independently:
 
 1. An explicit color on the object overrides everything else.
 2. A group color overrides temporal-frame color. When an object belongs to
-   several groups, a group explicitly shown by the active frame wins;
-   otherwise the group with the most event members wins, with authored
-   membership order as the tie-breaker.
+   several groups, a group the projection explicitly shows wins; otherwise the
+   group with the most members wins, then authored membership order, then frame
+   id — so the answer is total and identical across reload.
 3. The active temporal frame wins when the object belongs to several
    frames, then the frame supplying the rendered fact, then its other
    authored frame attachments.
-4. A semantic fallback applies only when none of the above has a color.
+4. The theme's neutral ink applies when none of the above has a color: an
+   unauthored record is never given an inferred one.
 
 ### Calendar sync
 
-The one sync interface is read-only HTTPS ICS subscriptions
-(`tools/calendar-feed-service.js`), plus ICS file import/export. A pull is
-one undoable document change; a source's revision advances only after its
-snapshot parses successfully. Feed secrets (the full subscription URL) live
-in `.chronolog-calendar-connections.json` in the data directory,
-owner-only on POSIX and relying on NTFS ACLs on Windows; the document
-itself only ever gets an opaque connection ID, provenance, and the
-acknowledged revision. Write-back is disabled — see ROADMAP.md's
-provider-write-back-gating frontier.
+The ICS boundary is file import and file export, and nothing else: no feed
+client, no subscription service, no poller. `importIcs` is one undoable document
+change and mints its own source, so a second import of the same calendar adds a
+second source rather than rewriting the first; what it raises against what is
+already there is staple **suggestions**, never a reference it rewrites on the
+author's behalf. Foreign residuals ride under `foreign.ics.sources` so a
+round-trip preserves what this program does not model. Write-back is disabled —
+see ROADMAP.md's provider-write-back-gating frontier.
 
 Provider-specific API integrations are out of scope (severance doctrine):
 ICS is the interchange boundary. Do not add a provider SDK or API client —
@@ -1191,9 +1112,9 @@ invent a coordinate conversion.
   `local/` is untracked free space for whatever an individual keeps there.
   `.gitignore` holds generic rules only — never name or describe specific
   personal filenames in it or in docs.
-- Only two network contexts matter: **Local** (this machine, `127.0.0.1`
-  only) and **WAN** (real sync between instances, future work — see
-  ROADMAP.md). There is no LAN tier; don't reintroduce one.
+- Only two network contexts matter: **Local** (this machine) and **WAN** (real
+  sync between instances, future work — see ROADMAP.md). There is no LAN tier;
+  don't reintroduce one.
 - Flutter/Dart, one binary, no server. `lib/core/` is pure Dart. Zero Flutter
   plugins, ever (see `app/lib/` above); host capabilities go through
   `dart:ffi`. The Flutter SDK lives at `~/.flutter/flutter/bin` and is on the
@@ -1205,12 +1126,12 @@ invent a coordinate conversion.
 - `LEXICON.md` is the owner's voice — agents never edit it unprompted, even
   when it references something that has since moved or been deleted.
   Additions happen only at the owner's direction, in his words.
-- `GUI_Mockup/` images are live design references — never delete them.
+- The images in `local/GUI_Mockup/` (untracked, not in the repo) are live design references — never delete them.
 - The doc set is this file, `README.md`, `ROADMAP.md`, `LEXICON.md`,
   `ISSUES.md` (the living tracker — items carry date tags and are resolved in
   place; never mint dated issue files) and `WHAT_RIDES.md`. Don't create new
   `.md` files without the owner's direction.
 - Prefer behavioral tests over source-text string assertions; tests are
   generative properties at `specSeed`, never pinned arbitrary facts.
-- Run `flutter analyze` and `flutter test` in `app/` before finishing work;
-  `npm test` covers the retiring JavaScript oracle.
+- Run `flutter analyze` and `flutter test` in `app/` before finishing work.
+  Nothing in the repo needs node.

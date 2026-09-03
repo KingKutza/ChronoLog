@@ -10,7 +10,7 @@
 // and the prime is not near the prime; it is unrelated, and the honest picture
 // of that is no line at all plus the sentence saying so.
 //
-// The origin sketch is `GUI_Mockup/signal-2023-08-31-09-24-39-007.jpg`: lines
+// The origin sketch is `local/GUI_Mockup/signal-2023-08-31-09-24-39-007.jpg`: lines
 // running at their own heights, dropping to the prime exactly where they are
 // stapled. `bak.png` is the robustness target -- a mapping that folds back on
 // itself is legal data and draws as a fold, not as an error.

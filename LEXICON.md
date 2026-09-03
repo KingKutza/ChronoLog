@@ -7,13 +7,13 @@
 and tab-based lens mechanics. The historical entries below remain an idea and
 provenance inventory.
 
-**Provenance map:** the project has passed through at least four bodies: a .NET/C# incarnation (only fossil: dead `.vscode` configs, pre-git-history), the Java/JavaFX scaffold (swept from the working tree; lives at git tag of `main` history and branch `codex/implement-gui-mockup-for-tests` = local `pr-2-gui-mockup`, commit `a3c9bdb`), the concept mockups in `GUI_Mockup/`, and the current single-file HTML artifact (`pocket-instrument.html`, see `POCKET_INSTRUMENT_HANDOFF.md`).
+**Provenance map:** the project has passed through at least four bodies: a .NET/C# incarnation (only fossil: dead `.vscode` configs, pre-git-history), the Java/JavaFX scaffold (swept from the working tree; lives at git tag of `main` history and branch `codex/implement-gui-mockup-for-tests` = local `pr-2-gui-mockup`, commit `a3c9bdb`), the concept mockups in `local/GUI_Mockup/` (untracked), and the current single-file HTML artifact (`pocket-instrument.html`, see `POCKET_INSTRUMENT_HANDOFF.md`).
 
 ---
 
 ## The founding conception (Don, stated directly, 2026-08-06 session)
 
-The original concession: there are **timelines**, each internally consistent to some function of time (a person's personal perception of time, a world's collective perception, etc.). There are **events**, which attach to **0 or more** lines; an event attached to multiple lines **staples** them together at that point. Render the view for any one line and see its events along it, with other lines weaving in and out. The robustness target: display every relationship in the time-travel-movies diagram (`GUI_Mockup/bak.png`).
+The original concession: there are **timelines**, each internally consistent to some function of time (a person's personal perception of time, a world's collective perception, etc.). There are **events**, which attach to **0 or more** lines; an event attached to multiple lines **staples** them together at that point. Render the view for any one line and see its events along it, with other lines weaving in and out. The robustness target: display every relationship in the time-travel-movies diagram (`local/GUI_Mockup/bak.png`).
 
 Observations in circulation about this conception (candidate refinements, not rulings):
 - Lines never touch except through events — a bipartite lines×events incidence structure; the handoff's directed metric multigraph *emerges* from it (two staples with unequal separations = the two-anchor bond / holonomy).
@@ -310,8 +310,8 @@ Rulings and additions (Don, 2026-08-31, SENTENCES.md alignment rounds):
 ## Information architecture sketches
 
 - **pr-2 JavaFX shell (June 2026):** 4-pane layout — top bar (New Event / Duplicate Timeline / Prime Line), left view-switcher (PrimeLine, TimeLines, Events, Notes, Journals) + Party Lines list + legend, center canvas ("Parallel Universe Scheduler"), right inspector ("Quantum Annotation" + Time Capsules). The canvas actually draws branching timelines: quadratic-curve branches off a prime line, arced time-loops, drop-lines to a date strip. The only drawn rendering of a branching/looping timeline in the project.
-- **Concept image (`GUI_Mockup/ChatGPT Image Jun 16, 2026…png`):** horizontal Prime Line spine across a month with event glyphs hanging off it; parallel color-coded Side Lines per context; glyph vocabulary (event ●, milestone, recurring ‖, decision ◇, note, journal, deadline ⚑); Topography strip; filters; lens detents DAY/WEEK/MONTH/QUARTER/YEAR.
-- **`GUI_Mockup/bak.png`:** the time-travel-movies timeline taxonomy — visual intuition for timelines as a directed graph with branches and loops.
+- **Concept image (`local/GUI_Mockup/ChatGPT Image Jun 16, 2026…png`):** horizontal Prime Line spine across a month with event glyphs hanging off it; parallel color-coded Side Lines per context; glyph vocabulary (event ●, milestone, recurring ‖, decision ◇, note, journal, deadline ⚑); Topography strip; filters; lens detents DAY/WEEK/MONTH/QUARTER/YEAR.
+- **`local/GUI_Mockup/bak.png`:** the time-travel-movies timeline taxonomy — visual intuition for timelines as a directed graph with branches and loops.
 - **Pocket instrument lens ladder:** intimate / tactical / strategic (+ cycle wrap), see handoff doc.
 
 ## Visual language candidates

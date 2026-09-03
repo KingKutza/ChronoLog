@@ -9,9 +9,8 @@
 // `role` field appears anywhere in this file or in the builder it uses, so a
 // chain that resolves here proves the derivation reads ORDER and nothing else.
 //
-// The elder-scrolls fixture is not read: `tools/load-dataset.js` is not ported,
-// so the chain is HAND-BUILT to the same shape (era frames + succession staples
-// + one authored pin). Stated, not implied.
+// Tamriel's chain is HAND-BUILT here: era frames, succession staples, and one
+// authored pin. Stated, not implied.
 
 import 'dart:math';
 

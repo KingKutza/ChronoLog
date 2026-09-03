@@ -6,10 +6,9 @@
 // atom is a pen stroke -- a law with a real axis of its own and no relation to
 // Earth days at all, which is what makes a cross-law correspondence testable.
 //
-// Nothing here loads a dataset. `tools/load-dataset.js` is not ported, so the
-// era chains the spec needs are HAND-BUILT from the same shape the JavaScript
-// fixture carries (era frames + succession staples + one pin), stated in the
-// test rather than read from a file this build cannot yet open.
+// Nothing here loads a dataset: `era()` and `succeed()` let a test build an
+// era chain directly, frame by frame and succession staple by staple, plus
+// whatever pin the case needs.
 
 import 'package:chronolog/core/document.dart';
 import 'package:chronolog/core/records.dart';

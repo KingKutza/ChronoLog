@@ -1,11 +1,10 @@
 // The two shipped real documents, loaded as files.
 //
 // These are the only pinned facts in the spec, and they are pinned deliberately:
-// they are FIXTURES OF THE FILE FORMAT, not assertions about behaviour. The
-// JavaScript validator reports zero errors on both (captured by running it
-// directly), and both are full of the time-travel taxonomy whose validators died
-// as written -- so if this build refused either of them, or altered a byte, the
-// ruling that unknown types are data would be a claim with nothing behind it.
+// they are FIXTURES OF THE FILE FORMAT, not assertions about behaviour. Both
+// are full of the time-travel taxonomy whose validators died as written -- so
+// if this build refused either of them, or altered a byte, the ruling that
+// unknown types are data would be a claim with nothing behind it.
 
 import 'dart:convert';
 import 'dart:io';
@@ -29,10 +28,10 @@ void main() {
     }
   });
 
-  test('both validate with exactly the errors the JavaScript reports: none', () {
-    // RULED ANCHOR, measured: `validateDocument` from src/model.js reports
-    // valid=true, errors=0 for both files. This build must agree, which it can
-    // only do by treating every taxonomy relation as data.
+  test('both validate with zero errors: an unknown relation is data', () {
+    // RULED ANCHOR: `validateDocument` (lib/core/validate.dart) must report
+    // valid=true, errors=0 for both files. Anything else would mean the ruling
+    // that unknown taxonomy relations are data was never enforced.
     for (final name in [taxonomy, skyland]) {
       final document = Document.fromJson(jsonDecode(fixture(name).readAsStringSync()) as Json);
       expect(validateDocument(document).errors, isEmpty, reason: name);

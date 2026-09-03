@@ -23,11 +23,9 @@ flutter analyze            # the analyzer
 flutter build windows      # a release build
 ```
 
-Node 20 is required for one test: `test/lens/geometry_diff_test.dart` runs
-`tool/lens_diff_gen.mjs` as a differential oracle against the previous
-JavaScript implementation in `src/`, proving the Dart geometry matches it
-case for case. That is what `src/`, `fixtures/` and the root `package.json`
-are still here for.
+Nothing else is needed: no package manager, no runtime beside Flutter's
+own, no code generation step. The Dart in `app/lib` is the whole
+implementation.
 
 Generative tests take a seed from `CHRONOLOG_SEED`; a failure prints the
 seed it ran with.
@@ -53,7 +51,6 @@ rules and projections go out as materialized instants, and no private
 - [SENTENCES.md](SENTENCES.md) — the sentences the edit card speaks
 - [LEXICON.md](LEXICON.md) — vocabulary and founding ideas
 - [WHAT_RIDES.md](WHAT_RIDES.md) — what carries forward, and its cost
-- [GUI_Mockup/](GUI_Mockup) — live design references
 
 ## License
 
