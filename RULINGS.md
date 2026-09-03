@@ -363,7 +363,7 @@ or the entry heads under every far end and the LIST, not the board, is what
 should stop pretending an entry lives in one place.
 
 **Answer:**
-
+So nearest by graph distance, and this is a general rule not a specific one, think back to when we determined OneMath applicaiton order, this will come up again other places too. We are projecting something, always, everything that projects around it is projected in order of its graph distance from the primary. In initmate this is the primary frame at the point that is the center of the view. for board it is the primary frame on the column, ect.
 ---
 
 ## 18. When does a coordinate field commit — on typing, or on Enter?
@@ -393,4 +393,27 @@ commit-as-you-type the rule with the undo history responsible for not recording
 every letter? The answer decides which of the two tests is retired.
 
 **Answer:**
+So there are two things hiding inside the one question I think, maybe three. When typing when do we a) save to file, b) check syntax / apply value / project quardinat / whatever runtime bs c) when do we let a another process have write access to that same field. a & c are when the user releases the field, 100% the could be a click off or an enter or whatever, but so long as the user is holding the field it is locked read only. As for b, this is a bit of a judgment call, butter demands that everything have immediat feedback and visual effect, and that whatever we are displaying / projecting is the most current thing. typing a hexcode for a color theme updates the color every keystroke type of thing. **BUT** butter also demands that we not run a bunch of compute expensive processes every keystrok causing the whole application to spasim and dye because we tryed to reproject 1200 years of mixed quailiniar time for 700 seperatly tracked individuals at !80 words per minute. So I hope that awnsers the question. Lock the field on user control and project butter at every turn just don't be stupid about it.
 
+---
+
+## 19. Does a drag anywhere in a zoned grid cell move the zone?
+
+Grid grounds now register a whole-cell hit with `grab: null`, so a drag starting
+anywhere inside a zoned cell moves the ground. Intimate's "the whole block
+grabs" is the precedent and the reason it was built that way.
+
+The consequence is bigger on a grid than it is in Intimate. An authored daily
+day-object makes EVERY cell a ground, and then the whole month sheet is
+drag-to-move-a-zone: there is nowhere left on the sheet to start a drag that
+means anything else — no marquee over a week, no pan, no drag-create in an
+empty day.
+
+The alternatives, none free: the ground grabs only from its own edge or title,
+which is a smaller target and contradicts Intimate; the ground grabs only where
+no mark is under the pointer, which makes the same gesture mean different things
+in different cells; or the cell keeps the drag and moving a ground is a verb on
+its title rather than a grab on its body.
+
+**Answer:**
+For zones, which are background fill the whole space affairs, just require we hold still on our drag for 3s then the zone clearly hilights and allows drag, if you move the cursor before that window it acts like you are draging on empty space.
