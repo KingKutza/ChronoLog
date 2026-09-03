@@ -9,11 +9,22 @@
 //   virtual occurrences included. Busyness is a frame/object handling composed
 //   through the rings like weight (`b * 0` on a zone bundle by default), and
 //   the minimap's per-fact formula is a settings key, not a literal.
+//
+// Don: "I don't know specifically how to fix that in a code / data-model way
+// that is consistent across all cases." The consistent way is the one weight
+// already takes: `display.busy` is a one-math term over `b`, the incoming
+// busyness, composed ring by ring exactly as `display.weight` is over `w`, so an
+// Out-of-Office frame authors `b * 0` and every member inherits it by the same
+// walk that gives it its colour and weight. "No special case anywhere:
+// 'anti-busy' is a formula somebody wrote on a frame, and the minimap reads the
+// graph." The key `minimap.busy` holds the shipped per-fact formula.
 
 import 'dart:io';
 import 'dart:math';
 
+import 'package:chronolog/chrome/shell.dart';
 import 'package:chronolog/core/projection.dart';
+import 'package:chronolog/core/records.dart';
 import 'package:chronolog/lens/minimap/field.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -48,16 +59,64 @@ void main() {
   });
 
   test('busyness is an authored handling composed through the rings', () {
-    // WORK ITEM (ISSUES 9.2): the per-fact magnitude is the literal
-    // `(1 + staples + duration) * weight` in field.dart, and no `display.busy`
-    // handling exists on frames or objects. When it does, this test authors
-    // `b * 0` on a frame, places a heavy multi-day member in it, and asserts the
-    // member adds nothing to any bin -- while the same member outside the frame
-    // does; and `minimap.busy` is the settings key the default formula lives in.
-    fail(
-      'ISSUES 9.2: busyness is a literal formula and no frame can say "anti-busy". Make '
-      '`display.busy` a ring-composed handling and `minimap.busy` a settings key, then '
-      'assert a `b * 0` frame contributes nothing here.',
+    // A heavy multi-day member of a frame that says `b * 0` adds nothing to any
+    // bin; the same member outside that frame lights the bins it spans. And the
+    // per-fact formula lives in a settings key, never in the painter.
+    final settings = chronologSettings();
+    expect(
+      settings.expressionOf('minimap.busy'),
+      isNotEmpty,
+      reason:
+          'ISSUES 9.2: the per-fact magnitude is the literal `(1 + staples + duration) * weight` '
+          'in field.dart. Lens numbers are settings: `minimap.busy` holds the shipped formula.',
+    );
+    final days = 3 + random.nextInt(4);
+    final startDay = 5 + random.nextInt(10);
+    World build({required bool antiBusy}) {
+      final world = World();
+      world.document = world.document.put(
+        'frames',
+        'group:ooo',
+        const Frame(
+          id: 'group:ooo',
+          title: 'Out of office',
+          traits: ['set', 'group'],
+          extra: {
+            'display': {'busy': 'b * 0', 'zone': true},
+          },
+        ),
+      );
+      final member = world.object(
+        duration: '${days * 24 * 60}',
+        placedAt: civil(2026, 9, startDay, 0),
+      );
+      if (antiBusy) {
+        world.staple(ends: [ObjectEnd(member), StapleEnd.frame('group:ooo')]);
+      }
+      return world;
+    }
+
+    final range = (start: civilDays(2026, 9, 1), end: civilDays(2026, 9, 30));
+    MinimapField fieldOf(World world) => accumulate(
+      ProjectionEngine(world.document),
+      Projection.of(const ['calendar:work']),
+      range,
+      settings.tunable,
+    );
+    final plain = fieldOf(build(antiBusy: false));
+    expect(
+      plain.magnitudes.any((magnitude) => magnitude > 0),
+      isTrue,
+      reason: 'a $days-day member outside the frame lights the bins it spans',
+    );
+    final quiet = fieldOf(build(antiBusy: true));
+    expect(
+      quiet.magnitudes.every((magnitude) => magnitude == 0),
+      isTrue,
+      reason:
+          'ISSUES 9.2: the same member inside a frame that says `b * 0` still lit '
+          '${quiet.magnitudes.where((m) => m > 0).length} bin(s). "The important zone is filling '
+          'the minimap" -- busyness is a ring-composed handling, and this frame says none.',
     );
   });
 }

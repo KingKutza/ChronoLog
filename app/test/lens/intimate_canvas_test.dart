@@ -24,8 +24,13 @@
 //   A sideways pan of ANY distance moves the window by exactly the days those
 //   pixels span, with no truncation and no rounding anywhere in the commit.
 //   The first and last columns may be partial, and a partial day still paints.
-//   Nothing snaps on its own. Realignment is an explicit step, in the law's own
-//   units -- its day, one turn of its weekday cycle -- never a hardcoded seven.
+//   Nothing snaps on its own. Realignment is the bar's OWN arrows (Don, ruled):
+//   "Arrows, step one unit. Right-click the arrow drops down available units, to
+//   set or reset. Right-clicking in the context bar lets you add a set of arrows;
+//   right-clicking on the arrow includes a remove option ... Applies to all
+//   lenses." So an arrow steps one authored unit of the law -- its day, one turn
+//   of its weekday cycle -- never a hardcoded seven, and never a declared
+//   `dayBack`/`weekForward` action (those were withdrawn).
 //   Every continuous surface in the catalog reads a pan this one way.
 //
 // The span is ONE number said once (ISSUES 9.2 (b)): the view key `span`, whose
@@ -35,6 +40,7 @@
 import 'dart:math';
 
 import 'package:chronolog/app.dart';
+import 'package:chronolog/chrome/context_bar.dart';
 import 'package:chronolog/chrome/controls.dart';
 import 'package:chronolog/chrome/shell.dart';
 import 'package:chronolog/core/document.dart';
@@ -53,6 +59,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../cards/harness.dart';
+import '../cards/object_harness.dart';
 import '../core/corpus.dart';
 import '../helpers/projection_scene.dart';
 import '../store/harness.dart';
@@ -347,82 +355,84 @@ void main() {
       );
     });
 
-    testWidgets('realignment is an explicit step in the law\'s own units, and nothing snaps alone', (
-      tester,
-    ) async {
+    testWidgets('realignment is the bar and its own arrows: one authored unit a step, the unit a '
+        'right-click away', (tester) async {
+      // Don: "Arrows, step one unit. Right-click the arrow drops down available
+      // units, to set or reset. Right-clicking in the context bar lets you add a
+      // set of arrows; right-clicking on the arrow includes a remove option."
+      // The four declared actions the first draft pinned are WITHDRAWN: "a second
+      // set of arrows beside the ones already there was the wrong shape."
       final spec = lensCatalog['intimate']!;
-      final actions = {
-        for (final control in spec.controls)
-          if (control.kind == 'action') control.key,
-      };
-      for (final step in const ['dayBack', 'dayForward', 'weekBack', 'weekForward']) {
+      for (final control in spec.controls) {
         expect(
-          actions,
-          contains(step),
-          reason:
-              'ISSUES 9.2: "forward/back day/week buttons to realign" -- Intimate declares no '
-              '`$step` action. Realignment is authored, so it is a control, not a side effect.',
+          const ['dayBack', 'dayForward', 'weekBack', 'weekForward'],
+          isNot(contains(control.key)),
+          reason: 'ISSUES 9.2: `${control.key}` is a declared realignment action; those were withdrawn',
         );
       }
-      final bed = await _layOut(tester);
-      final controller = viewTileControllers[tileId]!;
-      final before = _livePainter(tester);
-      final rail = before.scene.px('intimate.rail');
-      final column = dayWidth(before);
-      // A sub-column pan first, so there is a phase to realign.
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byType(ViewTile)),
-        buttons: kMiddleMouseButton,
-      );
-      await gesture.moveBy(Offset(-column * 0.37, 0));
-      await tester.pump();
-      await gesture.up();
+      final bench = (await tester.runAsync(() => openCards(createEmptyWorkspaceDocument())))!;
+      final chrome = cardChrome(bench.editor);
+      final view = chrome.views.of('view:1');
+      view.lensId = 'intimate';
+      view.selection.toggle(wallTime);
+      final law = bench.editor.engine.lawOf(wallTime);
+      await pumpCard(tester, chrome, const ContextBar());
+      // ONE UNIT A STEP: the arrow steps the law's own day, exactly.
+      final before = chrome.views.focusOf('view:1');
+      await tester.tap(find.text('›'));
       await tester.pumpAndSettle();
-      final panned = _livePainter(tester);
       expect(
-        _phase(panned, rail, column),
-        isNot(closeTo(0, 1e-3)),
-        reason: 'ISSUES 9.2: a pan never rounds itself to a column after the fact',
+        chrome.views.focusOf('view:1') - before,
+        equals(law.unitDays('day')),
+        reason: 'the arrow steps one unit of THIS law -- its day',
       );
-      final focusBefore = bed.views.focusOf(tileId);
-      controller.runAction('dayForward');
+      // RIGHT-CLICK THE ARROW: the law's own units, to set.
+      final arrow = await tester.startGesture(
+        tester.getCenter(find.text('›')),
+        buttons: kSecondaryMouseButton,
+      );
+      await arrow.up();
       await tester.pumpAndSettle();
-      final law = panned.law;
-      final stepped = bed.views.focusOf(tileId) - focusBefore;
-      expect(stepped > Rational.zero, isTrue, reason: 'a day forward moves forward');
-      expect(stepped <= law.dayDays, isTrue, reason: 'by at most one day of THIS law');
+      final week = find.textContaining(RegExp('week', caseSensitive: false));
       expect(
-        _phase(_livePainter(tester), rail, column),
-        closeTo(0, 1e-3),
-        reason: 'ISSUES 9.2: after a day step a midnight sits exactly on the rail\'s edge',
+        week,
+        findsWidgets,
+        reason:
+            'ISSUES 9.2: right-click on the arrow drops the units the law offers -- its levels and '
+            'its cycles -- and this law declares a weekday cycle, so a week is on the list. Today '
+            'the arrow has no menu at all.',
       );
-      // The week is the law's own cycle, however long it declares it.
-      final week = panned.scene.law.weekdayNames()?.length;
-      expect(week, isNotNull, reason: 'wall time declares a weekday cycle');
-      final weekBefore = bed.views.focusOf(tileId);
-      controller.runAction('weekForward');
+      expect(
+        find.textContaining(RegExp('remove', caseSensitive: false)),
+        findsWidgets,
+        reason: 'and the menu on the arrow offers to remove this set of arrows',
+      );
+      await tester.tap(week.first);
       await tester.pumpAndSettle();
-      final weekStep = bed.views.focusOf(tileId) - weekBefore;
-      expect(weekStep > Rational.zero, isTrue);
+      final cycle = law.weekdayNames()!.length;
+      final weekBefore = chrome.views.focusOf('view:1');
+      await tester.tap(find.text('›'));
+      await tester.pumpAndSettle();
       expect(
-        weekStep <= law.dayDays * Rational.fromInt(week!),
-        isTrue,
-        reason: 'a week step is one turn of the declared cycle, never a hardcoded seven',
+        chrome.views.focusOf('view:1') - weekBefore,
+        equals(law.unitDays('day')! * Rational.fromInt(cycle)),
+        reason: 'set to the week, the arrow steps one turn of the declared cycle, never a hardcoded seven',
       );
-      final days = weekStep / law.dayDays;
-      expect(Rational(days.floor()), equals(days), reason: 'and lands on a day boundary');
+      // RIGHT-CLICK IN THE BAR: add a set of arrows.
+      final bar = find.byType(ContextBar);
+      final empty = await tester.startGesture(
+        tester.getTopLeft(bar) + Offset(tester.getSize(bar).width / 2, tester.getSize(bar).height / 2),
+        buttons: kSecondaryMouseButton,
+      );
+      await empty.up();
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining(RegExp('add.*arrow', caseSensitive: false)),
+        findsWidgets,
+        reason: 'ISSUES 9.2: right-clicking in the context bar offers to add a set of arrows',
+      );
     });
   });
-}
-
-/// Where the nearest midnight sits relative to the rail's edge, as a fraction of
-/// a column: zero when a day boundary is exactly on the edge.
-double _phase(IntimatePainter painter, double rail, double column) {
-  final law = painter.law;
-  final day = law.dayOf(painter.scene.focusDays);
-  final x = painter.project(Rational(day) * law.dayDays)!.dx - rail;
-  final fraction = (x / column) - (x / column).floorToDouble();
-  return min(fraction, 1 - fraction);
 }
 
 IntimatePainter _livePainter(WidgetTester tester) {

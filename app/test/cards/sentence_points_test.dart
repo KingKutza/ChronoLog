@@ -9,11 +9,24 @@
 // the extent's current size and includes the whole; object->object defaults to
 // point<->point from two settings keys (`start`/`start`; Don's `start`/`end`
 // a setting away).
+//
+// "Whole to whole says THIS IS CONNECTED TO THAT. Points: this point IS that
+// point. Whole to point: THIS IS AT THAT POINT." Three shapes, three readings,
+// no verb involved -- the ends say it all. So the + row shows every term from
+// the first keystroke, its two point terms wearing the settings' defaults, and
+// what it WRITES is what it showed.
 
+import 'package:chronolog/cards/object_card.dart';
+import 'package:chronolog/cards/sentence_rows.dart';
 import 'package:chronolog/cards/staple_editor.dart';
 import 'package:chronolog/chrome/shell.dart';
+import 'package:chronolog/core/records.dart';
 import 'package:chronolog/core/staples.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../helpers/projection_scene.dart';
+import 'object_harness.dart';
 
 void main() {
   test('the point vocabulary offers the whole, and is not a written list', () {
@@ -42,16 +55,71 @@ void main() {
     expect(settings.text('edit.newPointFar'), isNotEmpty, reason: 'ISSUES 9.2: the far object\'s point is a settings key');
   });
 
-  test('the + row says the whole sentence from the first keystroke', () {
-    // WORK ITEM (ISSUES 9.2): `NewSentence` shows "This [verb] [far end]" and
-    // writes both ends with the whole; point terms appear only afterwards on the
-    // saved row. When the + row carries every term, this test types a far-end
-    // name on an object card, picks it, and asserts the written staple's ends
-    // carry the settings' default points -- `start`/`start` shipped -- and that
-    // choosing the whole on both ends is one click away and reads "connected to".
-    fail(
-      'ISSUES 9.2: the + row can only say whole<->whole between two objects. Show every term '
-      'from the first keystroke with settings-fed default points, then assert the written ends.',
+  testWidgets('the + row says the whole sentence from the first keystroke, and writes the points '
+      'it showed', (tester) async {
+    // "The + row should offer the whole sentence at once -- 'the [start] of this
+    // [is] the [end] of [that]' -- every term visible and editable from the first
+    // keystroke, and typing a name in the far slot enough to write it." The
+    // default points come from the two settings keys; the written ends carry
+    // exactly those points.
+    final scene = Scene()..calendar('calendar:a');
+    final host = scene.object(title: 'Chase the rubric', duration: '0');
+    scene.place('calendar:a', civil(2026, 9, 3, 9), event: host);
+    const farTitle = 'AI Team meeting with Reggie';
+    final far = scene.object(title: farTitle, duration: '60');
+    scene.place('calendar:a', civil(2026, 9, 3, 14), event: far);
+    final bench = (await tester.runAsync(() => openCards(scene.document)))!;
+    final near = bench.settings.text('edit.newPointNear');
+    final farPoint = bench.settings.text('edit.newPointFar');
+    expect(near, isNotEmpty, reason: 'the near default point is a settings key, so the row has a word to show');
+    expect(farPoint, isNotEmpty, reason: 'and the far one');
+    await pumpHosted(
+      tester,
+      bench,
+      ObjectCard(
+        request: (klass: 'object', id: host, kind: null, frameId: null, startDays: null, endDays: null),
+      ),
+      id: host,
+      shell: true,
     );
+    final row = find.byType(NewSentence);
+    expect(row, findsOneWidget);
+    expect(
+      find.descendant(of: row, matching: find.textContaining(near)),
+      findsWidgets,
+      reason:
+          'ISSUES 9.2: the + row shows "This [verb] [far end]" and no point term; the point of '
+          'THIS object ($near, from the settings) is a term from the first keystroke.',
+    );
+    final before = bench.editor.document.relations.keys.toSet();
+    // The FAR term's field, by the hint it wears -- once the row shows every
+    // term from the first keystroke, the first field may be the near point.
+    final field = find.descendant(
+      of: row,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is TextField && (widget.decoration?.hintText ?? '').contains('frame or an object'),
+      ),
+    );
+    expect(field, findsWidgets, reason: 'the far term is a field a name is typed into');
+    await tester.enterText(field.first, 'Reggie');
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: row, matching: find.textContaining(farTitle)).first);
+    await tester.pumpAndSettle();
+    final written = bench.editor.document.relations.values
+        .where((relation) => !before.contains(relation.id))
+        .toList();
+    expect(written, hasLength(1), reason: 'saying the far end writes one sentence');
+    final ends = written.single.ends.whereType<ObjectEnd>().toList();
+    expect(ends, hasLength(2), reason: 'object to object');
+    final nearEnd = ends.firstWhere((end) => end.object == host);
+    final farEnd = ends.firstWhere((end) => end.object == far);
+    expect(
+      endPoint(nearEnd),
+      equals(near),
+      reason:
+          'ISSUES 9.2: the + row wrote the WHOLE on this end ("${endPoint(nearEnd)}"), so the todo '
+          'had no position and drew nowhere. The near point is the settings\' default.',
+    );
+    expect(endPoint(farEnd), equals(farPoint), reason: 'and the far point is the settings\' other default');
   });
 }

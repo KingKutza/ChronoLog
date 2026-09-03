@@ -10,28 +10,36 @@
 // `grid.weekend.2` -- a count-plus-index pseudo-list, which is an enum wearing
 // numbers: two positions, marked by the shipped default, meaning nothing anyone
 // said. Strategic, Tactical and Wall draw it together, because they share the
-// painter. A calendar with a rest position elsewhere, several, none, or a rest
-// that is not a whole day cannot say so, and nothing can give the weekend a
-// name, a colour or a magnitude.
+// painter.
 //
-// The ruling is the one already on the books for the day (`lens/zones.dart`):
-// "day start/end is an authored object -- a daily series -- whose handling says
-// display-as-zone ... The setting dies." So:
+// THEN DON'S QUESTION SETTLED WHAT A WEEKEND IS: "Three steps back -- what is a
+// 'weekend'? Is it a feature of the Gregorian calendar, or a cultural event that
+// happens to be ubiquitous?" A CULTURAL EVENT. Two people on the identical
+// Gregorian law disagree about which positions are the weekend, so "a property
+// of a calendar cannot be something two users of that same calendar answer
+// differently." The weekday CYCLE is the law's; the weekend is a SELECTION OF
+// POSITIONS in it, asserted by someone -- an authored object over a cycle, held
+// in the numbers a person can have many of.
 //
-//   The weekend is an AUTHORED REPEATING OBJECT over the law's own weekday
-//   cycle, zone-handled, with its own colour and weight. The painter learns
-//   nothing about weekends. A fresh Gregorian document ships one seeded weekend
-//   -- a default a person can read, rename, recolour and unsay, not a lens that
-//   knows -- and a law with a weekday cycle of another length, or none, gets no
-//   weekend it did not author.
+// AND THE RULING ON WHAT SHIPS, option (c): "no offer at all, now, and reassess
+// when cycles land. So the weekend is authored by the person, once, per
+// document -- nothing seeded, nothing offered, nothing in the new-frame flow.
+// `createEmptyWorkspaceDocument` keeps 'two structural frames and nothing
+// else'." This file was first authored against a SEEDED weekend and asserted one
+// in a fresh document; it is re-authored here to the ruling:
 //
-// NOT IN SCOPE, and deliberately not swept here: `grid.washToday` and
-// `grid.washPast` are clock facts, `wall.firstWeekday` rotates the layout. They
-// stay. The weekend was the only encoded meaning.
+//   The lens holds no weekend belief: no setting names one, and a fresh document
+//   paints no fill on any grid lens.
+//   An AUTHORED weekend -- a weekly series on the law's own weekday cycle, zone-
+//   handled by its group, in the group's colour -- draws as a zone in that colour
+//   on every grid lens, and recolouring it recolours the drawing.
+//   A fresh document has neither: no object, no wash.
+//   A law with a weekday cycle of another length, or none, gets no weekend it
+//   did not author.
 //
-// Nothing here pins which cycle positions the weekend falls on, and nothing
-// reads a title: the seeded object is found by the PROPERTY that makes it a
-// weekend -- its facts recur on the law's weekday cycle and draw as a zone.
+// NOT IN SCOPE: `grid.washToday` and `grid.washPast` are clock facts,
+// `wall.firstWeekday` rotates the layout. They stay. The weekend was the only
+// encoded meaning.
 
 import 'dart:math';
 import 'dart:ui';
@@ -42,19 +50,17 @@ import 'package:chronolog/core/document.dart';
 import 'package:chronolog/core/exact.dart';
 import 'package:chronolog/core/projection.dart';
 import 'package:chronolog/core/records.dart';
-import 'package:chronolog/edit/editor.dart';
 import 'package:chronolog/lens/lens_painter.dart';
 import 'package:chronolog/lens/painters/month_grid.dart';
 import 'package:chronolog/lens/painters/strategic.dart';
 import 'package:chronolog/lens/painters/tactical.dart';
 import 'package:chronolog/lens/painters/wall.dart';
+import 'package:chronolog/lens/theme.dart';
 import 'package:chronolog/lens/zones.dart';
-import 'package:chronolog/store/document_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../core/corpus.dart';
 import '../helpers/projection_scene.dart';
-import '../store/harness.dart';
 import 'painters/grid_scene.dart';
 
 const String wallTime = 'frame:wall-time';
@@ -112,55 +118,28 @@ List<Color> fillsOf(Document document, String frame, DayGridPainter Function(Len
   return drawn.colors;
 }
 
-/// The seeded weekend, found by what makes it one. Over a window of several
-/// cycles the object's facts land on the same cycle positions every turn, on a
-/// nonempty PROPER subset of them (a weekend that is every day is a day, and one
-/// that is no day is nothing), and each fact draws as a zone.
-String? seededWeekend(Document document, {required int cycles}) {
-  final engine = ProjectionEngine(document);
-  final law = engine.lawOf(wallTime);
-  final radix = law.weekdayNames()!.length;
-  final from = civilDays(2026, 9, 6);
-  final result = engine.queryFacts(
-    Projection.of(const [wallTime]),
-    start: from,
-    end: from + Rational.fromInt(radix * cycles),
+/// THE PERSON'S OWN WEEKEND: a group that says zone and wears a colour, and a
+/// weekly all-day series on the law's weekday cycle whose template is in it.
+/// Which positions are the weekend is the author's -- two are drawn here at
+/// random, because nothing about the claim depends on which.
+({Document document, String group}) authoredWeekend(Random random, String color) {
+  final scene = Scene();
+  scene.group('group:weekend', const [], extra: {
+    'display': {'zone': true},
+    'color': color,
+  });
+  const codes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  final first = random.nextInt(7);
+  final second = (first + 1 + random.nextInt(6)) % 7;
+  final pattern = scene.series(
+    wallTime,
+    {'FREQ': 'WEEKLY', 'BYDAY': '${codes[first]},${codes[second]}'},
+    at: civil(2026, 8, 30, 0),
+    duration: '${24 * 60}',
   );
-  final byObject = <String, Set<int>>{};
-  final zoned = <String, bool>{};
-  for (final fact in result.facts) {
-    final position = law.cycleIndex('weekday', fact.day);
-    if (position == null) continue;
-    (byObject[fact.event.id] ??= {}).add(position);
-    zoned[fact.event.id] = (zoned[fact.event.id] ?? true) && zoneFill(engine, fact, allTunables);
-  }
-  for (final entry in byObject.entries) {
-    final positions = entry.value;
-    if (positions.isEmpty || positions.length >= radix) continue;
-    // Every turn of the cycle, the same positions: count the facts per position
-    // and require one per turn.
-    final perPosition = <int, int>{};
-    for (final fact in result.facts) {
-      if (fact.event.id != entry.key) continue;
-      final position = law.cycleIndex('weekday', fact.day)!;
-      perPosition[position] = (perPosition[position] ?? 0) + 1;
-    }
-    if (perPosition.values.every((count) => count == cycles) && zoned[entry.key] == true) {
-      return entry.key;
-    }
-  }
-  return null;
-}
-
-Future<Editor> editorOver(Document document) async {
-  final store = DocumentStore(
-    dataRoot: 'memory',
-    files: MemoryFiles(),
-    scheduler: ManualScheduler(),
-    establish: () => document,
-  );
-  await store.load();
-  return Editor(store);
+  final template = scene.document.patterns[pattern]!.templateEvent!;
+  scene.join('group:weekend', template);
+  return (document: scene.document, group: 'group:weekend');
 }
 
 /// An 8x8x8 calendar carrying an authored FIVE-position weekday cycle: a law
@@ -199,97 +178,77 @@ void main() {
     );
   });
 
-  test('a fresh Gregorian document ships one seeded weekend: a zone-handled object recurring '
-      'on the law\'s own weekday cycle', () {
-    for (final seed in seeds(3)) {
-      final random = Random(seed);
-      final document = createEmptyWorkspaceDocument(now: DateTime.utc(2026, 9, 1));
-      final found = seededWeekend(document, cycles: 2 + random.nextInt(4));
+  test('a fresh document has no weekend: no object, and no fill on any grid lens', () {
+    // Option (c): "nothing seeded, nothing offered." And the painter knows
+    // nothing about weekends: with no object in the document there is nothing to
+    // draw, and no fill lands in any cell of any sheet.
+    final document = createEmptyWorkspaceDocument(now: DateTime.utc(2026, 9, 1));
+    expect(document.events, isEmpty, reason: 'two structural frames and nothing else');
+    for (final lens in gridLenses) {
+      final fills = fillsOf(document, wallTime, lens.build);
       expect(
-        found,
-        isNotNull,
+        fills,
+        isEmpty,
         reason:
-            'ISSUES 9.2 (seed $seed): "what ships in a fresh document is a seeded weekend object '
-            'on the Gregorian law, visible on the card, renameable, recolourable, deletable -- a '
-            'default the person can read and unsay, not a lens that knows." No object in the '
-            'fresh document recurs on the weekday cycle and draws as a zone.',
+            'ISSUES 9.2: with nothing in the document, ${lens.name} still lays down '
+            '${fills.length} fill(s) -- the lens holds the belief "some positions of the weekday '
+            'cycle are lesser" on its own.',
       );
-      // Nameable: it is an ordinary object in the document, which is what the
-      // object card edits -- not a frame, not a setting, not a pattern alone.
-      expect(document.events.containsKey(found), isTrue, reason: 'the weekend is an object');
     }
   });
 
-  test('the weekend is what the grid paints, in its own authored colour', () {
-    // "its own colour and weight." Meaning is authored: the wash used to be the
-    // theme's muted tone, which no one chose. Two different authored colours
-    // must paint two different fills; there is no colour the painter picks.
-    final document = createEmptyWorkspaceDocument(now: DateTime.utc(2026, 9, 1));
-    final weekend = seededWeekend(document, cycles: 2);
-    if (weekend == null) {
-      fail('ISSUES 9.2: no seeded weekend object to recolour (see the previous case).');
-    }
+  test('an authored weekend draws as a zone in its own colour, on every grid lens', () {
+    // "The weekend is an AUTHORED OBJECT -- a repeating series over the law's
+    // weekday cycle, `display.zone` on its frame, its own colour and weight --
+    // and the painter learns nothing about weekends." Meaning is authored: the
+    // wash used to be the theme's muted tone, which no one chose. The zone's
+    // fill is the one `zoneBand` derives from the authored colour, and two
+    // authored colours paint two different fills.
+    final theme = shipped['paper']!;
     for (final seed in seeds(3)) {
       final random = Random(seed);
-      String hex() =>
-          '#${random.nextInt(1 << 24).toRadixString(16).padLeft(6, '0')}';
+      String hex() => '#${random.nextInt(1 << 24).toRadixString(16).padLeft(6, '0')}';
       final one = hex();
       var other = hex();
       while (other == one) {
         other = hex();
       }
-      Document painted(String color) => document.put(
-        'events',
-        weekend,
-        document.events[weekend]!.withField('color', color),
-      );
       for (final lens in gridLenses) {
-        final first = fillsOf(painted(one), wallTime, lens.build);
-        final second = fillsOf(painted(other), wallTime, lens.build);
-        expect(first, isNotEmpty, reason: 'the weekend paints on ${lens.name}');
+        final first = fillsOf(authoredWeekend(Random(seed), one).document, wallTime, lens.build);
+        final second = fillsOf(authoredWeekend(Random(seed), other).document, wallTime, lens.build);
+        expect(
+          first,
+          isNotEmpty,
+          reason: 'ISSUES 9.2 (seed $seed): the authored weekend paints nothing on ${lens.name}',
+        );
+        final expected = zoneBand(
+          const Rect.fromLTWH(0, 0, 10, 10),
+          parseColor(one)!,
+          zoneWhole,
+          theme,
+          allTunables,
+        ).fill.color;
+        expect(
+          first,
+          contains(expected),
+          reason:
+              'ISSUES 9.2 (seed $seed): ${lens.name} lays no zone fill in the weekend\'s own colour '
+              '$one -- the fill is the lens\'s tone, not the object\'s.',
+        );
         expect(
           first.toSet(),
           isNot(equals(second.toSet())),
-          reason:
-              'ISSUES 9.2 (seed $seed): recolouring the weekend object changed nothing on '
-              '${lens.name} -- the fill is the lens\'s own tone, not the object\'s authored '
-              'colour.',
+          reason: 'recolouring the weekend object recolours the drawing on ${lens.name}',
         );
       }
     }
   });
 
-  test('deleting the seeded weekend leaves no grey anywhere, on every grid lens', () async {
-    // The painter knows nothing about weekends: with the object gone there is
-    // nothing left to draw, and no fill remains in any cell of any sheet.
-    final document = createEmptyWorkspaceDocument(now: DateTime.utc(2026, 9, 1));
-    final weekend = seededWeekend(document, cycles: 2);
-    final editor = await editorOver(document);
-    if (weekend != null) editor.deleteObject(weekend);
-    for (final lens in gridLenses) {
-      final fills = fillsOf(editor.document, wallTime, lens.build);
-      expect(
-        fills,
-        isEmpty,
-        reason:
-            'ISSUES 9.2: with no weekend object in the document, ${lens.name} still lays down '
-            '${fills.length} fill(s) -- the lens holds the belief "some positions of the weekday '
-            'cycle are lesser" on its own.',
-      );
-    }
-    // And the unsaying is undoable like everything else, which is what makes a
-    // shipped default safe to delete.
-    if (weekend != null) {
-      expect(editor.undo(), isTrue);
-      expect(editor.document.events.containsKey(weekend), isTrue);
-    }
-  });
-
   test('a law with a weekday cycle of another length gets no weekend it did not author', () {
     // "otherwise it may break with a non-Gregorian calendar." A five-day week
-    // under an 8x8x8 ladder: the fresh document's weekend is stapled to wall
-    // time and says nothing about this frame, so this frame has no weekend --
-    // and a painter that greyed position 0 here would be inventing one.
+    // under an 8x8x8 ladder: nobody authored a weekend on this frame, so this
+    // frame has no weekend -- and a painter that greyed position 0 here would be
+    // inventing one.
     final document = createEmptyWorkspaceDocument(now: DateTime.utc(2026, 9, 1)).put(
       'frames',
       'frame:five',
@@ -319,10 +278,10 @@ void main() {
   });
 
   test('a law with no weekday cycle at all projects no weekend', () {
-    // A world with no week has no weekend. The invented pen-stroke ladder from
-    // the staple world has no cycle; the seeded object, stapled to wall time,
-    // must not reach it through any route nobody authored.
-    final document = createEmptyWorkspaceDocument(now: DateTime.utc(2026, 9, 1)).put(
+    // A world with no week has no weekend. The invented pen-stroke ladder has no
+    // cycle; an authored weekend on wall time must not reach it through any
+    // route nobody authored.
+    final authored = authoredWeekend(Random(specSeed), '#336699').document.put(
       'frames',
       'frame:invented',
       const Frame(
@@ -332,7 +291,7 @@ void main() {
         extra: {'coordinate': inventedLaw},
       ),
     );
-    final engine = ProjectionEngine(document);
+    final engine = ProjectionEngine(authored);
     expect(engine.lawOf('frame:invented').hasWeekdays(), isFalse);
     final result = engine.queryFacts(
       Projection.of(const ['frame:invented']),
@@ -342,7 +301,7 @@ void main() {
     expect(
       result.facts,
       isEmpty,
-      reason: 'the fresh document\'s weekend says nothing about a frame with no week',
+      reason: 'a weekend authored on wall time says nothing about a frame with no week',
     );
   });
 }

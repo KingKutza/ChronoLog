@@ -9,16 +9,36 @@
 //   grouped and weight-ordered, so a cell of N nameless facts draws all N while
 //   N x footprint <= the cell's area. Hover names any mark.
 //
+// The hover: "a label plate (title, when, frame) after `pointer.hoverMillis`,
+// one shared affordance for every lens mark (the drag ghost's plate painter
+// already draws exactly this shape and melts into it), so a pip anywhere can be
+// read without a click." Painters draw their text through the canvas, so a
+// widget Text carrying the fact's title can only be the plate.
+//
 // Generative: a random day and a random count.
 
 import 'dart:io';
 import 'dart:math';
 
+import 'package:chronolog/app.dart';
+import 'package:chronolog/chrome/controls.dart';
+import 'package:chronolog/chrome/shell.dart';
+import 'package:chronolog/core/document.dart';
+import 'package:chronolog/core/exact.dart';
+import 'package:chronolog/edit/editor.dart';
+import 'package:chronolog/lens/lens_painter.dart';
 import 'package:chronolog/lens/painters/strategic.dart';
-import 'package:flutter/painting.dart';
+import 'package:chronolog/lens/theme.dart';
+import 'package:chronolog/lens/view_tile.dart';
+import 'package:chronolog/session/view_state.dart';
+import 'package:chronolog/stage/tile.dart';
+import 'package:chronolog/store/document_store.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../helpers/projection_scene.dart';
+import '../store/harness.dart';
 import 'painters/grid_scene.dart';
 
 final int runSeed =
@@ -26,16 +46,10 @@ final int runSeed =
     DateTime.now().microsecondsSinceEpoch;
 
 const String frameId = 'calendar:a';
+const String wallTime = 'frame:wall-time';
+const String tileId = 'view:1';
 
-Map<String, Object?> at(int day, int hour) => {
-  'levels': [
-    {'level': 'year', 'value': '2026'},
-    {'level': 'month', 'value': '9'},
-    {'level': 'day', 'value': '$day'},
-    {'level': 'hour', 'value': '$hour'},
-    {'level': 'minute', 'value': '0'},
-  ],
-};
+Map<String, Object?> at(int day, int hour) => civil(2026, 9, day, hour, 0);
 
 void main() {
   // ignore: avoid_print
@@ -68,14 +82,82 @@ void main() {
     );
   });
 
-  test('hover names any mark', () {
-    // WORK ITEM (ISSUES 9.2): the view tile's hover sets the cursor and nothing
-    // else. When the shared hover plate exists (the drag ghost's plate painter,
-    // melted), this test hovers a registered hit and asserts a plate carrying the
-    // fact's title is painted.
-    fail(
-      'ISSUES 9.2: no hover label exists on any lens mark. Melt the ghost\'s plate into a '
-      'shared hover affordance after `pointer.hoverMillis`, then assert the title here.',
+  testWidgets('hover names any mark', (tester) async {
+    // "Hovering any registered hit paints a plate containing the fact's title."
+    // The mark here is a Strategic pip -- weight standard, so nothing names it
+    // at rest -- and the wait is the settings' own `pointer.hoverMillis`.
+    registerShippedLenses();
+    final store = DocumentStore(
+      dataRoot: 'memory',
+      files: MemoryFiles(),
+      scheduler: ManualScheduler(),
+      establish: createEmptyWorkspaceDocument,
+    );
+    await tester.runAsync(store.load);
+    final settings = chronologSettings();
+    expect(
+      settings.expressionOf('pointer.hoverMillis'),
+      isNotEmpty,
+      reason: 'ISSUES 9.2: how long a hover waits before naming is a settings key',
+    );
+    final editor = Editor(store, settings: settings.tunable);
+    final views = ViewBook()..defaultFrames = [wallTime];
+    views.of(tileId).lensId = 'strategic';
+    final stage = Stage(tunable: settings.tunable, onLens: views.setLens);
+    final tile = ViewTile(
+      tileId: tileId,
+      surface: (
+        editor: editor,
+        settings: settings,
+        views: views,
+        stage: stage,
+        objectCard: null,
+        frameCard: null,
+        settingsCard: null,
+      ),
+    );
+    stage.open(TileSpec(id: tileId, type: 'view', klass: 'lens', title: 'View', build: (_) => tile));
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: themeDataFor(shipped['paper']!),
+        home: Scaffold(
+          body: ChromeScope(
+            chrome: Chrome(settings: settings, stage: stage, views: views, editor: editor),
+            child: Center(child: SizedBox(width: 1400, height: 800, child: tile)),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final focus = views.focusOf(tileId);
+    final title = 'Pip ${random.nextInt(1 << 20)}';
+    final id = editor.createAt(wallTime, focus, focus + Rational.fromInt(1, 24));
+    editor.transaction(
+      'Name it',
+      (d) => d.put('events', id, d.events[id]!.copyWith(payload: {...?d.events[id]!.payload, 'title': title})),
+    );
+    await tester.pumpAndSettle();
+    final paints = tester.widgetList<CustomPaint>(
+      find.byWidgetPredicate((widget) => widget is CustomPaint && widget.painter is BledPainter),
+    );
+    final painter = (paints.first.painter! as BledPainter).lens;
+    final hit = painter.hits.firstWhere((hit) => hit.fact.event.id == id);
+    expect(find.text(title), findsNothing, reason: 'at rest a pip has no name: nothing to read');
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getTopLeft(find.byType(ViewTile)) + hit.bounds.center);
+    await tester.pump();
+    await tester.pump(Duration(milliseconds: settings.value('pointer.hoverMillis').round().toInt() + 50));
+    expect(
+      find.textContaining(title),
+      findsWidgets,
+      reason:
+          'ISSUES 9.2: "hover to view the event" -- the view tile\'s hover sets the cursor and '
+          'nothing else. After `pointer.hoverMillis` a plate names the mark under the pointer.',
     );
   });
 }

@@ -6,8 +6,20 @@
 // the pointer handler. The rule:
 //
 //   Paint budgets are settings. A seeded document of 5,000 events, 200 series
-//   and 50 frames paints Strategic within `perf.paintMillis`, and a lens paint
-//   asks the engine for its window ONCE, bucketing afterwards.
+//   and 50 frames paints Strategic within `perf.paintMillis` at a span Strategic
+//   is FOR, and a lens paint asks the engine for its window ONCE, bucketing
+//   afterwards.
+//
+// THE SPAN IS STRATEGIC'S OWN. Don's field report -- "Strategic does not like
+// it when I zoom out to show a decade or two at once. Chug chug" -- was
+// corrected by Don himself: "looking at the minimap, I think it is 1/2
+// centuries. We need super strat, and more butter." A century is about 1,200
+// rows of 31 cells, and the honest answer there is a different lens, promoted
+// to ROADMAP #6 (the super-strategic band). So this light is lit at the
+// shipped `strategic.months`, which is the season Strategic exists to draw, and
+// the century case is #6's, not a Strategic bug.
+//
+// The budget is a settings key, never a literal here.
 //
 // Generative: seeded placements and rules, fresh each run.
 
@@ -15,6 +27,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:chronolog/chrome/shell.dart';
+import 'package:chronolog/core/records.dart';
 import 'package:chronolog/lens/painters/strategic.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,14 +46,14 @@ void main() {
 
   test('Strategic first paint over a massive calendar stays within the settings budget', () {
     final settings = chronologSettings();
-    final budget = settings.expressionOf('perf.paintMillis');
-    if (budget.isEmpty) {
-      fail(
-        'ISSUES 9.2: no `perf.paintMillis` setting exists. Performance budgets are settings '
-        'keys like every other tunable; add it (and `perf.frameMillis`), then this test times '
-        'the paint against it.',
-      );
-    }
+    expect(
+      settings.expressionOf('perf.paintMillis'),
+      isNotEmpty,
+      reason:
+          'ISSUES 9.2: no `perf.paintMillis` setting exists. Performance budgets are settings '
+          'keys like every other tunable; add it (and `perf.frameMillis`), and this test times '
+          'the paint against it.',
+    );
     final world = World();
     for (var i = 0; i < 5000; i += 1) {
       world.object(
@@ -58,14 +71,17 @@ void main() {
       world.document = world.document.put(
         'frames',
         'group:$i',
-        world.document.frames.values.first.copyWith(id: 'group:$i', title: 'Group $i'),
+        Frame(id: 'group:$i', title: 'Group $i', traits: const ['set', 'group']),
       );
     }
+    // The season Strategic is for: its own shipped months, read as the view
+    // would read them, never a number typed here.
     final lens = sceneOf(
       world.document,
       const ['calendar:work'],
       size: const Size(1600, 1000),
       focus: civilDays(2026, 6, 15),
+      view: {'months': settings.raw('strategic.months')},
     );
     final painter = StrategicPainter(lens);
     final watch = Stopwatch()..start();
@@ -75,8 +91,9 @@ void main() {
       watch.elapsedMilliseconds,
       lessThanOrEqualTo(settings.value('perf.paintMillis').toDouble()),
       reason:
-          'ISSUES 9.2: Strategic asked the engine once per DAY of the season. One windowed '
-          'query per paint, bucketed by day afterwards.',
+          'ISSUES 9.2: Strategic asked the engine once per DAY of the season '
+          '(${watch.elapsedMilliseconds} ms). One windowed query per paint, bucketed by day '
+          'afterwards; the century case is ROADMAP #6, not this light.',
     );
   });
 }
