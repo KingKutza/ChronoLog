@@ -101,6 +101,11 @@ class StapleKind {
   final bool anchors;
 }
 
+/// THE WORD AN ANCHORING STAPLE IS SPELLED WITH, said once. Every writer that
+/// means "this point is that point" reaches for this rather than retyping the
+/// word, so the day the registry retires there is one site to answer for.
+const String anchorStapleKind = 'anchor';
+
 /// The registered kinds. Adding one is an entry plus its interpretation.
 ///
 /// Constraint bounds ("can't go later than like 7:30/8") are deliberately NOT

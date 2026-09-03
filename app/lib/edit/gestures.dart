@@ -116,7 +116,7 @@ extension Gestures on Editor {
       }
       return putStaple(
         next,
-        kind: 'anchor',
+        kind: anchorStapleKind,
         ends: [
           ObjectEnd(event.id, point: 'start'),
           ObjectEnd(stapledTo, point: 'start'),
@@ -344,4 +344,47 @@ extension Gestures on Editor {
     contained ? 'Contain object' : 'Release object',
     (current) => withContains(current, parentId, childId, contained),
   );
+
+  // --- Saying one sentence over a selection ----------------------------------
+
+  /// STAPLE EACH OF THESE TO THAT: N two-ended staples (Don, ISSUES 9.2).
+  ///
+  /// "Every selected start is that end, graph distance 1 from the target and the
+  /// selected objects NOT connected to one another." Each object gets its own
+  /// record, so the only thing the selection shares is what it was stapled to --
+  /// which is what a person who selected many and said one thing meant.
+  ///
+  /// ONE TRANSACTION, ONE UNDO ENTRY. A mass edit that undid a row at a time
+  /// would make the selection a thing the history has to be replayed to see.
+  void stapleEach(Iterable<String> objects, StapleEnd far, {String point = startPoint}) =>
+      transaction('Staple each', (current) {
+        var next = current;
+        for (final objectId in objects) {
+          next = putStaple(
+            next,
+            id: createId('relation'),
+            kind: anchorStapleKind,
+            ends: [ObjectEnd(objectId, point: point), far],
+          ).document;
+        }
+        return next;
+      });
+
+  /// STAPLE ALL OF THESE TOGETHER TO THAT: ONE staple with N+1 ends.
+  ///
+  /// "n points are one point" said at its full width -- the metal does exactly
+  /// this and nothing about it is a special case of the two-ended form. Graph
+  /// distance 0: the selected objects are all one point WITH the target, which
+  /// is the whole difference from [stapleEach] and the reason the alternate
+  /// gesture exists at all.
+  void stapleAsOne(Iterable<String> objects, StapleEnd far, {String point = startPoint}) =>
+      transaction(
+        'Staple all as one',
+        (current) => putStaple(
+          current,
+          id: createId('relation'),
+          kind: anchorStapleKind,
+          ends: [for (final objectId in objects) ObjectEnd(objectId, point: point), far],
+        ).document,
+      );
 }

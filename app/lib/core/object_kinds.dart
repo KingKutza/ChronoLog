@@ -58,12 +58,51 @@ const Set<String> controlledTraits = {'event', 'task', 'todo', 'note'};
 String normalizeObjectKind(Object? value) =>
     objectKinds.containsKey(value) ? value as String : 'event';
 
-String objectKindForEvent(Event? event) {
-  final traits = event?.traits ?? const <String>[];
-  if (traits.contains('task') || traits.contains('todo')) return 'todo';
-  if (traits.contains('note')) return 'note';
-  return 'event';
+/// WHICH ROW OF THE CATALOG AN OBJECT WEARS, and the catalog is a PARAMETER.
+///
+/// "A catalog, not a type system: a fourth kind is a row ... nothing below
+/// branches on which key it is." This used to read `traits.contains('task')`
+/// and two more like it, which is exactly the written list that made a fourth
+/// kind a code change. The rule instead is a fit, scored:
+///
+///  * a row is a CANDIDATE when the object wears any of its traits;
+///  * THE MOST SPECIFIC BUNDLE WINS -- the candidate the object wears the most
+///    of, so an object wearing the meeting bundle is a meeting and not an event
+///    that happens to carry an extra trait;
+///  * a tie goes to the row with the least left unworn, so an object wearing
+///    the bare `event` trait is an event rather than the half of some richer
+///    bundle it also satisfies, and then to the key, so one document reads one
+///    way everywhere.
+///
+/// Overlap rather than containment, because a trait bundle is a description and
+/// not a schema: an object carrying `event` and `task` but never `todo` is the
+/// task somebody wrote, and demanding the whole bundle would silently demote it
+/// to a plain point.
+///
+/// An object no row touches at all is a [fallbackObjectKind]: the plainest
+/// thing the catalog can say about it, never a refusal, because the trait
+/// vocabulary is the author's and they may write in it freely.
+String objectKindForEvent(Event? event, {Map<String, ObjectKind> kinds = objectKinds}) {
+  final worn = (event?.traits ?? const <String>[]).toSet();
+  String? best;
+  var fit = 0, spare = 0;
+  for (final key in kinds.keys.toList()..sort()) {
+    final traits = kinds[key]!.traits;
+    final overlap = traits.where(worn.contains).length;
+    if (overlap == 0) continue;
+    final unworn = traits.length - overlap;
+    if (best == null || overlap > fit || (overlap == fit && unworn < spare)) {
+      best = key;
+      fit = overlap;
+      spare = unworn;
+    }
+  }
+  return best ?? fallbackObjectKind;
 }
+
+/// The row an object nothing else fits reads as. A spelling, not a privilege:
+/// no derivation asks whether a kind is THIS kind.
+const String fallbackObjectKind = 'event';
 
 List<String> traitsForObjectKind(Iterable<String>? existing, Object? kind) => {
   ...objectKinds[normalizeObjectKind(kind)]!.traits,

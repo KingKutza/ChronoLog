@@ -32,19 +32,6 @@ const _freqs = ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'];
 const _codes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 const _monthCodes = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
 
-// Parts the standards define as deciding which occurrences a rule names, that
-// this build does not implement. Silence about one of these is the divergence
-// the ruling killed, in the other direction.
-const _unimplementedParts = [
-  'BYSECOND',
-  'BYMINUTE',
-  'BYHOUR',
-  'BYYEARDAY',
-  'BYWEEKNO',
-  'BYSETPOS',
-  'WKST',
-  'SKIP',
-];
 
 // Days that always cover one cycle of each frequency, for sizing a window that
 // holds a known number of cycles, and a cap on how many cycles a generated
@@ -626,8 +613,11 @@ void main() {
         final rule = _randomRule(r);
         final base = _randomBase(r);
         final window = _window(r, rule, base);
-        final part = _unimplementedParts[r.nextInt(_unimplementedParts.length)];
-        final value = part == 'WKST' ? _codes[r.nextInt(7)] : '${1 + r.nextInt(9)}';
+        // THE PARTS THIS BUILD REALLY LACKS, asked of the build. A copy here
+        // went stale the day BYSETPOS and WKST were implemented, and a spec
+        // asserting a snapshot asserts nothing.
+        final part = unimplementedRuleParts[r.nextInt(unimplementedRuleParts.length)];
+        final value = '${1 + r.nextInt(9)}';
         rule[part] = value;
         expect(
           () => _days(rule, base, window.lower, window.upper),

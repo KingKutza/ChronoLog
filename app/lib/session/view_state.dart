@@ -13,6 +13,7 @@ import '../core/frame_selection.dart';
 import '../core/math.dart';
 import '../core/projection.dart';
 import 'lens_catalog.dart';
+import 'point_pick.dart';
 import 'settings.dart';
 
 class ViewState {
@@ -147,6 +148,19 @@ class ViewState {
     }
   }
 
+  /// WHAT WAS SAID, as against where the eye happened to be.
+  ///
+  /// "A write a GESTURE produced -- pan, zoom, focus, which tile the eye is on
+  /// -- is where you are looking rather than what you said ... This also
+  /// settles what a named view is: exactly the second category, made durable on
+  /// purpose." (Don, the settings-undo ruling.) So a named view is THIS: lens,
+  /// projection expression, columns in order with their own expressions, the
+  /// lens's own keys -- and never the focus.
+  ///
+  /// It is [toJson] minus the focus rather than a second serializer, so a named
+  /// view and a saved view file cannot drift apart in what they think a view is.
+  Map<String, Object?> get said => {...toJson()}..remove('focus');
+
   Map<String, Object?> toJson() => {
     'lens': lensId,
     'frames': selection.selected(),
@@ -175,7 +189,23 @@ class ViewState {
 /// What `chronolog.view` holds: the per-tile view state, the shared focus, and
 /// the lens order and hidden set.
 class ViewBook extends ChangeNotifier {
-  ViewBook({Rational? sharedFocus}) : sharedFocus = sharedFocus ?? nowDays();
+  ViewBook({Rational? sharedFocus}) : sharedFocus = sharedFocus ?? nowDays() {
+    // One mode, relayed: a surface already listening to the book to know what
+    // it is showing learns that a pick is armed through the same listenable,
+    // rather than every tile subscribing to a second one.
+    pick.addListener(notifyListeners);
+  }
+
+  /// THE ONE POINT-CAPTURE MODE, on the session because a card and a tile both
+  /// hold the book. Armed by Pick, answered by whichever surface is clicked.
+  final PointPick pick = PointPick();
+
+  @override
+  void dispose() {
+    pick.removeListener(notifyListeners);
+    pick.dispose();
+    super.dispose();
+  }
 
   Rational sharedFocus;
   final Map<String, ViewState> views = {};
@@ -193,6 +223,19 @@ class ViewBook extends ChangeNotifier {
     focusDays: sharedFocus,
     selection: FrameSelection(defaultFrames),
   );
+
+  /// SHOW A NAMED VIEW IN ONE TILE: everything [ViewState.said] carries is
+  /// adopted and the tile's FOCUS IS LEFT ALONE, because where the eye is
+  /// looking is this tile's business and never the board's.
+  ///
+  /// Replaces rather than mutates, so what lands is exactly what a reload of
+  /// the same record would produce -- a named view that showed differently the
+  /// second time would not be a named view.
+  void showSaid(String tileId, Map<String, Object?> said) {
+    final focus = views.containsKey(tileId) ? views[tileId]!.focusDays : sharedFocus;
+    views[tileId] = ViewState.fromJson({...said, 'focus': focus.toJson()});
+    notifyListeners();
+  }
 
   void setLens(String tileId, String lensId) {
     if (!lensCatalog.containsKey(lensId)) return;

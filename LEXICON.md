@@ -292,7 +292,8 @@ Rulings and additions (Don, 2026-08-31, SENTENCES.md alignment rounds):
   this order as this list of decimals."
 
 - **The trinity, restated for clarity** (Don): "No Enums, No Special cases,
-  No Hard coded values."
+  No Hard coded values." Enum is the enemy: "any system that encodes a right
+  way does in the same breath preclude other ways."
 
 ## Vocabulary (time-traveler framing, from ReadMe.txt and the pr-2 mockup)
 

@@ -191,8 +191,13 @@ String? unsupportedCalendarScale(RRule rrule, ScaleRegistry isRegisteredScale) {
 // them refused to project. WKST rides with it because it changes what "every two
 // weeks" means, and a build that honours one and refuses the other would answer
 // half of an ordinary export.
-final Set<String> _unimplementedParts =
-    'BYSECOND BYMINUTE BYHOUR BYYEARDAY BYWEEKNO SKIP'.split(' ').toSet();
+///
+/// PUBLIC, and read by the spec rather than copied into it: a second list of
+/// the parts this build lacks is a list that goes stale the day one is
+/// implemented, which is exactly how BYSETPOS and WKST came to be refused in a
+/// test and generated in the engine at the same time. There is one list.
+final List<String> unimplementedRuleParts =
+    'BYSECOND BYMINUTE BYHOUR BYYEARDAY BYWEEKNO SKIP'.split(' ');
 
 // RFC 5545 section 3.3.10's filter/expand model, stated once as the parts each
 // frequency EXPANDS: a BY* part finer than the frequency multiplies occurrences
@@ -249,7 +254,7 @@ List<Rational> ruleOccurrenceDays(
   // In the rule's own written order, so the author is told about the first part
   // that defeated the projection rather than the first this build thought of.
   for (final part in rule.keys) {
-    if (_unimplementedParts.contains(part) && _part(rule, part) != null) {
+    if (unimplementedRuleParts.contains(part) && _part(rule, part) != null) {
       _refuse(_unimplemented('part', part, rule[part]!));
     }
   }
@@ -324,6 +329,23 @@ List<Rational> ruleOccurrenceDays(
     _refuse(
       'RRULE BYSETPOS counts from 1 or back from -1, never 0'
       ' (BYSETPOS=${rule['BYSETPOS']}).',
+    );
+  }
+  // RFC 5545 section 3.3.10: BYSETPOS "MUST only be used in conjunction with
+  // another BYxxx rule part". It indexes the set the other parts built, so on
+  // its own it is a position into a set nobody described -- and this build used
+  // to answer it anyway, by indexing the one candidate the frequency's own base
+  // instant supplies, which turns "the first of nothing said" into a full
+  // expansion the author never wrote. A constraint the standard states, applied
+  // to every BYSETPOS rule alike; nothing here is a case.
+  if (positions != null &&
+      !rule.keys.any(
+        (part) => part != 'BYSETPOS' && part.startsWith('BY') && _part(rule, part) != null,
+      )) {
+    _refuse(
+      'RRULE BYSETPOS indexes the set the other BY parts name, and this rule'
+      ' names none (BYSETPOS=${rule['BYSETPOS']}); the rule is kept but cannot'
+      ' be projected.',
     );
   }
 

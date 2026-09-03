@@ -128,10 +128,13 @@ void main() {
           ],
           groups: groups,
         );
-        final expected = states.contains(doneStateFrameId)
-            ? 'done'
-            : states.isNotEmpty
-            ? 'closed'
+        // DONE IS A FRAME LIKE ANY OTHER (ISSUES 9.2). This ladder used to
+        // read `doneStateFrameId` for its first rung and call every other state
+        // frame `closed` -- the very split the ruling deleted, which is why the
+        // frames below are built indistinguishable but for their ids. Somebody
+        // said a status, or nobody did.
+        final expected = states.isNotEmpty
+            ? resolvedStateWord
             : (described || groups.isNotEmpty || stapled)
             ? null
             : 'sparse';

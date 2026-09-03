@@ -1,226 +1,246 @@
 # Roadmap
 
-Ordered by priority. Done items are removed, not archived — git history is
-the archive.
+## The sentence, the set, and the column
 
-1. **Chrome and stage polish** — the rolling bucket; it never empties, by
-   nature. Current contents: edge-flip and z-level are properties of one
-   shared dropdown class that every bar dropdown inherits; the lens bar
-   puts its hamburger on the right edge and its options fill the bar;
-   the dock-side toggle gets a label; the lens workspace compacts (name,
-   checkbox, up/down on one line; descriptions with the tags; no
-   scrolling); swap "jump to today" and "reset lens"; minimap dot
-   tuning — more visibility into what counts as a dot and how dots
-   accumulate. Bar controls derive their height from their bar through
-   one shared class rather than hand-picked pixel values. The
-   stage-takeover settings window is cut: settings arrive incrementally
-   in existing surfaces and dock cards — the document control opens a
-   document/settings card carrying the snapshot-compaction period, and
-   the series projection horizon is the one setting still unexposed,
-   because it is a literal in the engine with no field to bind to. Parked from the 8.19 wave:
-   ToDo-tailored editor fields (recurrence rows, location, and
-   calendar-vs-list framing are still event-shaped); exposing
-   many-to-many event↔frame attachment in the editor (frame selection is
-   one class with an explicit primary marker and every selected frame
-   overlays; the editor side did not land); transaction-aware Apply for
-   undo-tracked surfaces (the event editor and frame forms need more than
-   a button). Frame overlay selection is session view state — a document
-   authored before that change is bridged into the session once.
-2. **ToDo and Notes** — the todo model is ruled (see LEXICON.md,
-   2026-08-25 rulings) and building: state is a frame (done is a frame a
-   todo affiliates with; the completion instant is a terminal end-staple;
-   the legacy completed relation migrates); staples are directional, not
-   typed (no due kind — a due reading derives from the arrow of time, and
-   a due staple can place a todo across the spectrum from now until due);
-   `contains` lets any object hold any objects with no judgment on the
-   family tree, so a list or project is a container object, never a group
-   frame, and task↔project needs no promotion; apparent magnitude with a
-   per-lens falloff over distance from an object's staple-span home
-   replaces keep-range (importance groups modify magnitude; the fixed
-   standard/important/landmark enum retires by migration); there are no
-   filters — projecting or dropping state frames does that job. Two todo
-   lenses, list and board (a gantt may follow), independent projections
-   like Spiral and Radial; three capture modes (quick delimited line,
-   tab-through fields, placed in a lens); title-only items read sparse at
-   a glance. ICS todo mapping (DUE, STATUS, PRIORITY) is held until the
-   model settles; VTODO import/export behavior is preserved through the
-   migration. Reconciling the staple-kind registry with the directional
-   ruling is a later pass. **The Notes
-   default is Obsidian-shaped**: a name, properties and tags (groups)
-   under a rolled-up section, and a big markdown text window that renders
-   everything except the line under the cursor in edit mode. Staples
-   occur naturally at creation and edit, can be typed inline
-   ([8.19@7:22]) in the text, or entered as freeform fields/properties;
-   the note appears wherever it is stapled, and which staples render in
-   which lenses is configurable (per group or globally: every edit, only
-   creation, only inline references, only properties, combinations).
-   This generalizes: todos, events, and any future object carry
-   arbitrarily many staples of arbitrary type, arbitrarily placed, and
-   render accordingly. Advanced identity may build gestalt note-event
-   hybrids, but that is not the default. Includes the sigils-and-zones
-   display work and an ICS path (VJOURNAL). Labeled as work, not settled
-   design.
-3. **Obsidian integration** — ChronoLog works an Obsidian vault directly:
-   settings take a path and naming scheme for a daily-notes folder and
-   everything works back and forth effortlessly in both apps; same for
-   meeting/event notes and for todos in linked folders. Markdown files
-   are the interchange boundary for notes, as ICS is for calendars —
-   severance doctrine, no plugin API coupling.
-4. **Staple display and constraint staples** — the substrate ships (see
-   AGENTS.md, "Staples"): staples are an open collection on any object,
-   `kind` is validated against a registry rather than hardcoded, and the
-   derivations cover anchoring with derived magnitudes, series rule
-   segments, per-staple fuzziness, occurrence phase, and exclusions as
-   live references to another frame's events. The Rob-and-John scenario
-   passes beat by beat, end-anchored events place from where they stop,
-   and the editor authors the whole collection including the rule that
-   follows an inflection. What remains is display and one unruled
-   shape. **The warp**: cross-frame projection exists only through staples,
-   and multiple staples between two frames define the correspondence exactly at
-   each stapled point without ever averaging into a rigid offset (see AGENTS.md,
-   "Coordinate law"). Between stapled points the mapping stretches, and that
-   stretch is authored meaning — "we place 8 that is where lines shows us the
-   warp." The substrate keeps every point exact and claims nothing about the
-   space between them; DRAWING the stretch is Lines-lens work and is undesigned.
-   **Fuzzy rendering**: uncertainty reaches the renderer as data
-   and is marked, but the display language for it is undesigned — a
-   spread wants sigils and zones that read at a glance without piling
-   information on the eye, the same problem #2's decay work faces, and
-   the two should be designed together. **Overdetermined anchors** are
-   reported and never averaged; how a lens should *show* that an
-   authored staple is not being believed is undesigned. **Constraint
-   bounds** ("can't go later than like 7:30/8") stay unruled — LEXICON.md
-   reads them as a bound distinct from the fuzzy actual, and the kind
-   registry is a one-entry path once the semantics are decided.
-   A named anchor point's relationship to a second anchor derives no
-   magnitude on purpose; whether it should is unruled. Rule extent
-   (indefinite) is distinct from projection horizon (bounded, ~2 years) —
-   the horizon is still a literal in the engine rather than a setting,
-   and exposing it is the last piece of #1's settings work.
-5. **One cycle idea, and coordinates authored on it** (ruled 2026-09-02,
-   deliberately parked here for consideration) — a recurring event, a
-   cycle, and every repeating structure beside them are ONE object, and
-   today they are three mechanisms: recurrence is a rule that generates
-   occurrences (`core/rrule.dart`), a cycle is something the coordinate
-   law declares, and a weekend is an authored group over a cycle. Same
-   idea, said three ways, which is the trinity's own complaint. The one
-   object is a period, an epoch anchor, and names — nothing else — and
-   everything above is that object with different numbers in it. THE
-   SECOND HALF, and the reason this is not merely tidying: a coordinate
-   must be authorable NATIVELY ON AN ATTACHED CYCLE, so "third Monday"
-   is a valid coordinate rather than a recurrence special-case. That is
-   an ordinal selection over a cycle position within a containing level,
-   and it subsumes what ICS spells `BYDAY=3MO` and `BYSETPOS` — those
-   become a TRANSLATION at the calendar boundary, never the mechanism.
-   An occurrence then stops being something a rule generates and becomes
-   something a coordinate names, read by the projection engine through
-   the same path every other coordinate takes. THE CALENDAR-AS-SYNTHESIS
-   QUESTION RIDES HERE (Don, 9.2): whether n frames each contributing a
-   rule compose into one basis frame. The analysis is in ISSUES.md and
-   its conclusion is a distinction, not a yes — a CYCLE contribution
-   (period, epoch, names) composes freely and is order-independent,
-   because two cycles never read each other; a STRUCTURE contribution
-   (levels, radices, intercalation) may be owned by exactly one frame,
-   and an overlap is a refusal in prose rather than a precedence rule,
-   because a precedence rule is an encoded right way. Parked on purpose:
-   Don, "so we have time to give more consideration, before we blunder
-   in and turn 7 heads to 14." It is a change to the substrate every
-   surface reads and must not share a wave with surface work. Subsumes
-   the authoring problem in #6 and the prerequisite in #7; the lunisolar
-   case (month depends on observation, year's month-count depends on the
-   moon) is a fixed point rather than a stack and is the hard edge to
-   design against, not to discover later.
-6. **Super-strategic band** (naming candidate: the epoch view) — the lens
-   beyond Strategic: decades to centuries to millennia or longer. PROMOTED
-   2026-09-02 on Don's field report — he zoomed Strategic out, felt it chug,
-   checked the minimap and found he was asking it for one or two CENTURIES:
-   "we need super strat, and more butter." That is not a Strategic
-   optimisation, it is Strategic running out. Strategic is one row per month
-   and one column per day of that month, so a century is about 1,200 rows of
-   31 cells and the honest answer at that span is a different lens, not a
-   faster one. What it needs is already being ruled elsewhere: the query
-   coarsens with the cell (facts while a cell can draw them, density below
-   that — `core/strategic_density.dart` is the reading), one windowed
-   bucketed query rather than one per day, and a span said as a unit and a
-   number so a century is typed rather than reached by holding an arrow. AND
-   MORE BUTTER — motion at this scale is where jank shows worst, so the band
-   is transform-only, glides on the existing curve settings, and never
-   commits inside a pointer handler. Pairs with #7's epochs and ages, and
-   with #5: a band over centuries wants cycle-native coordinates more than
-   any other surface, because nothing below the year is legible there.
-7. **Pattern authoring beyond the RRULE dropdown** — the repeat control
-   is a rigid list of common Gregorian periods. "Every odd day of every
-   even month of every odd year, except where any of those numbers is
-   prime" is a repeat pattern with no entry path — and the dropdown
-   plays worse still with non-Gregorian calendars. The formula language
-   exists for exactly this; the authoring surface doesn't. Needs design
-   alongside #4.
-8. **Custom calendars are first-class** — the prerequisite stage has
-   shipped: the frame's coordinate declaration is the executed law. One
-   coordinate-arithmetic engine (`src/coordinate-law.js`, and AGENTS.md's
-   "Coordinate law") reads the levels / radix / transition ladder, the
-   exact.js civil functions are the registered Gregorian entries rather
-   than a bypass, calendar families are CLDR calendar scales so a new
-   calendar is one registration, and the ~50 call sites that carried
-   24/1440/86400 and a float mean month now ask the governing frame.
-   Setting hours-per-day to 23 moves engine occurrence math, projection
-   layout, minimap strides, duration magnitudes, drag snapping and the
-   editor together. The frame editor authors that declaration directly —
-   levels, radices, transitions, names, and cycles, with weekday names as
-   a cycle rather than a level — on Wall Time, which is the frame every
-   derived calendar inherits from. ICS is a lossy boundary with a settled
-   contract, including RFC 7529 `RSCALE` import/export.
-   What remains. **Positional conversion for a fully custom ladder**: a
-   `fixed`-block calendar still reads its base level as a day count
-   rather than converting its own year/month/day to a day ordinal, and
-   the Gregorian month-boundary walks in the minimap and Radial are
-   still the registered ladder's own. **Projection export** of a series
-   ICS cannot express. Then the surface work, with custom
-   day/month/year names: the minimap must respect the new names; units
-   must be addable/removable; Strategic must adapt (full months per
-   line, weeks per line, custom month labels) and Wall the same; no
-   artificial Now line on a calendar with no now-mapping; jump-to-date
-   must exist. **Epochs shipped as true eras** (ruling: "Hard No. Epochs,
-   true epochs no faking"): an era is a level of the coordinate, not a
-   label over a linearized year, per-era numbering direction is
-   first-class so BCE and Merethic both count down, one authored anchor
-   derives every era's range, and a table that contradicts itself is
-   refused before it is stored — see AGENTS.md, "Coordinate law". Era
-   tables are opt-in per declaration, so a document without one is
-   unchanged. The uniform positional family landed with them, so a wholly
-   invented calendar converts through the registry. What remains of the
-   era work: the Now-line guard is written but not yet applied at the
-   three `src/projections.js` sites, and the era-qualified year has not
-   reached the event editor's own fields. Observed-boundary cycles need a
-   computed sibling: a cycle derived from formula or ephemeris — the moon
-   by Newton, not by a list of observations — with observation as the
-   override, not the definition.
-9. **Intimate overlap and create-in-place** — overlap is indicated
-   locally, not globally: a 30-minute collision must not lane both
-   events full-height. Events stay rectangles — no key-shaped blocks.
-   The overlap itself gets drawn (a zone marking the contended interval)
-   rather than deforming the participants. Placing an event inside an
-   occupied span must not require dragging the occupant away and back —
-   create-in-place works through an existing block.
-10. **Two-way calendar sync, Outlook first** — pushed down for difficulty,
-   not priority of desire. Through ICS import/export semantics, never a
-   provider API. The journal's per-op conflict foundation exists;
-   provider-side conflict semantics for recurring/edited events still
-   need design.
-11. **Control-bar aesthetics.**
-12. **New logo** — plain text until a better mark earns the spot.
-13. **More calendar subscriptions** — Google Calendar and other providers,
-    each through its published ICS URL.
-14. **Instance-to-instance WAN sync** — two ChronoLogs syncing across the
-    web, built on the journal's per-op foundation.
-15. **Mobile version** — Android first. The dock becomes a full-screen
-    sheet under a width breakpoint; card paging becomes swipe gestures.
-16. **Field-level merge** — real merging on top of per-op sequencing. Needs
-    design.
-17. **Compiled native binaries** — the distribution end-state; the portable
-    Node bundles are interim. Native shells may pop dock cards out into
-    real second OS windows on desktop platforms.
-18. **The document's own timeline** — a lens over the journal itself:
-    scroll back through what the document was, watch a deleted series
-    vanish and return. The journal already records every op; this is the
-    view it makes possible. The very far bottom, on purpose.
+The card says sentences that read as sentences and edit every term in them,
+folded one at a time so a staple list is a page and not a scroll. A selection
+is a set on every lens, taken by the same marquee and the same ctrl-click
+whatever the lens draws, and one sentence is said over the whole set at once.
+Doing X to EACH is what a mass edit means by default; doing it to all AS ONE —
+the single N-ary staple — is the alt path, and the two are different sentences
+rather than one guess. A board column is a projection and a tile, its
+position authored and never derived from what it happens to hold, and the
+projection language admits object ids and graph predicates as names rather than
+frames only: `ProjectionEngine.termsOf` is the one call every column and every
+lens makes, so "all todos stapled to that meeting" and "AI Team NOT Done" are
+the same kind of sentence. A set of columns saved together is a named subtree
+of the stage, entered deliberately by alt-drag and never by accident.
+
+That last extension is what the rest of the surface is waiting on. Until an
+object answers to every name it reaches, List and Board stay special cases with
+their own grouping mechanism, mass edits have nothing to say themselves over,
+and a filter can only be spelled against a frame. After it, the stapled pile is
+one addressable graph and every surface reads it the same way.
+
+The contracts this wave builds against are written before it builds against
+them: a test that asserts nothing green-washes exactly like a skip.
+
+Which ladder level does a bare number in a time entry bind to? `26` must be the
+day and `2026` the year without a digit-count test, which is a Gregorian
+hardcode an 8×8×8 calendar would break. The card's coordinate field cannot
+settle until that does.
+
+What structurally answers "does this staple anchor a point?" The kind table is
+the last place in the engine where a WORD selects a derivation, which is what
+"verbs carry zero engine meaning" forbids. Melting it needs that answer, and
+the card's point vocabulary — which points an object offers, read off the
+object rather than from a fixed list of three — sits behind the melt.
+
+And which of three superseded intents retire against the rulings that
+superseded them: the field that committed on every keystroke, the done/closed
+enum, and the whole-ended staple that was expected to fail to resolve a point?
+A wave whose deliverable is green lights cannot fully green while they stand.
+
+## The hand never waits on a query
+
+The same pass, seen from the field-test side rather than the authoring side;
+neither half waits on the other.
+
+One full projection query per day per paint, run inside the pointer handler, is
+why Strategic chugs on open, why minimap drag is unusable and why a pan drags
+white paper onto the screen. The rule is the one already stated as law: if it
+is not usable at 500 calendars it is improperly built for 3. The query coarsens
+with the cell — facts while a cell can draw them, density below that — one
+windowed bucketed query stands in for the per-day sweep, and motion is never
+gated on paint: two clocks, an incremental budgeted paint, a coarser rung as
+the fallback, and nothing committed inside a pointer handler.
+
+This is also what makes the pile findable. Staple-to search across fifty frames
+and two thousand todos, and a search for the objects with no staples at all,
+are the same budget seen from the other side. A budget bounds work, never data.
+
+## The super-strategic band
+
+Strategic is one row per month and one column per day of that month, so a
+century is twelve hundred rows of thirty-one cells. Zooming it out to a century
+is not Strategic running slow, it is Strategic running out. The band beyond it
+reads decades to centuries to millennia, and a span is said as a unit and a
+number so a century is typed rather than reached by holding an arrow — which is
+also the missing way to say WHERE, since today a lens can only be told how far,
+never to jump to a date.
+
+It needs the coarsening query and the butter from the milestone above, and it
+gets sharper later from cycle-native coordinates, because nothing below the year
+is legible at that span.
+
+## Notes, and the vault as the boundary
+
+A note is Obsidian-shaped by default: a name, properties and tags under a
+rolled-up section, and a big markdown window that renders everything except the
+line under the cursor. Staples occur naturally at creation and edit, can be
+typed inline in the text, or entered as freeform properties; the note appears
+wherever it is stapled, and which staples render in which lenses is
+configurable per group or globally. This generalizes — any object carries
+arbitrarily many staples of arbitrary kind, arbitrarily placed, and renders
+accordingly.
+
+Then ChronoLog works a vault directly: a path and a naming scheme for daily
+notes, and everything works back and forth in both apps, the same for meeting
+notes and for todos in linked folders. Markdown files are the interchange
+boundary for notes exactly as ICS is for calendars — severance doctrine, no
+plugin API coupling.
+
+## Drawing what the model already knows
+
+Four display languages do not exist for data that does.
+
+The warp: cross-frame projection exists only through staples, and multiple
+staples between two frames pin the correspondence exactly at each stapled point
+without averaging into an offset. Between those points the mapping stretches,
+and that stretch is authored meaning — "we place 8 that is where Lines shows us
+the warp." The substrate keeps every point exact and claims nothing about the
+space between them. Drawing the stretch is Lines work and is undesigned.
+
+Fuzziness reaches the renderer as data and is marked, but a spread wants sigils
+and zones that read at a glance without piling information on the eye. The
+apparent-magnitude falloff has the same problem, and the two want designing
+together.
+
+An overdetermined anchor is reported and never averaged. How a lens shows that
+an authored staple is not being believed is undesigned.
+
+Overlap is indicated locally, not globally: a thirty-minute collision must not
+lane both events full height. Events stay rectangles — no key-shaped blocks —
+and the contended interval itself gets drawn rather than the participants
+deformed. Placing an event inside an occupied span works through the occupant
+instead of requiring it dragged away and back.
+
+What is a constraint bound? "Can't go later than like 7:30/8" is a bound
+distinct from the fuzzy actual, and the kind registry stays deliberately
+one entry short until the semantics are decided, because registering a kind
+nobody has ruled is inventing meaning.
+
+## Time travel authored
+
+The taxonomy is executable in the model — a fork is a terminator stapled to an
+interior point, a loop is two terminators stapling back, a displacement records
+forward traveler time against reverse world direction as endpoints only with no
+fabricated conversion, and `open` is projection state rather than a stored claim
+that a line ends. What has no authoring path is any of it. A basis is any valid
+expression in the one math — linear, non-linear, piecewise, an all-point, a
+loop, a list — plus its unit breakdown, and an era is a frame stapled to
+another. What it waits on is the frame card saying sentences the way the object
+card does, so it follows the wave; what it delivers is real time-travel frames
+in the live document — appended as one journal transaction like any other edit,
+and undoable — which is how the model gets nailed down against something other
+than a fixture. Lines and Tree are where the branches and loops get drawn.
+
+## One cycle idea
+
+A recurring event, a cycle, and every repeating structure beside them are ONE
+object, and today they are three mechanisms: a rule that generates occurrences,
+something the coordinate law declares, and an authored group over a cycle. Same
+idea said three ways, which is the trinity's own complaint. The one object is a
+period, an epoch anchor, and names — nothing else — and all three are that
+object with different numbers in it.
+
+The half that makes this more than tidying: a coordinate must be authorable
+natively on an attached cycle, so "third Monday" is a valid coordinate rather
+than a recurrence special case. That is an ordinal selection over a cycle
+position within a containing level, and it subsumes what ICS spells `BYDAY=3MO`
+and `BYSETPOS` — those become a translation at the calendar boundary, never the
+mechanism. An occurrence stops being something a rule generates and becomes
+something a coordinate names, read through the same path every other coordinate
+takes.
+
+A weekend is what this makes ordinary: a cultural assertion over the law's own
+cycle, authored as an object, never a belief a lens holds — and once one can be
+authored, a library of them is adoptable, holidays and sabbath and business
+hours and a shift rotation, none of them seeded and none of them offered until
+the cycle exists to hang them on.
+
+This is a change to the substrate every surface reads, so it shares a wave with
+no surface work: "so we have time to give more consideration, before we blunder
+in and turn 7 heads to 14." Lunisolar is the hard edge to design against rather
+than discover later — the month depends on observation and the year's month
+count depends on the moon, which is a fixed point, not a stack.
+
+Does a calendar synthesize from frames? A cycle contribution — period,
+epoch, names — would compose freely and order-independently, because two cycles
+never read each other; a structure contribution — levels, radices,
+intercalation — would be owned by exactly one frame, and an overlap would be a
+refusal in prose rather than a precedence rule, since a precedence rule is an
+encoded right way. Is that distinction the law?
+
+## Patterns authored, not picked
+
+The repeat control is a rigid list of common Gregorian periods, and its own note
+admits a complex pattern is authored elsewhere. "Every odd day of every even
+month of every odd year, except where any of those numbers is prime" is a repeat
+pattern with no entry path, and the dropdown plays worse still against a
+non-Gregorian calendar. The math exists for exactly this; the authoring surface
+does not. Cycle-native coordinates are what make the surface expressible without
+a second mechanism, which is why this follows them.
+
+## Custom calendars all the way down
+
+The law executes: one coordinate engine reads the levels, radices and
+transitions, Gregorian is a registered entry rather than a bypass, a wholly
+invented uniform ladder converts through the registry, eras are a level of the
+coordinate with per-era numbering direction so BCE and Merethic both count down,
+and a frame with no now-mapping refuses a Now line instead of faking one.
+
+What is still Gregorian is the drawing. The minimap's month-boundary walk is the
+registered Gregorian ladder's own, and the month sheet assumes a Gregorian week.
+Custom day, month and year names have to reach the ticks and the labels; units
+must be addable and removable; Strategic and Wall must adapt to full months per
+line or weeks per line under whatever the law says a month holds.
+
+Observed boundaries ride — a lunar series whose every gap is a different exact
+observation, with no mean synodic month allowed to stand in for any one of them.
+The computed sibling does not: a cycle derived from formula or ephemeris, the
+moon by Newton, with observation as the override rather than the definition.
+
+## Write-back, and Outlook both ways
+
+ICS reads a file and writes a file; what is disabled is write-back — carrying
+an edit made here into the calendar it came from. Opening that direction
+delivers two-way sync with Outlook, which is high priority and sits here for
+difficulty rather than for want of it, through ICS semantics and never a
+provider API. The contract is already ruled and lossy on purpose: Gregorian and
+RSCALE come in; a rule goes out as a rule where ICS can say it and as
+materialized instants where it cannot; and there is no private `X-` dialect in
+either direction, so object anchors, fuzzy spreads and segmented series
+identity do not round-trip. The journal's record-level ops are the foundation
+the reconcile stands on.
+
+What are the conflict semantics when a recurring event is edited on both
+sides, and how does a timezone travel? That design does not exist yet, and it is
+what gates the whole direction.
+
+## Subscriptions
+
+Google Calendar and any other provider, each through its published ICS URL and
+the same reconcile write-back builds. A provider connects the way every provider
+connects, or it does not connect.
+
+## The other platforms
+
+Windows is the build. arm64 Ubuntu under Wayland only is the cross-test that
+keeps the surface honest, and Android is near-term. There are no Flutter plugins
+and there never will be — this machine's policy forbids the symlink support a
+plugin build needs — so anything the host has to answer goes through FFI.
+
+## Two ChronoLogs
+
+Instance-to-instance sync across the web on the journal's per-op foundation,
+then real field-level merge on top of the sequencing. One master isolate owns
+the document today and that is why there is no conflict type, no rebase loop and
+no merge; WAN is what puts those questions back on the table, and merge needs
+design before either lands.
+
+## The document's own timeline
+
+A lens over the journal itself: scroll back through what the document was, watch
+a deleted series vanish and return. Every op is already recorded. This is the
+view that record makes possible, and it is the very bottom on purpose.

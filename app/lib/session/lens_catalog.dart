@@ -224,8 +224,22 @@ const List<LensSpec> _shipped = [
   ),
 ];
 
-/// Shipped defaults for every lens view key the catalog names.
+/// Shipped defaults for every lens view key the catalog names, and the
+/// session's own budgets beside them -- one composed map, so the shell's list
+/// of areas does not grow a row for every family the session keeps.
 const Map<String, String> sessionTunableDefaults = {
+  // PERFORMANCE BUDGETS ARE SETTINGS (ISSUES 9.2, Don's Strategic lag:
+  // "Strategic lags when opening", "minimap drag is so slow as to be
+  // unusable"). A budget is a tunable like any other -- named, shipped with an
+  // expression, editable in the settings card -- rather than a number written
+  // into a test or a remark about how fast something ought to feel. Two of
+  // them, because a surface has two obligations: what a surface already up must
+  // keep to for motion to read as butter, and what FIRST paint of a heavy
+  // document may take before the wait is a thing a person notices. Said as
+  // arithmetic, so the frame budget reads as the rate it comes from rather than
+  // as a rounded 16.
+  'perf.frameMillis': '1000 / 60',
+  'perf.paintMillis': '250',
   'intimate.back': '0',
   'intimate.forward': '2',
   'intimate.grain': '15',

@@ -22,6 +22,7 @@ import '../core/exact.dart';
 import '../core/projection.dart';
 import '../edit/editor.dart';
 import '../session/lens_catalog.dart';
+import '../session/point_pick.dart';
 import '../session/settings.dart';
 import '../session/view_state.dart';
 import '../stage/content.dart';
@@ -407,6 +408,7 @@ class _ViewTileState extends State<ViewTile>
                 size: size,
               ),
             ),
+            ?_pickReadout(context),
           ],
         ),
       ),
@@ -440,6 +442,34 @@ class _ViewTileState extends State<ViewTile>
   Widget _refuse(BuildContext context, String message) =>
       statedRefusal(context, message, _settings.tunable);
 
+  /// A MODE MUST SHOW ITSELF (butter navigation). While a pick is armed this
+  /// surface wears the ⌖ and, once the pointer is over something it can name,
+  /// the coordinate it would commit -- read out in the data face, because a
+  /// coordinate is data. Null when nothing is armed, so an unarmed tile carries
+  /// no layer at all.
+  Widget? _pickReadout(BuildContext context) {
+    final pick = _views.pick;
+    if (!pick.armed) return null;
+    final theme = ChronoTheme.of(context);
+    final here = pick.readout;
+    final inset = _px('pointer.refusalPad');
+    return Positioned(
+      left: inset,
+      top: inset,
+      child: IgnorePointer(
+        child: ColoredBox(
+          color: theme.paper,
+          child: Text(
+            here == null || here.surface != widget.tileId
+                ? pickGlyph
+                : '$pickGlyph ${here.text}',
+            style: theme.data.copyWith(color: theme.strong),
+          ),
+        ),
+      ),
+    );
+  }
+
   LensScene _scene(BuildContext context, Size size, CoordinateLaw law) => LensScene(
     engine: editor.engine,
     projection: projection,
@@ -457,6 +487,10 @@ class _ViewTileState extends State<ViewTile>
 
   void _down(PointerDownEvent event) {
     stage.focus(widget.tileId);
+    // AN ARMED CLICK PICKS A POINT; IT NEVER CREATES OR SELECTS (ISSUES 9.2).
+    // Taken before the verb table is consulted, because every verb in it is a
+    // thing this click must not do.
+    if (_views.pick.armed) return;
     final keys = HardwareKeyboard.instance;
     // TWO QUESTIONS, TWO ANSWERS: what a DRAG grabs decides move-or-create, and
     // what is UNDER THE POINTER is what a click and the menu mean. One shape
@@ -493,6 +527,10 @@ class _ViewTileState extends State<ViewTile>
   }
 
   void _up(PointerUpEvent event) {
+    if (_views.pick.armed) {
+      final picked = _readoutAt(event.localPosition);
+      return picked == null ? null : _views.pick.land(picked.entry);
+    }
     final from = _downAt, verb = _verb, grabbed = _grabbed;
     final travel = from == null ? Offset.zero : event.localPosition - from;
     _release();
@@ -601,10 +639,31 @@ class _ViewTileState extends State<ViewTile>
     select(hit == null || hit.identity == _selected?.identity ? null : hit.identity);
   }
 
-  void _hover(PointerHoverEvent event) =>
-      _cursor.value = _painter?.markAt(event.localPosition) == null
-      ? SystemMouseCursors.precise
-      : SystemMouseCursors.click;
+  void _hover(PointerHoverEvent event) {
+    // HOVER READS OUT THE COORDINATE UNDER THE POINTER AT THIS SURFACE'S OWN
+    // PRECISION (ISSUES 9.2). The reading is this tile's because the law is:
+    // the mode holds what a surface said, never a coordinate of its own.
+    if (_views.pick.armed) {
+      _cursor.value = SystemMouseCursors.precise;
+      return _views.pick.hover(_readoutAt(event.localPosition));
+    }
+    _cursor.value = _painter?.markAt(event.localPosition) == null
+        ? SystemMouseCursors.precise
+        : SystemMouseCursors.click;
+  }
+
+  /// What this surface would pick at a point, formatted in its own law. Null
+  /// where the surface has no time under the pointer.
+  PickReadout? _readoutAt(Offset at) {
+    final painter = _painter;
+    final entry = painter?.pickAt(at);
+    if (painter == null || entry == null) return null;
+    return (
+      surface: widget.tileId,
+      entry: entry,
+      text: formatCoordinateEntry(entry.coordinate, painter.scene.law),
+    );
+  }
 
   // --- Wheel -----------------------------------------------------------------
 

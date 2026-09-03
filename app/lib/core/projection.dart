@@ -273,6 +273,12 @@ typedef GraphEdge = ({String from, String to, String kind});
 const String containsEdge = 'contains', stapleEdge = 'staple';
 const String membershipEdge = 'membership', placementEdge = 'placement';
 
+/// How a STRUCTURAL predicate is spelled as a name a person can bind: the word
+/// `stapled`, then the noun the far end of the staple calls itself. Written
+/// once, here, so the projection engine and every surface that offers the term
+/// spell it the same way.
+const String stapledTerm = 'stapled:';
+
 class ProjectionEngine {
   ProjectionEngine(Document document, {AuthoredDepthOf? precisionOf})
     : precisionOf = precisionOf ?? authoredDepth {
@@ -310,6 +316,7 @@ class ProjectionEngine {
   final Map<String, Rational> _maxDuration = {};
   final Map<String, List<ProjectionError>> _errors = {};
   final Map<String, Map<String, int>> _reach = {}, _above = {};
+  final Map<String, Set<String>> _terms = {};
   final Map<String, List<Fact>> _series = {}, _windows = {};
   int _seriesFacts = 0, _windowFacts = 0;
 
@@ -440,6 +447,7 @@ class ProjectionEngine {
     _errors.clear();
     _reach.clear();
     _above.clear();
+    _terms.clear();
     _frameProjection = null;
     _correspondences = null;
     if (doomed == null) {
@@ -467,6 +475,7 @@ class ProjectionEngine {
     _maxDuration.remove(frameId);
     _errors.remove(frameId);
     _reach.clear();
+    _terms.clear();
   }
 
   // --- Coordinates and laws -------------------------------------------------
@@ -563,6 +572,49 @@ class ProjectionEngine {
       }
     }
     return edges;
+  }
+
+  /// EVERY NAME THIS OBJECT IS ADMITTED UNDER, as one set.
+  ///
+  /// "The projection language must therefore admit object ids and graph
+  /// predicates as names, not only frames -- a core extension." (Don, ISSUES
+  /// 9.2, on authoring board columns: "one column for a frame shows all todos
+  /// stapled to that frame, another all todos stapled to an OBJECT, another only
+  /// paired todos".)
+  ///
+  /// THE ALGEBRA DOES NOT CHANGE. [Projection.admits] already takes a predicate
+  /// over names; what was missing is which names an object answers to. So this
+  /// is the one call every column and every lens makes --
+  /// `projection.admits(engine.termsOf(id).contains)` -- and whether a term
+  /// names a frame, another object or a shape of the graph is the caller's
+  /// business and never the algebra's.
+  ///
+  /// Three sources, one vocabulary:
+  ///  * every frame the object reaches -- its own placement frames and the
+  ///    frames those sit inside (route one), plus [modifyingFrames]' walk;
+  ///  * every record its staples NAME, which is how "stapled to that meeting"
+  ///    becomes sayable at all;
+  ///  * the structural predicates that hold of it, spelled `stapled:<noun>`
+  ///    from the far end's own [StapleEnd.noun] -- so `stapled:object` is
+  ///    Don's "only PAIRED todos" and nothing here enumerates the shapes.
+  Set<String> termsOf(String objectId) => _terms[objectId] ??= _names(objectId);
+
+  Set<String> _names(String objectId) {
+    final terms = <String>{};
+    // Route one: an object's own placements are the names it wears directly,
+    // and a frame inside a frame is that frame too.
+    for (final frameId in indexes.framesOf(objectId)) {
+      terms.addAll(framesAbove(frameId).keys);
+    }
+    terms.addAll(modifyingFrames(objectId).keys);
+    for (final staple in indexes.staplesOf(objectId)) {
+      for (final end in indexes.endsOf(staple)) {
+        if (end.id == objectId) continue;
+        terms.add(end.id);
+        terms.add('$stapledTerm${end.noun}');
+      }
+    }
+    return terms;
   }
 
   /// A GROUP DISPLAY PROPERTY, resolved for one object: the object's own

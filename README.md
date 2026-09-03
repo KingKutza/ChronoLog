@@ -23,9 +23,13 @@ flutter analyze            # the analyzer
 flutter build windows      # a release build
 ```
 
-Nothing else is needed: no package manager, no runtime beside Flutter's
-own, no code generation step. The Dart in `app/lib` is the whole
-implementation.
+No package manager and no runtime beside Flutter's own. The record types
+carry generated equality and `copyWith` from `freezed`; the `*.freezed.dart`
+files are committed, and after editing a file that declares one:
+
+```sh
+dart run build_runner build
+```
 
 Generative tests take a seed from `CHRONOLOG_SEED`; a failure prints the
 seed it ran with.
@@ -50,7 +54,6 @@ rules and projections go out as materialized instants, and no private
 - [AGENTS.md](AGENTS.md) — architecture map and engineering contracts
 - [SENTENCES.md](SENTENCES.md) — the sentences the edit card speaks
 - [LEXICON.md](LEXICON.md) — vocabulary and founding ideas
-- [WHAT_RIDES.md](WHAT_RIDES.md) — what carries forward, and its cost
 
 ## License
 

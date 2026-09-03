@@ -486,6 +486,21 @@ sealed class StapleEnd with _$StapleEnd {
     ObjectEnd() => 'events',
     SeriesEnd() => 'patterns',
   };
+
+  /// THE WORD THIS END CALLS WHAT IT NAMES -- the same key it writes itself
+  /// under in [toJson], read back as a word rather than as a class.
+  ///
+  /// It is the noun a STRUCTURAL TERM is spelled with: "has at least one
+  /// object-to-object staple" is `stapled:object` because the far end calls
+  /// itself an object, and a fourth end form gets its own term the day it is
+  /// added, with nothing to write in the projection engine. Exhaustive over the
+  /// shapes a staple end HAS, which is the same switch [id] and [map] are --
+  /// not a list of values anything may decide meaning by.
+  String get noun => switch (this) {
+    FrameEnd() => 'frame',
+    ObjectEnd() => 'object',
+    SeriesEnd() => 'series',
+  };
 }
 
 /// Where on a frame an end touches.

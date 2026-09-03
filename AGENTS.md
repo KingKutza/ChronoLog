@@ -40,7 +40,10 @@ capabilities go through `dart:ffi` (`host/`).
   substrate. Depth is precision, never uncertainty. See "Coordinate law".
 - `records.dart`, `document.dart`, `ops.dart`, `validate.dart` — the
   `chronolog/1` document shape, record-level ops as the change representation,
-  and the load-time validator. `createEmptyWorkspaceDocument` is what a first
+  and the load-time validator. Changing a record shape means regenerating the
+  `*.freezed.dart` beside them (`dart run build_runner build`); those are
+  committed build products, and JSON codegen is deliberately absent because
+  every codec here is hand-written to keep unknown fields and never throw. `createEmptyWorkspaceDocument` is what a first
   run establishes: two structural frames and nothing else.
 - `projection.dart` — `ProjectionEngine`: fact queries, occurrence generation,
   the boolean-algebra `Projection` over connections, the weight chain's ring
@@ -80,7 +83,8 @@ capabilities go through `dart:ffi` (`host/`).
   carries force forward, and a failed write that hands the ops back.
 - `plaintext_file.dart` — a named sidecar the app reads, writes atomically and
   polls for external edits, so hand-editing a file and using the GUI are one
-  authoring path.
+  authoring path. The file is always a valid second path and never the only
+  one: no feature may be reachable only by editing a file.
 - `seams.dart` — the outside world, injected: every file call and the clock.
 
 #### `edit/` — the one write door
@@ -345,12 +349,15 @@ stay distinct and must not collapse into each other:
 1. A **frame/line** owns temporal coordinates.
 2. A **unit system** (`coordinate.kind: "nested"`) names and nests
    coordinate levels and their boundaries.
-3. A **coordinate mapping** relation authors a relationship between
-   positions/intervals in two frames, with explicit `continuity`
-   (`continuous`/`discontinuous`) and direction — never an invented
-   interpolation across a discontinuity.
+3. A **correspondence** between two frames is authored as staples and read
+   through the one math — never an invented interpolation across a gap.
+   `coordinate-mapping`, `shared-segment`, `termination` and `displacement`
+   records stay perfectly legal data, round-trip untouched, and are checked
+   against no hardcoded shape: time travel is a native first-class capability,
+   re-founded on the one math — author the function and the one projector
+   projects it — and hardcoding four shapes would preclude the rest.
 4. A **lens** projects a leading frame and optional companions; selecting
-   or displaying a frame never creates a mapping.
+   or displaying a frame never creates a correspondence.
 
 Event-defined periods (`period.kind: "event-defined"`) resolve exactly
 against their authored, strictly ordered boundary series — no averaging and
@@ -797,7 +804,7 @@ extent). There is **no scope gate** — nothing decides which things a connectio
 may join, because a staple says n points are one point and that is true of any
 two things that can name a point. Registered kinds are `end` and `inflection`
 (both partition; only `inflection` may carry a following rule), `phase`,
-`anchor` (the only one that places), `correspondence`, and `succession`, which
+`anchor` (the only kind that anchors, which is one of the four facts a placement needs), `correspondence`, and `succession`, which
 is a LABEL and not a case: an era boundary is a plain point staple, so nothing
 selects a derivation from the word and an existing record spelled `succession`
 keeps its meaning and round-trips byte for byte. Constraint bounds ("can't go
@@ -1040,7 +1047,9 @@ One fixed sigil vocabulary — `point`, `milestone`, `repeat`, `task`, `note`,
 `terminator`, `celestial`, `span`, in `sigilGlyphs` in `app/lib/lens/marks.dart`,
 plus `overflowSigil` for a budget that ran out, which is a LOWER BOUND drawn as
 its own mark rather than a truncated list — applies across every lens in the
-catalog. A lens may omit a mark it cannot render at scale, but must not repurpose
+catalog. No lens carries an integer cap on what it may draw: capacity is one
+derived budget of screen space and apparent magnitude, and what the budget
+cannot seat is said by the overflow sigil rather than silently dropped. A lens may omit a mark it cannot render at scale, but must not repurpose
 one to mean something else. The sigil an object shows is derived from what its
 author actually wrote (`sigilFor`): an authored `display.sigil` on the object or
 its frame names one outright, and otherwise a mark covering a whole day under
@@ -1085,12 +1094,13 @@ second source rather than rewriting the first; what it raises against what is
 already there is staple **suggestions**, never a reference it rewrites on the
 author's behalf. Foreign residuals ride under `foreign.ics.sources` so a
 round-trip preserves what this program does not model. Write-back is disabled —
-see ROADMAP.md's provider-write-back-gating frontier.
+see ROADMAP.md, "Write-back, and Outlook both ways".
 
 Provider-specific API integrations are out of scope (severance doctrine):
-ICS is the interchange boundary. Do not add a provider SDK or API client —
-a new provider connects the same way Outlook/Google/Apple do today, through
-a published ICS URL.
+ICS is the interchange boundary. Do not add a provider SDK or API client.
+There is no network code in `app/lib` and a provider is reached through ICS
+semantics, not its own protocol; a subscription that reads a published ICS
+address is a later milestone and arrives as one, not as a provider client.
 
 ### Lens extension contract
 
@@ -1101,7 +1111,9 @@ lens) registered through `registerLensPainter`/`registerLensWidget` in
 `app/lib/lens/view_tile.dart`, and its defaults map composed into
 `chronologSettings()`. Every number the lens draws with is a named setting. A
 newly registered lens is placed after a user's persisted ordering without
-resetting it. A lens that cannot support the current document paints the
+resetting it. Zoom never swaps one lens for another: a tile IS a lens, its
+span changes under it, and nothing crosses a threshold and silently becomes a
+different lens. A lens that cannot support the current document paints the
 explicit refusal in the law's vocabulary — it must not break other lenses or
 invent a coordinate conversion.
 
@@ -1122,15 +1134,19 @@ invent a coordinate conversion.
 - Everything is a tile; every tunable is a named setting whose value is an
   expression in the one math; no confirmation dialogs — every operation is
   undoable instead.
-- Pre-alpha: break compatibility rather than accrete legacy shims.
+- Pre-alpha: break compatibility rather than accrete legacy shims. Code that
+  is not used is not used and is removed — no dead export, no no-op kept for
+  company.
+- No enums, no special cases, no hard-coded values.
 - `LEXICON.md` is the owner's voice — agents never edit it unprompted, even
   when it references something that has since moved or been deleted.
   Additions happen only at the owner's direction, in his words.
 - The images in `local/GUI_Mockup/` (untracked, not in the repo) are live design references — never delete them.
 - The doc set is this file, `README.md`, `ROADMAP.md`, `LEXICON.md`,
-  `ISSUES.md` (the living tracker — items carry date tags and are resolved in
-  place; never mint dated issue files) and `WHAT_RIDES.md`. Don't create new
-  `.md` files without the owner's direction.
+  `SENTENCES.md`, `ISSUES.md` (the living tracker — items carry date tags and
+  are resolved in place; never mint dated issue files) and `RULINGS.md` (open
+  questions, most blocking first). Don't create new `.md` files without the
+  owner's direction.
 - Prefer behavioral tests over source-text string assertions; tests are
   generative properties at `specSeed`, never pinned arbitrary facts.
 - Run `flutter analyze` and `flutter test` in `app/` before finishing work.

@@ -13,6 +13,8 @@
 
 import 'package:flutter/widgets.dart';
 
+import '../core/coordinate_entry.dart';
+import '../core/eras.dart' show LawRefusal;
 import '../core/coordinate_law.dart';
 import '../core/exact.dart';
 import '../core/projection.dart';
@@ -187,6 +189,12 @@ double paintLabel(
 /// nothing is indistinguishable from an empty calendar.
 typedef LensRefusal = ({String source, String message});
 
+/// One painted ground: the fact whose authored handling made it a zone, and the
+/// rectangle that was filled. A ground SPANS -- it was confined to a chip box
+/// only while it was treated as a mark -- so a lens that draws one ground across
+/// several cells records one of these per cell it actually covered.
+typedef ZoneHit = ({Fact fact, Rect bounds});
+
 abstract class LensPainter extends CustomPainter {
   LensPainter(this.scene);
 
@@ -199,6 +207,66 @@ abstract class LensPainter extends CustomPainter {
   /// Refusals collected during the last paint. A lens paints them; it never
   /// throws and never invents a coordinate conversion to avoid one.
   final List<LensRefusal> refusals = [];
+
+  /// The GROUNDS drawn by the last paint, beside [hits], and built in the same
+  /// pass as the pixels for the same reason: the list and the picture are one
+  /// derivation, so a zone the eye can see and a zone the program can find
+  /// cannot come apart.
+  ///
+  /// FILL IS GROUND, A MARK IS FIGURE (ruled 2026-09-02). One entry per painted
+  /// zone SEGMENT -- a ground that spans four days on a grid is four segments,
+  /// because that is what was painted -- and a ground spans by nature, so
+  /// nothing here is a chip box and nothing here went through the lane packer.
+  /// A lens that paints its zone its own way (Intimate's band) still records
+  /// through this one list.
+  final List<ZoneHit> zones = [];
+
+  /// WHICH LEVEL OF THE LAW THIS SURFACE CAN HONESTLY NAME.
+  ///
+  /// "A click on Strategic gives a day because a Strategic cell IS a day; a
+  /// click on Intimate gives the instant it can resolve" (ISSUES 9.2). It is a
+  /// property of the drawing, so each surface states its own -- and the default
+  /// is the law's own base level, read from the law rather than written down,
+  /// because a surface that has said nothing about zoom is drawing the unit the
+  /// law counts in.
+  String get precision => scene.law.baseLevel;
+
+  /// THE COORDINATE UNDER A POINT, AT THIS SURFACE'S OWN PRECISION.
+  ///
+  /// Implemented ONCE, here, from [unproject] and [precision]: a surface that
+  /// says which level it can name gets the whole of picking for free, and two
+  /// surfaces cannot disagree about what a click on them means.
+  ///
+  /// DEPTH IS NEVER FUZZINESS (the entry model's own rule). The answer stops at
+  /// [precision] and is stored exactly that deep -- a coarse pick is a coarse
+  /// coordinate, never zero-filled down to a false instant nobody clicked on.
+  /// Null where the surface has no time under the point at all, and null rather
+  /// than a guess where the law refuses to name that instant.
+  CoordinateEntry? pickAt(Offset at) {
+    final days = unproject(at);
+    if (days == null) return null;
+    final law = scene.law;
+    final names = law.levelNames();
+    final stop = names.indexOf(precision);
+    if (stop < 0) return null;
+    Coordinate whole;
+    try {
+      whole = law.fromDays(days);
+    } on LawRefusal {
+      return null;
+    }
+    // Down to this surface's level and no further. A level the decomposition
+    // left out is one it had nothing to spend there, which below the base is a
+    // zero and is exactly what has to be said out loud for the pick to be as
+    // deep as the surface claims.
+    return (
+      coordinate: Coordinate([
+        for (final name in names.take(stop + 1))
+          (level: name, value: whole.value(name)),
+      ]),
+      depth: precision,
+    );
+  }
 
   /// Every painter here draws a time axis. A roster lens is a widget and never
   /// reaches this class.
